@@ -1,3404 +1,6670 @@
 "use client";
 
-import React from "react";
-import { useState, useEffect, useCallback } from "react";
-import { useForm } from "react-hook-form";
+import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format } from "date-fns";
+import { format, isSameDay, addDays, isWeekend } from "date-fns";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
+import QRCode from 'qrcode';
 
-import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar } from "@/components/ui/calendar";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
+import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock, MoreHorizontal, ChevronUp, ChevronDown, Send } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Calendar } from "@/components/ui/calendar";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
+import { StatCard } from "@/components/dashboard/stat-card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Separator } from "@/components/ui/separator";
+import { Progress } from "@/components/ui/progress";
 
-
-const inspectionStatuses = ["Pendente", "Aprovado", "Aprovado com ressalvas", "Rejeitado"] as const;
-
-const itemUpdateSchema = z.object({
-  supplierName: z.string().optional(),
-  invoiceNumber: z.string().optional(),
-  invoiceItemValue: z.coerce.number().optional(),
-  certificateNumber: z.string().optional(),
-  storageLocation: z.string().optional(),
-  deliveryReceiptDate: z.date().optional().nullable(),
-  inspectionStatus: z.enum(inspectionStatuses).optional(),
-  weight: z.coerce.number().optional(),
-  weightUnit: z.string().optional(),
+const productionStageSchema = z.object({
+    stageName: z.string(),
+    status: z.string(),
+    startDate: z.date().nullable().optional(),
+    completedDate: z.date().nullable().optional(),
+    durationDays: z.coerce.number().min(0).optional(),
+    useBusinessDays: z.boolean().optional().default(true), // true = dias úteis, false = dias corridos
+    workSchedule: z.enum(['normal', 'especial']).default('normal'),
 });
 
-type ItemUpdateData = z.infer<typeof itemUpdateSchema>;
+const orderItemSchema = z.object({
+    id: z.string().optional(),
+    code: z.string().optional(),
+    product_code: z.string().optional(),
+    description: z.string().min(1, "A descrição é obrigatória."),
+    quantity: z.coerce.number().min(0, "A quantidade não pode ser negativa."),
+    unitWeight: z.coerce.number().min(0, "O peso não pode ser negativo.").optional(),
+    itemNumber: z.string().optional(), // Número do item no pedido de compra
+    productionPlan: z.array(productionStageSchema).optional(),
+    itemDeliveryDate: z.date().nullable().optional(),
+    shippingList: z.string().optional(),
+    invoiceNumber: z.string().optional(),
+    shippingDate: z.date().nullable().optional(),
+});
 
-const requisitionItemSchema = z.object({
+const orderStatusEnum = z.enum([
+    "Aguardando Produção",
+    "Em Produção",
+    "Pronto para Entrega",
+    "Concluído",
+    "Cancelado",
+    "Atrasado",
+]);
+
+const customerInfoSchema = z.object({
+  id: z.string({ required_error: "Selecione um cliente." }),
+  name: z.string(),
+});
+
+const orderSchema = z.object({
   id: z.string(),
-  description: z.string(),
-  quantityRequested: z.number(),
-  status: z.string(),
-  supplierName: z.string().optional(),
-  invoiceNumber: z.string().optional(),
-  invoiceItemValue: z.number().optional(),
-  certificateNumber: z.string().optional(),
-  storageLocation: z.string().optional(),
-  deliveryReceiptDate: z.date().optional().nullable(),
-  inspectionStatus: z.enum(inspectionStatuses).optional(),
-  weight: z.number().optional(),
-  weightUnit: z.string().optional(),
+  customer: customerInfoSchema,
+  quotationNumber: z.string().optional(),
+  internalOS: z.string().optional(),
+  projectName: z.string().optional(),
+  status: orderStatusEnum,
+  deliveryDate: z.date().nullable().optional(),
+  completedAt: z.date().nullable().optional(),
+  dataBookSent: z.boolean().default(false),
+  dataBookSentAt: z.date().nullable().optional(),
+  items: z.array(orderItemSchema).min(1, "O pedido deve ter pelo menos um item"),
+  driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
+  documents: z.object({
+    drawings: z.boolean().default(false),
+    inspectionTestPlan: z.boolean().default(false),
+    paintPlan: z.boolean().default(false),
+  }).optional(),
 });
 
-const segmentOptions = [
-  "Insumos de pintura", 
-  "Matéria-Prima", 
-  "Ensaios não-destrutivos", 
-  "Tratamento Térmico", 
-  "Emborrachamento", 
-  "Dobra", 
-  "Corte a laser", 
-  "Usinagem CNC", 
-  "Eletroerosão", 
-  "Usinagem", 
-  "Insumos de solda"
+type ProductionStage = z.infer<typeof productionStageSchema>;
+type OrderItem = z.infer<typeof orderItemSchema>;
+
+type CustomerInfo = { id: string; name: string };
+
+type CompanyData = {
+    nomeFantasia?: string;
+    logo?: { preview?: string };
+    endereco?: string;
+    cnpj?: string;
+    email?: string;
+    celular?: string;
+    website?: string;
+};
+
+type Order = {
+    id: string;
+    quotationId: string;
+    quotationNumber: string;
+    internalOS?: string;
+    projectName?: string;
+    customer: CustomerInfo;
+    items: OrderItem[];
+    totalValue: number;
+    totalWeight: number;
+    status: string;
+    createdAt: Date;
+    deliveryDate?: Date;
+    completedAt?: Date;
+    dataBookSent: boolean;
+    dataBookSentAt?: Date;
+    driveLink?: string;
+    documents: {
+        drawings: boolean;
+        inspectionTestPlan: boolean;
+        paintPlan: boolean;
+    };
+};
+
+// Feriados nacionais brasileiros para 2024-2025
+const brazilianHolidays = [
+  // 2024
+  new Date(2024, 0, 1),   // Ano Novo
+  new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
+  new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
+  new Date(2024, 2, 29),  // Sexta-feira Santa
+  new Date(2024, 3, 21),  // Tiradentes
+  new Date(2024, 4, 1),   // Dia do Trabalho
+  new Date(2024, 4, 30),  // Corpus Christi
+  new Date(2024, 8, 7),   // Independência do Brasil
+  new Date(2024, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2024, 10, 2),  // Finados
+  new Date(2024, 10, 15), // Proclamação da República
+  new Date(2024, 11, 25), // Natal
+  // 2025
+  new Date(2025, 0, 1),   // Ano Novo
+  new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
+  new Date(2025, 2, 4),   // Carnaval (Terça-feira)
+  new Date(2025, 3, 18),  // Sexta-feira Santa
+  new Date(2025, 3, 21),  // Tiradentes
+  new Date(2025, 4, 1),   // Dia do Trabalho
+  new Date(2025, 5, 19),  // Corpus Christi
+  new Date(2025, 8, 7),   // Independência do Brasil
+  new Date(2025, 9, 12),  // Nossa Senhora Aparecida
+  new Date(2025, 10, 2),  // Finados
+  new Date(2025, 10, 15), // Proclamação da República
+  new Date(2025, 11, 25), // Natal
 ];
 
-const supplierSchema = z.object({
-  supplierCode: z.string().optional(),
-  razaoSocial: z.string().optional(),
-  nomeFantasia: z.string().optional(),
-  cnpj: z.string().optional(),
-  inscricaoEstadual: z.string().optional(),
-  inscricaoMunicipal: z.string().optional(),
-  segment: z.string().optional(),
-  status: z.enum(["ativo", "inativo"]).optional().default("ativo"),
-  telefone: z.string().optional(),
-  primaryEmail: z.string().optional(),
-  salesContactName: z.string().optional(),
-  address: z.object({
-    zipCode: z.string().optional(),
-    street: z.string().optional(),
-    number: z.string().optional(),
-    complement: z.string().optional(),
-    neighborhood: z.string().optional(),
-    cityState: z.string().optional(),
-  }).optional(),
-  bankInfo: z.object({
-    bank: z.string().optional(),
-    agency: z.string().optional(),
-    accountNumber: z.string().optional(),
-    accountType: z.enum(["Pessoa Jurídica", "Pessoa Física"]).optional(),
-    pix: z.string().optional(),
-  }).optional(),
-  commercialInfo: z.object({
-    paymentTerms: z.string().optional(),
-    avgLeadTimeDays: z.coerce.number().optional(),
-    shippingMethods: z.string().optional(),
-    shippingIncluded: z.boolean().optional().default(false),
-  }).optional(),
-  documentation: z.object({
-    contratoSocialUrl: z.string().optional(),
-    cartaoCnpjUrl: z.string().optional(),
-    certidoesNegativasUrl: z.string().optional(),
-    isoCertificateUrl: z.string().optional(),
-    alvaraUrl: z.string().optional(),
-  }).optional(),
-  firstRegistrationDate: z.date().optional(),
-  lastUpdate: z.date().optional(),
-});
-
-const costEntrySchema = z.object({
-  orderId: z.string().optional(),
-  description: z.string().optional(),
-  quantity: z.coerce.number().optional(),
-  unitCost: z.coerce.number().optional(),
-  purchaseOrderNumber: z.string().optional(),
-});
-
-type CostEntryData = z.infer<typeof costEntrySchema>;
-
-type Supplier = z.infer<typeof supplierSchema> & { id: string, name?: string };
-type RequisitionItem = z.infer<typeof requisitionItemSchema>;
-
-type Requisition = {
-  id: string;
-  requisitionNumber: string;
-  date: Date;
-  status: string;
-  orderId?: string;
-  totalValue?: number;
-  itemsWithPrice?: number;
-  progress?: number;
-  lastPriceUpdate?: Date | null;
-  items: RequisitionItem[];
+// Funções utilitárias para cálculo de dias úteis
+const isHoliday = (date: Date): boolean => {
+  return brazilianHolidays.some(holiday => isSameDay(holiday, date));
 };
 
-type ItemForUpdate = RequisitionItem & { requisitionId: string };
-type OrderInfo = { id: string; internalOS: string; customerName: string; costEntries?: any[] };
+const isBusinessDay = (date: Date): boolean => {
+  return !isWeekend(date) && !isHoliday(date);
+};
 
-// Função utilitária para formatação segura de datas
-const safeFormatDate = (date: any, formatString: string, fallback: string = 'Data inválida'): string => {
-    try {
-        if (!date) return fallback;
-        
-        // Converter Firestore Timestamp para Date se necessário
-        let dateObj = date;
-        if (date?.toDate) {
-            dateObj = date.toDate();
-        } else if (typeof date === 'string' || typeof date === 'number') {
-            dateObj = new Date(date);
-        }
-        
-        // Verificar se a data é válida
-        if (!dateObj || !(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
-            console.warn('Data inválida detectada:', { 
-                originalDate: date, 
-                convertedDate: dateObj, 
-                formatString,
-                dateType: typeof date,
-                isDate: dateObj instanceof Date
-            });
-            return fallback;
-        }
-        
-        // Tentar formatar com proteção adicional
-        const result = format(dateObj, formatString);
-        return result;
-        
-    } catch (error: any) {
-        console.error('❌ Erro ao formatar data:', { 
-            date, 
-            formatString, 
-            error: error.message,
-            stack: error.stack 
-        });
-        
-        // Se for especificamente o erro RangeError: Invalid time value
-        if (error.message?.includes('Invalid time value')) {
-            console.error('🚨 ERRO ESPECÍFICO - Invalid time value:', {
-                originalDate: date,
-                dateType: typeof date,
-                formatString
-            });
-        }
-        
-        return fallback;
+// 3. FUNÇÃO AUXILIAR CORRIGIDA - Adicionar dias úteis (corrigida para não pular um dia extra)
+const addBusinessDays = (startDate: Date, days: number): Date => {
+  if (days === 0) return new Date(startDate);
+  
+  let currentDate = new Date(startDate);
+  let remainingDays = Math.abs(days);
+  const isAdding = days > 0;
+  
+  while (remainingDays > 0) {
+    currentDate = addDays(currentDate, isAdding ? 1 : -1);
+    if (isBusinessDay(currentDate)) {
+      remainingDays--;
+    }
+  }
+  return currentDate;
+};
+
+const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
+  if (isSameDay(startDate, endDate)) return 1;
+  let count = 0;
+  let currentDate = new Date(startDate);
+  const end = new Date(endDate);
+  while (currentDate <= end) {
+    if (isBusinessDay(currentDate)) {
+      count++;
+    }
+    currentDate = addDays(currentDate, 1);
+  }
+  return count;
+};
+
+// Função para obter o próximo dia útil
+const getNextBusinessDay = (date: Date): Date => {
+  let nextDay = addDays(date, 1);
+  while (!isBusinessDay(nextDay)) {
+    nextDay = addDays(nextDay, 1);
+  }
+  return nextDay;
+};
+
+// Função para obter o dia útil anterior
+const getPreviousBusinessDay = (date: Date): Date => {
+  let prevDay = addDays(date, -1);
+  while (!isBusinessDay(prevDay)) {
+    prevDay = addDays(prevDay, -1);
+  }
+  return prevDay;
+};
+
+// Componente para exibir informações de dias úteis
+interface BusinessDayInfoProps {
+  startDate: Date | null;
+  endDate: Date | null;
+  expectedDuration: number;
+}
+
+// 4. COMPONENTE ATUALIZADO - Informações de dias úteis com lógica corrigida
+const BusinessDayInfo = ({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) => {
+  if (!startDate || !endDate) return null;
+  
+  const expectedDurationNum = Number(expectedDuration) || 0;
+  const isSameDate = isSameDay(startDate, endDate);
+  
+  // CORREÇÃO: Para duração maior que 1, a tarefa deve terminar após os dias especificados
+  const actualDaysDifference = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
+  
+  return (
+    <div className="text-xs mt-2 p-2 rounded bg-blue-50 text-blue-700 border border-blue-200">
+      <div className="flex items-center gap-2">
+        <span className="font-medium">Duração:</span>
+        <span>{expectedDurationNum} dia(s)</span>
+      </div>
+      
+      {isSameDate && expectedDurationNum <= 1 && (
+        <p className="text-blue-600 mt-1">
+          ✓ Tarefa executada no mesmo dia (duração ≤ 1 dia)
+        </p>
+      )}
+      
+      {!isSameDate && expectedDurationNum > 1 && (
+        <p className="text-green-600 mt-1">
+          ✓ Cronograma sequencial: próxima tarefa inicia em {format(endDate, 'dd/MM/yyyy')}
+        </p>
+      )}
+      
+      {!isBusinessDay(startDate) && (
+        <p className="text-orange-600 mt-1">
+          ⚠️ Data de início será ajustada para próximo dia útil
+        </p>
+      )}
+      
+      {!isBusinessDay(endDate) && (
+        <p className="text-orange-600 mt-1">
+          ⚠️ Data de fim será ajustada para dia útil
+        </p>
+      )}
+      
+      <p className="text-blue-600 mt-1 text-xs">
+        💡 Tarefas são executadas sequencialmente: a próxima sempre inicia no mesmo dia que a anterior termina
+      </p>
+    </div>
+  );
+};
+
+const calculateTotalWeight = (items: OrderItem[]): number => {
+    if (!items || !Array.isArray(items)) return 0;
+    return items.reduce((acc, item) => {
+        const quantity = Number(item.quantity) || 0;
+        const unitWeight = Number(item.unitWeight) || 0;
+        return acc + (quantity * unitWeight);
+    }, 0);
+};
+
+const calculateItemProgress = (item: OrderItem): number => {
+    if (item.productionPlan && item.productionPlan.length > 0) {
+        const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
+        return (completedStages / item.productionPlan.length) * 100;
+    }
+
+    if (item.code && item.code.trim() !== "") {
+        return 0;
+    }
+    
+    return 100;
+};
+
+const calculateOrderProgress = (order: Order): number => {
+    if (!order.items || order.items.length === 0) {
+        return 0;
+    }
+    const totalProgress = order.items.reduce((acc, item) => acc + calculateItemProgress(item), 0);
+    return totalProgress / order.items.length;
+};
+
+const mapOrderStatus = (status?: string): string => {
+    if (!status) return "Não definido";
+    const lowerStatus = status.toLowerCase().trim();
+    
+    const statusMap: { [key: string]: string } = {
+        'in production': 'Em Produção',
+        'em produção': 'Em Produção',
+        'in progress': 'Em Produção',
+        'in-progress': 'Em Produção',
+        'em progresso': 'Em Produção',
+        'awaiting production': 'Aguardando Produção',
+        'aguardando produção': 'Aguardando Produção',
+        'pending': 'Aguardando Produção',
+        'completed': 'Concluído',
+        'concluído': 'Concluído',
+        'finished': 'Concluído',
+        'cancelled': 'Cancelado',
+        'cancelado': 'Cancelado',
+        'ready': 'Pronto para Entrega',
+        'pronto para entrega': 'Pronto para Entrega'
+    };
+
+    return statusMap[lowerStatus] || status;
+};
+
+const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
+    switch (status) {
+        case "Em Produção":
+            return { variant: "default", icon: PlayCircle, label: "Em Produção", colorClass: "" };
+        case "Aguardando Produção":
+            return { variant: "secondary", icon: Hourglass, label: "Aguardando Produção", colorClass: "" };
+        case "Concluído":
+            return { variant: "default", icon: CheckCircle, label: "Concluído", colorClass: "bg-green-600 hover:bg-green-600/90" };
+        case "Pronto para Entrega":
+            return { variant: "default", icon: Truck, label: "Pronto para Entrega", colorClass: "bg-blue-500 hover:bg-blue-500/90" };
+        case "Cancelado":
+            return { variant: "destructive", icon: XCircle, label: "Cancelado", colorClass: "" };
+        case "Atrasado":
+            return { variant: "destructive", icon: AlertTriangle, label: "Atrasado", colorClass: "bg-orange-500 hover:bg-orange-500/90 border-transparent text-destructive-foreground" };
+        default:
+            return { variant: "outline", icon: Package, label: status || "Não definido", colorClass: "" };
     }
 };
 
-// Função utilitária para limpar valores undefined recursivamente
-const cleanFirestoreData = (obj) => {
-    if (obj === null || obj === undefined) {
-        return null;
-    }
+function DocumentStatusIcons({ documents }: { documents?: Order['documents'] }) {
+    if (!documents) return null;
     
-    if (obj instanceof Date || obj?.toDate) {
-        return obj; // Manter Timestamps e Dates como estão
-    }
-    
-    if (Array.isArray(obj)) {
-        return obj.map(item => cleanFirestoreData(item)).filter(item => item !== null && item !== undefined);
-    }
-    
-    if (typeof obj === 'object') {
-        const cleaned = {};
-        for (const [key, value] of Object.entries(obj)) {
-            const cleanedValue = cleanFirestoreData(value);
-            if (cleanedValue !== undefined && cleanedValue !== null) {
-                cleaned[key] = cleanedValue;
-            }
-        }
-        return Object.keys(cleaned).length > 0 ? cleaned : null;
-    }
-    
-    return obj;
-};
+    const iconClass = (present?: boolean) => cn("h-4 w-4", present ? "text-green-500" : "text-muted-foreground/50");
 
-// Biblioteca global de insumos para caldeiraria e usinagem
-const insumosBiblioteca = {
-    "MATERIAS_PRIMAS": [
-        // Aços Carbono
-        "Aço carbono ASTM A36",
-        "Aço SAE 1020",
-        "Aço SAE 1045",
-        "Aço SAE 8620",
-        "Aço SAE 4140",
-        "Aço SAE 4340",
-        "Aço 52100",
-        
-        // Aços Ferramenta
-        "Aço ferramenta D2",
-        "Aço ferramenta D6",
-        "Aço ferramenta VC131",
-        "Aço ferramenta H13",
-        
-        // Aços Inoxidáveis
-        "Aço inox AISI 304",
-        "Aço inox AISI 316",
-        "Aço inox AISI 310",
-        "Aço inox AISI 410",
-        "Aço inox AISI 420",
-        
-        // Aços Especiais
-        "HARDOX 400",
-        "HARDOX 450",
-        "HARDOX 500",
-        "Dillidur 400",
-        "Dillidur 500",
-        "USI AR 400",
-        "USI AR 500",
-        
-        // Metais Não Ferrosos
-        "Alumínio 6061",
-        "Alumínio 7075",
-        "Alumínio 5083",
-        "Latão",
-        "Bronze SAE 660",
-        "Titânio Ti-6Al-4V",
-        "Cobre eletrolítico",
-        "Zinco fundido",
-        "Magnésio fundido",
-        "Níquel puro ou ligado",
-        
-        // Plásticos Técnicos
-        "Plástico Nylon (PA6)",
-        "Plástico UHMW",
-        "Plástico POM (Delrin)",
-        "Plástico PTFE (Teflon)",
-        "Plástico PVC industrial",
-        "Poliuretano sólido",
-        "Poliuretano expandido",
-        "Grafite para eletroerosão"
-    ],
-    
-    "FERRAMENTAS_CORTE": [
-        // Pastilhas
-        "Pastilha de corte de metal duro (carbeto de tungstênio)",
-        "Pastilha de corte cerâmica",
-        "Pastilha de corte CBN (nitreto cúbico de boro)",
-        "Pastilha de corte PCD (diamante policristalino)",
-        
-        // Brocas
-        "Brocas HSS",
-        "Brocas de metal duro",
-        
-        // Fresas
-        "Fresas topo reto",
-        "Fresas topo esférico",
-        "Fresas de canal",
-        
-        // Ferramentas Especiais
-        "Alargadores manuais",
-        "Alargadores de máquina",
-        "Machos de rosca M, G, NPT",
-        
-        // Abrasivos
-        "Discos de desbaste",
-        "Discos flap",
-        "Discos de corte",
-        "Rebolos"
-    ],
-    
-    "CONSUMIVEIS_USINAGEM": [
-        // Fluidos
-        "Fluidos de corte solúveis",
-        "Fluidos de corte semissintéticos",
-        "Fluidos de corte sintéticos",
-        "Óleos integrais para usinagem pesada",
-        "Óleos de base vegetal para usinagem ecológica",
-        
-        // Porta-ferramentas
-        "Porta-pastilhas ISO",
-        "Porta-fresas tipo Weldon",
-        "Porta-ferramentas ER",
-        "Porta-ferramentas BT",
-        "Porta-ferramentas SK",
-        "Porta-ferramentas HSK",
-        "Mandris para usinagem"
-    ],
-    
-    "FIXACAO": [
-        // Parafusos
-        "Parafusos cabeça sextavada",
-        "Parafusos Allen",
-        "Parafusos de pressão",
-        "Parafusos cabeça chata",
-        
-        // Porcas e Arruelas
-        "Porcas sextavadas",
-        "Porcas travantes (nylon ou metal)",
-        "Arruelas lisas",
-        "Arruelas de pressão",
-        "Arruelas dentadas",
-        
-        // Elementos de Fixação
-        "Pinos de posicionamento cilíndricos",
-        "Pinos cônicos",
-        "Chavetas retas DIN 6885",
-        "Chavetas paralelas DIN 6886",
-        "Prisioneiros roscados",
-        "Anéis de retenção Seeger",
-        "Buchas de guia",
-        "Buchas de redução"
-    ],
-    
-    "SOLDAGEM": [
-        // Arames
-        "Arame MIG ER70S-6",
-        "Arame MIG inox ER308L",
-        "Arame MIG inox ER309",
-        "Arame MIG inox ER316",
-        "Arame tubular E71T-1",
-        "Arame tubular E71T-GS",
-        
-        // Eletrodos
-        "Eletrodo revestido E6013",
-        "Eletrodo revestido E7018",
-        "Eletrodo inoxidável 308L",
-        "Eletrodo de níquel Ni99",
-        
-        // Varetas TIG
-        "Vareta TIG ER308L",
-        "Vareta TIG ER4045",
-        "Vareta TIG ER5356",
-        
-        // Gases
-        "Argônio puro",
-        "CO₂ industrial",
-        "Mistura Ar + CO₂ (92/8 ou 80/20)",
-        "Oxigênio industrial",
-        "Acetileno Puro",
-        "Nitrogênio gasoso",
-        "Gás hélio (uso especial)",
-        
-        // Fundentes
-        "Fundente para soldagem TIG",
-        "Fluxo para brasagem"
-    ],
-    
-    "ACABAMENTO_PINTURA": [
-        // Abrasivos
-        "Lixas ferro grão 36, 60, 80",
-        "Lixas flap zirconada",
-        "Escovas de aço rotativas",
-        
-        // Ensaios
-        "Líquido penetrante (ensaio LP)",
-        "Tinta de contraste para LP",
-        "Revelador em spray",
-        
-        // Limpeza
-        "Trapos industriais",
-        "Panos não tecidos",
-        "Solvente desengraxante",
-        "Desengraxante biodegradável",
-        
-        // Tintas e Primers
-        "Tinta epóxi bicomponente",
-        "Tinta poliuretano (PU)",
-        "Tinta esmalte sintético industrial",
-        "Primer zarcão industrial",
-        "Diluente industrial",
-        "Catalisador PU",
-        "Fita crepe de alta temperatura",
-        "Pistola de pintura convencional",
-        "Pistola de pintura HVLP"
-    ],
-    
-    "LUBRIFICACAO": [
-        "Óleo hidráulico ISO VG 32",
-        "Óleo hidráulico ISO VG 68",
-        "Graxa industrial EP2",
-        "Graxa branca atóxica",
-        "Graxa com bisulfeto de molibdênio"
-    ],
-    
-    "DISPOSITIVOS_FIXACAO": [
-        "Mandíbulas de torno",
-        "Garras de torno automático",
-        "Calços metálicos",
-        "Calços plásticos",
-        "Calas de nivelamento",
-        "Morsas fixas e giratórias",
-        "Suportes magnéticos",
-        "Dispositivos de fixação rápida"
-    ],
-    
-    "ELEMENTOS_MAQUINAS": [
-        // Mancais e Rolamentos
-        "Mancais tipo pedestal",
-        "Mancais tipo flange",
-        "Rolamentos rígidos de esferas",
-        "Rolamentos de rolos cilíndricos",
-        "Rolamentos de agulhas",
-        "Rolamentos axiais",
-        
-        // Transmissão
-        "Engrenagens retas",
-        "Engrenagens helicoidais",
-        "Polias de alumínio",
-        "Polias de ferro fundido",
-        "Correias em V A/B/C",
-        "Correias sincronizadoras HTD",
-        "Acoplamento elástico tipo H",
-        "Acoplamento dentado tipo KTR",
-        "Acoplamento cardan",
-        
-        // Molas
-        "Molas helicoidais",
-        "Molas prato",
-        "Molas de compressão e tração"
-    ],
-    
-    "INSTRUMENTOS_MEDICAO": [
-        // Instrumentos Dimensionais
-        "Paquímetros digitais e analógicos",
-        "Micrômetros externos",
-        "Micrômetros internos",
-        "Relógios comparadores",
-        "Relógios apalpadores",
-        "Blocos padrão",
-        "Calibradores de raio",
-        "Calibradores de rosca (M, G, UN, NPT)",
-        "Calibradores de folga",
-        "Trenas industriais",
-        "Esquadros de precisão"
-    ]
-};
-
-const emptySupplierFormValues: z.infer<typeof supplierSchema> = {
-    status: 'ativo',
-    razaoSocial: '',
-    nomeFantasia: '',
-    cnpj: '',
-    inscricaoEstadual: '',
-    inscricaoMunicipal: '',
-    segment: '',
-    telefone: '',
-    primaryEmail: '',
-    salesContactName: '',
-    address: {
-        zipCode: '',
-        street: '',
-        number: '',
-        complement: '',
-        neighborhood: '',
-        cityState: '',
-    },
-    bankInfo: {
-        bank: '',
-        agency: '',
-        accountNumber: '',
-        accountType: undefined,
-        pix: '',
-    },
-    commercialInfo: {
-        paymentTerms: '',
-        avgLeadTimeDays: undefined,
-        shippingMethods: '',
-        shippingIncluded: false,
-    },
-    documentation: {
-        contratoSocialUrl: '',
-        cartaoCnpjUrl: '',
-        certidoesNegativasUrl: '',
-        isoCertificateUrl: '',
-        alvaraUrl: '',
-    },
-};
-
-export default function CostsPage() {
-    // Verificação inicial de problemas com datas
-    React.useEffect(() => {
-        try {
-            // Testar se a biblioteca de formatação de datas está funcionando
-            const testDate = new Date();
-            format(testDate, 'dd/MM/yyyy');
-            console.log("✅ Biblioteca de formatação de datas funcionando corretamente");
-        } catch (error) {
-            console.error("❌ Problema detectado com a biblioteca de formatação de datas:", error);
-        }
-
-        // Interceptar erros de RangeError relacionados a datas
-        const originalError = console.error;
-        console.error = (...args) => {
-            const message = args.join(' ');
-            if (message.includes('Invalid time value') || message.includes('RangeError')) {
-                console.warn("🚨 ERRO DE DATA DETECTADO:", ...args);
-                console.trace("Stack trace do erro de data:");
-            }
-            originalError.apply(console, args);
-        };
-
-        return () => {
-            console.error = originalError;
-        };
-    }, []);
-
-    const [requisitions, setRequisitions] = useState<Requisition[]>([]);
-    const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-    const [orders, setOrders] = useState<OrderInfo[]>([]);
-
-    const [isLoadingRequisitions, setIsLoadingRequisitions] = useState(true);
-    const [isLoadingSuppliers, setIsLoadingSuppliers] = useState(true);
-    const [isLoadingOrders, setIsLoadingOrders] = useState(true);
-    const [isFormOpen, setIsFormOpen] = useState(false);
-    const [isSupplierFormOpen, setIsSupplierFormOpen] = useState(false);
-    const [isDeleteAlertOpen, setIsDeleteAlertOpen] = useState(false);
-    const [selectedItem, setSelectedItem] = useState<ItemForUpdate | null>(null);
-    const [selectedSupplier, setSelectedSupplier] = useState<Supplier | null>(null);
-    const [supplierToDelete, setSupplierToDelete] = useState<Supplier | null>(null);
-    const { user, loading: authLoading } = useAuth();
-    const { toast } = useToast();
-    
-    const [isDeleteCostAlertOpen, setIsDeleteCostAlertOpen] = useState(false);
-    const [costEntryToDelete, setCostEntryToDelete] = useState<any | null>(null);
-    const [editingCostEntry, setEditingCostEntry] = useState<any | null>(null);
-    const [isEditingCost, setIsEditingCost] = useState(false);
-    const [osSearchTerm, setOsSearchTerm] = useState("");
-    const [selectedInsumo, setSelectedInsumo] = useState("");
-    const [itemSpecification, setItemSpecification] = useState("");
-    const [activeTab, setActiveTab] = useState("receipts");
-    const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
-    const [isReportModalOpen, setIsReportModalOpen] = useState(false);
-    const [selectedOrderForReport, setSelectedOrderForReport] = useState<OrderInfo | null>(null);
-
-    const itemForm = useForm<ItemUpdateData>({
-        resolver: zodResolver(itemUpdateSchema),
-    });
-
-    const supplierForm = useForm<z.infer<typeof supplierSchema>>({
-        resolver: zodResolver(supplierSchema),
-        defaultValues: emptySupplierFormValues
-    });
-    
-    const costEntryForm = useForm<CostEntryData>({
-        resolver: zodResolver(costEntrySchema),
-    });
-
-    const fetchRequisitions = useCallback(async () => {
-        if (!user) return;
-        setIsLoadingRequisitions(true);
-        try {
-            const reqsSnapshot = await getDocs(collection(db, "companies", "mecald", "materialRequisitions"));
-            const reqsList: Requisition[] = reqsSnapshot.docs.map(d => {
-                const data = d.data();
-                const requisition = {
-                    id: d.id,
-                    requisitionNumber: data.requisitionNumber || 'N/A',
-                    date: (() => {
-                        try {
-                            if (data.date?.toDate) return data.date.toDate();
-                            if (data.date) {
-                                const date = new Date(data.date);
-                                return !isNaN(date.getTime()) ? date : new Date();
-                            }
-                            return new Date();
-                        } catch {
-                            return new Date();
-                        }
-                    })(),
-                    status: data.status,
-                    orderId: data.orderId,
-                    totalValue: data.totalValue || 0,
-                    itemsWithPrice: data.itemsWithPrice || 0,
-                    progress: data.progress || 0,
-                    lastPriceUpdate: (() => {
-                        try {
-                            if (!data.lastPriceUpdate) return null;
-                            if (data.lastPriceUpdate?.toDate) return data.lastPriceUpdate.toDate();
-                            if (data.lastPriceUpdate) {
-                                const date = new Date(data.lastPriceUpdate);
-                                return !isNaN(date.getTime()) ? date : null;
-                            }
-                            return null;
-                        } catch {
-                            return null;
-                        }
-                    })(),
-                    items: (data.items || []).map((item: any, index: number): RequisitionItem => {
-                        // Tentar diferentes possíveis estruturas para o peso
-                        const weight = item.weight || item.peso || item.materialWeight || item.itemWeight || undefined;
-                        const weightUnit = item.weightUnit || item.pesoUnidade || item.unidadePeso || item.unit || "kg";
-                        
-                        return {
-                        id: item.id || `${d.id}-${index}`,
-                        description: item.description,
-                        quantityRequested: item.quantityRequested,
-                        status: item.status || "Pendente",
-                        supplierName: item.supplierName || "",
-                        invoiceNumber: item.invoiceNumber || "",
-                        invoiceItemValue: item.invoiceItemValue || undefined,
-                        certificateNumber: item.certificateNumber || "",
-                        storageLocation: item.storageLocation || "",
-                        deliveryReceiptDate: (() => {
-                            try {
-                                if (!item.deliveryReceiptDate) return null;
-                                if (item.deliveryReceiptDate?.toDate) return item.deliveryReceiptDate.toDate();
-                                if (item.deliveryReceiptDate) {
-                                    const date = new Date(item.deliveryReceiptDate);
-                                    return !isNaN(date.getTime()) ? date : null;
-                                }
-                                return null;
-                            } catch {
-                                return null;
-                            }
-                        })(),
-                        inspectionStatus: item.inspectionStatus || "Pendente",
-                            weight: weight,
-                            weightUnit: weightUnit,
-                        };
-                    }),
-                };
-                
-                // Log para debug requisições com valores
-                if (requisition.totalValue && requisition.totalValue > 0) {
-                    console.log(`💰 Requisição ${requisition.requisitionNumber} carregada com valor R$ ${requisition.totalValue} (${requisition.progress}% completa) - OS ID: ${requisition.orderId || 'NÃO VINCULADA'}`);
-                    
-                    // Log especial para a requisição 00008
-                    if (requisition.requisitionNumber === '00008') {
-                        console.log(`🔍 ===== REQUISIÇÃO 00008 DETECTADA =====`);
-                        console.log(`💰 Valor: R$ ${requisition.totalValue}`);
-                        console.log(`📊 Progresso: ${requisition.progress}%`);
-                        console.log(`🔗 OS ID: ${requisition.orderId}`);
-                        console.log(`📅 Última atualização: ${requisition.lastPriceUpdate}`);
-                        console.log(`🔍 ===== FIM DEBUG 00008 =====`);
-                    }
-                } else if (requisition.orderId) {
-                    console.log(`📋 Requisição ${requisition.requisitionNumber} sem valores ainda - OS ID: ${requisition.orderId}`);
-                }
-                
-                return requisition;
-            });
-            setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
-        } catch (error) {
-            console.error("Error fetching requisitions:", error);
-            toast({ variant: "destructive", title: "Erro ao buscar requisições" });
-        } finally {
-            setIsLoadingRequisitions(false);
-        }
-    }, [user, toast]);
-
-     const fetchSuppliers = useCallback(async () => {
-        if (!user) return;
-        setIsLoadingSuppliers(true);
-        try {
-            const suppliersSnapshot = await getDocs(collection(db, "companies", "mecald", "suppliers"));
-            const suppliersList: Supplier[] = suppliersSnapshot.docs.map(d => {
-              const data = d.data();
-              return { 
-                id: d.id,
-                ...data,
-                firstRegistrationDate: (() => {
-                  try {
-                    if (!data.firstRegistrationDate) return undefined;
-                    if (data.firstRegistrationDate?.toDate) return data.firstRegistrationDate.toDate();
-                    if (data.firstRegistrationDate) {
-                      const date = new Date(data.firstRegistrationDate);
-                      return !isNaN(date.getTime()) ? date : undefined;
-                    }
-                    return undefined;
-                  } catch {
-                    return undefined;
-                  }
-                })(),
-                lastUpdate: (() => {
-                  try {
-                    if (!data.lastUpdate) return undefined;
-                    if (data.lastUpdate?.toDate) return data.lastUpdate.toDate();
-                    if (data.lastUpdate) {
-                      const date = new Date(data.lastUpdate);
-                      return !isNaN(date.getTime()) ? date : undefined;
-                    }
-                    return undefined;
-                  } catch {
-                    return undefined;
-                  }
-                })(),
-              } as Supplier
-            });
-            setSuppliers(suppliersList);
-        } catch (error) {
-            console.error("Error fetching suppliers:", error);
-            toast({ variant: "destructive", title: "Erro ao buscar fornecedores" });
-        } finally {
-            setIsLoadingSuppliers(false);
-        }
-    }, [user, toast]);
-    
-    const fetchOrders = useCallback(async () => {
-        if (!user) return;
-        console.log('📊 Iniciando busca de ordens de serviço...');
-        setIsLoadingOrders(true);
-        try {
-            const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
-            const ordersList: OrderInfo[] = ordersSnapshot.docs
-                .filter(doc => !['Concluído', 'Cancelado'].includes(doc.data().status))
-                .map(doc => {
-                    const data = doc.data();
-                    return {
-                        id: doc.id,
-                        internalOS: data.internalOS || 'N/A',
-                        customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
-                        costEntries: (data.costEntries || []).map((entry: any) => ({
-                            ...entry,
-                            entryDate: (() => {
-                                try {
-                                    if (!entry.entryDate) return undefined;
-                                    if (entry.entryDate?.toDate) return entry.entryDate.toDate();
-                                    if (entry.entryDate) {
-                                        const date = new Date(entry.entryDate);
-                                        return !isNaN(date.getTime()) ? date : undefined;
-                                    }
-                                    return undefined;
-                                } catch {
-                                    return undefined;
-                                }
-                            })(),
-                            lastEditDate: (() => {
-                                try {
-                                    if (!entry.lastEditDate) return undefined;
-                                    if (entry.lastEditDate?.toDate) return entry.lastEditDate.toDate();
-                                    if (entry.lastEditDate) {
-                                        const date = new Date(entry.lastEditDate);
-                                        return !isNaN(date.getTime()) ? date : undefined;
-                                    }
-                                    return undefined;
-                                } catch {
-                                    return undefined;
-                                }
-                            })(),
-                            lastPriceUpdate: (() => {
-                                try {
-                                    if (!entry.lastPriceUpdate) return undefined;
-                                    if (entry.lastPriceUpdate?.toDate) return entry.lastPriceUpdate.toDate();
-                                    if (entry.lastPriceUpdate) {
-                                        const date = new Date(entry.lastPriceUpdate);
-                                        return !isNaN(date.getTime()) ? date : undefined;
-                                    }
-                                    return undefined;
-                                } catch {
-                                    return undefined;
-                                }
-                            })(),
-                        })),
-                    };
-                });
-            
-            const totalCostEntries = ordersList.reduce((sum, order) => sum + (order.costEntries?.length || 0), 0);
-            console.log(`📊 ${ordersList.length} ordens carregadas com ${totalCostEntries} lançamentos de custo`);
-            
-            // Log especial para debug da OS 724/25
-            const order724 = ordersList.find(order => order.internalOS === '724/25');
-            if (order724) {
-                console.log(`🔍 ===== OS 724/25 DETECTADA =====`);
-                console.log(`🆔 ID: ${order724.id}`);
-                console.log(`📋 Número: ${order724.internalOS}`);
-                console.log(`👤 Cliente: ${order724.customerName}`);
-                console.log(`💼 Lançamentos: ${(order724.costEntries || []).length}`);
-                if (order724.costEntries && order724.costEntries.length > 0) {
-                    order724.costEntries.forEach((entry: any, index: number) => {
-                        console.log(`  📝 Lançamento ${index + 1}: ${entry.description} - R$ ${entry.totalCost} (Req ID: ${entry.requisitionId || 'N/A'})`);
-                    });
-                }
-                console.log(`🔍 ===== FIM DEBUG OS 724/25 =====`);
-            } else {
-                console.log(`⚠️ OS 724/25 NÃO ENCONTRADA nas ${ordersList.length} ordens carregadas`);
-                // Listar todas as OS para debug
-                console.log('📋 Ordens carregadas:');
-                ordersList.forEach(order => {
-                    console.log(`  - ${order.internalOS} (ID: ${order.id}) - ${order.customerName}`);
-                });
-            }
-            
-            setOrders(ordersList);
-            setLastUpdateTime(new Date());
-
-        } catch (error) {
-            console.error("Error fetching orders:", error);
-            toast({ variant: "destructive", title: "Erro ao buscar Ordens de Serviço" });
-        } finally {
-            setIsLoadingOrders(false);
-        }
-    }, [user, toast]);
-
-
-    useEffect(() => {
-        if (!authLoading && user) {
-            fetchRequisitions();
-            fetchSuppliers();
-            fetchOrders();
-        }
-    }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
-
-    // Sincronizar requisições com OS automaticamente
-    useEffect(() => {
-        const syncRequisitionsWithOrders = async () => {
-            if (!requisitions.length || !orders.length || isLoadingRequisitions || isLoadingOrders) return;
-            
-            console.log('🔄 ===== INICIANDO VERIFICAÇÃO DE SINCRONIZAÇÃO =====');
-            console.log(`📊 Total de requisições: ${requisitions.length}`);
-            console.log(`📊 Total de ordens: ${orders.length}`);
-            
-            let hasChanges = false;
-            
-            for (const req of requisitions) {
-                if (req.orderId && req.totalValue && req.totalValue > 0) {
-                    console.log(`🔍 ===== VERIFICANDO REQUISIÇÃO ${req.requisitionNumber} =====`);
-                    console.log(`💰 Valor: R$ ${req.totalValue} | Progresso: ${req.progress}% | OS ID: ${req.orderId}`);
-                    
-                    const order = orders.find(o => o.id === req.orderId);
-                    if (order) {
-                        console.log(`📋 OS encontrada: ${order.internalOS} - ${order.customerName}`);
-                        console.log(`💼 Lançamentos existentes na OS: ${(order.costEntries || []).length}`);
-                        
-                        // Debug especial para requisição 00008
-                        if (req.requisitionNumber === '00008') {
-                            console.log(`🔍 ===== MAPEAMENTO REQUISIÇÃO 00008 =====`);
-                            console.log(`🔗 Requisição 00008 está vinculada ao ID: ${req.orderId}`);
-                            console.log(`📋 Este ID corresponde à OS: ${order.internalOS}`);
-                            console.log(`🎯 Esperado: OS 724/25`);
-                            console.log(`✅ Match: ${order.internalOS === '724/25' ? 'SIM' : 'NÃO - PROBLEMA!'}`);
-                            if (order.internalOS !== '724/25') {
-                                console.error(`❌ ERRO: Requisição 00008 deveria estar vinculada à OS 724/25, mas está vinculada à OS ${order.internalOS}`);
-                            }
-                            console.log(`🔍 ===== FIM MAPEAMENTO 00008 =====`);
-                        }
-                        
-                        const existingReqCost = order.costEntries?.find((entry: any) => 
-                            entry.requisitionId === req.id
-                        );
-                        
-                        if (existingReqCost) {
-                            console.log(`🔍 Lançamento existente encontrado: R$ ${existingReqCost.totalCost} | Pendente: ${existingReqCost.isPending}`);
-                        } else {
-                            console.log(`⚠️ NENHUM lançamento encontrado para esta requisição!`);
-                        }
-                        
-                        // Se não existe lançamento OU o lançamento existente tem valor diferente
-                        const needsUpdate = !existingReqCost || 
-                                          (existingReqCost.totalCost !== req.totalValue) ||
-                                          existingReqCost.isPending;
-                        
-                        if (needsUpdate) {
-                            console.log(`🚀 EXECUTANDO SINCRONIZAÇÃO: Requisição ${req.requisitionNumber} -> OS ${req.orderId}`);
-                            try {
-                                await updateOrderCostFromRequisition(req.orderId, req.id, req.items);
-                                hasChanges = true;
-                                console.log(`✅ Sincronização da requisição ${req.requisitionNumber} CONCLUÍDA`);
-                            } catch (error) {
-                                console.error(`❌ ERRO na sincronização da requisição ${req.requisitionNumber}:`, error);
-                            }
-                        } else {
-                            console.log(`✅ Requisição ${req.requisitionNumber} já está sincronizada corretamente`);
-                        }
-                    } else {
-                        console.error(`❌ OS ${req.orderId} NÃO ENCONTRADA para requisição ${req.requisitionNumber}!`);
-                    }
-                } else if (req.orderId && (!req.totalValue || req.totalValue === 0)) {
-                    // Requisição sem valores ainda - criar lançamento pendente
-                    const order = orders.find(o => o.id === req.orderId);
-                    if (order) {
-                        const existingReqCost = order.costEntries?.find((entry: any) => 
-                            entry.requisitionId === req.id
-                        );
-                        
-                        if (!existingReqCost) {
-                            console.log(`📝 Criando lançamento pendente para requisição ${req.requisitionNumber} na OS ${req.orderId}`);
-                            await createInitialOrderCostFromRequisition(req.orderId, req.id);
-                            hasChanges = true;
-                        }
-                    }
-                }
-            }
-            
-            // Re-fetch orders se houve mudanças
-            console.log('🔄 ===== FINALIZANDO VERIFICAÇÃO DE SINCRONIZAÇÃO =====');
-            if (hasChanges) {
-                console.log('📊 ✅ MUDANÇAS DETECTADAS - Atualizando interface...');
-                await fetchOrders();
-                console.log('🔄 Interface atualizada após sincronização');
-            } else {
-                console.log('✅ Nenhuma sincronização necessária - todos os dados estão atualizados');
-            }
-            console.log('🔄 ===== VERIFICAÇÃO DE SINCRONIZAÇÃO CONCLUÍDA =====');
-        };
-        
-        // Sincronizar quando dados mudam - aguardar um pouco para garantir que tudo foi carregado
-        const timeoutId = setTimeout(syncRequisitionsWithOrders, 1000);
-        return () => clearTimeout(timeoutId);
-    }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders]);
-
-    // Função para forçar refresh dos dados de custos
-    const forceRefreshCosts = useCallback(async () => {
-        console.log('🔄 Refresh forçado dos dados...');
-        setIsLoadingOrders(true);
-        setIsLoadingRequisitions(true);
-        
-        // Recarregar tanto requisições quanto ordens
-        await Promise.all([
-            fetchRequisitions(),
-            fetchOrders()
-        ]);
-        
-        console.log('✅ Refresh completo - dados serão sincronizados automaticamente');
-    }, [fetchOrders, fetchRequisitions]);
-
-    // Auto-atualizar dados quando mudar para aba de custos
-    useEffect(() => {
-        if (activeTab === "costEntry") {
-            console.log('🔄 Mudou para aba de custos, atualizando dados...');
-            forceRefreshCosts();
-        }
-    }, [activeTab, forceRefreshCosts]);
-    
-
-
-    const handleOpenForm = (item: RequisitionItem, requisitionId: string) => {
-        try {
-            const selectedItemData = { ...item, requisitionId };
-            setSelectedItem(selectedItemData);
-            
-            // Resetar formulário com dados existentes - com proteção para datas
-            const formData = {
-                supplierName: item.supplierName || "",
-                invoiceNumber: item.invoiceNumber || "",
-                invoiceItemValue: item.invoiceItemValue || undefined,
-                certificateNumber: item.certificateNumber || "",
-                storageLocation: item.storageLocation || "",
-                deliveryReceiptDate: (() => {
-                    try {
-                        if (!item.deliveryReceiptDate) return null;
-                        const date = item.deliveryReceiptDate;
-                        return date && !isNaN(date.getTime()) ? date : null;
-                    } catch {
-                        console.warn("Data de entrega inválida no item:", item.deliveryReceiptDate);
-                        return null;
-                    }
-                })(),
-                inspectionStatus: item.inspectionStatus || "Pendente",
-                weight: item.weight || undefined,
-                weightUnit: item.weightUnit || "kg",
-            };
-            
-            itemForm.reset(formData);
-            setIsFormOpen(true);
-        } catch (error) {
-            console.error("Erro ao abrir formulário de item:", error);
-            toast({ 
-                variant: "destructive",
-                title: "Erro", 
-                description: "Não foi possível abrir o formulário. Tente novamente." 
-            });
-        }
-    };
-
-    const onItemSubmit = async (values: ItemUpdateData) => {
-        if (!selectedItem) return;
-
-        try {
-            const reqRef = doc(db, "companies", "mecald", "materialRequisitions", selectedItem.requisitionId);
-            const reqSnap = await getDoc(reqRef);
-            if (!reqSnap.exists()) {
-                throw new Error("Requisição não encontrada.");
-            }
-
-            const reqData = reqSnap.data();
-            const items = reqData.items || [];
-            const itemIndex = items.findIndex((i: any) => i.id === selectedItem.id);
-
-            if (itemIndex === -1) {
-                throw new Error("Item não encontrado na requisição.");
-            }
-
-            const updatedItem = {
-                ...items[itemIndex],
-                ...values,
-                deliveryReceiptDate: values.deliveryReceiptDate ? Timestamp.fromDate(values.deliveryReceiptDate) : null,
-            };
-
-            if (values.inspectionStatus === "Aprovado" || values.inspectionStatus === "Aprovado com ressalvas") {
-                updatedItem.status = "Inspecionado e Aprovado";
-            } else if (values.inspectionStatus === "Rejeitado") {
-                updatedItem.status = "Inspecionado e Rejeitado";
-            } else if (values.deliveryReceiptDate) {
-                updatedItem.status = "Recebido (Aguardando Inspeção)";
-            }
-
-            const updatedItems = [...items];
-            updatedItems[itemIndex] = updatedItem;
-
-            // Calcular valor total da requisição
-            const totalValue = updatedItems.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
-            const itemsWithPrice = updatedItems.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
-            const progress = updatedItems.length > 0 ? Math.round((itemsWithPrice / updatedItems.length) * 100) : 0;
-
-            console.log(`💰 Valor total calculado da requisição: R$ ${totalValue}`);
-            console.log(`📊 Progresso de precificação: ${progress}% (${itemsWithPrice}/${updatedItems.length} itens)`);
-
-            // Atualizar requisição com os novos valores e totais
-            await updateDoc(reqRef, { 
-                items: updatedItems,
-                totalValue: totalValue,
-                itemsWithPrice: itemsWithPrice,
-                progress: progress,
-                lastPriceUpdate: Timestamp.now()
-            });
-            console.log('✅ Requisição atualizada no banco de dados com valores totais');
-
-            // Atualizar custos da OS automaticamente se a requisição estiver vinculada a uma OS
-            let costUpdateSuccess = false;
-            if (reqData.orderId) {
-                console.log('🔗 Requisição vinculada à OS, atualizando custos...');
-                try {
-                    await updateOrderCostFromRequisition(reqData.orderId, selectedItem.requisitionId, updatedItems);
-                    console.log('✅ Custos da OS atualizados com sucesso');
-                    costUpdateSuccess = true;
-                } catch (costError) {
-                    console.error('❌ Erro ao atualizar custos da OS:', costError);
-                    // Mesmo se houver erro nos custos, mostra que a requisição foi salva
-                }
-            } else {
-                console.log('⚠️ Requisição não está vinculada a uma OS');
-            }
-
-            // Toast mais informativo baseado nos valores
-            if (reqData.orderId) {
-                const hasValues = values.invoiceItemValue && values.invoiceItemValue > 0;
-                if (hasValues && costUpdateSuccess) {
-                    toast({ 
-                        title: "✅ Item precificado com sucesso!", 
-                        description: `Valor ${values.invoiceItemValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi adicionado aos custos da OS.`,
-                        duration: 5000
-                    });
-                } else if (hasValues && !costUpdateSuccess) {
-                    toast({ 
-                        title: "⚠️ Item atualizado com aviso!", 
-                        description: "Dados salvos, mas houve problema ao atualizar custos da OS. Tente recarregar a página." 
-                    });
-                } else {
-                    toast({ 
-                        title: "📝 Item atualizado!", 
-                        description: "Dados salvos. Adicione o valor da nota fiscal para atualizar os custos da OS." 
-                    });
-                }
-            } else {
-                toast({ 
-                    title: "Item atualizado com sucesso!", 
-                    description: "Requisição não vinculada a uma OS." 
-                });
-            }
-
-            // CORREÇÃO: NÃO fechar o modal nem mudar de aba automaticamente
-            // Deixar o usuário decidir quando sair da tela de precificação
-            // setIsFormOpen(false); // REMOVIDO
-            
-            // Forçar refresh de dados de forma mais robusta
-            console.log('🔄 Atualizando interface após edição...');
-            
-            // Aguardar um pouco para o Firestore processar as mudanças
-            await new Promise(resolve => setTimeout(resolve, 1000));
-            
-            // Atualizar dados sequencialmente para evitar conflitos
-            await fetchRequisitions();
-            await fetchOrders();
-            
-            console.log('✅ Interface atualizada');
-            
-            // MELHORIA: Mostrar toast com opção de continuar precificando ou voltar
-            toast({
-                title: "🎉 Item salvo com sucesso!",
-                description: "Você pode continuar precificando outros itens ou fechar esta janela quando terminar.",
-                duration: 7000
-            });
-            
-        } catch (error: any) {
-            console.error("Error updating item:", error);
-            toast({ variant: "destructive", title: "Erro ao atualizar", description: error.message });
-        }
-    };
-
-    // Função para atualizar custos da OS baseado na requisição
-    const updateOrderCostFromRequisition = async (orderId, requisitionId, items) => {
-        console.log('🔄 ===== INICIANDO ATUALIZAÇÃO DE CUSTOS =====');
-        console.log('🔄 Dados de entrada:', { orderId, requisitionId, itemsCount: items.length });
-        
-        try {
-            // Buscar dados da requisição
-            const reqRef = doc(db, "companies", "mecald", "materialRequisitions", requisitionId);
-            const reqSnap = await getDoc(reqRef);
-            
-            if (!reqSnap.exists()) {
-                console.log('❌ Requisição não encontrada:', requisitionId);
-                return;
-            }
-            
-            const reqData = reqSnap.data();
-            console.log('📋 Requisição encontrada:', {
-                id: requisitionId,
-                number: reqData.requisitionNumber,
-                status: reqData.status,
-                itemsCount: (reqData.items || []).length,
-                totalValue: reqData.totalValue,
-                progress: reqData.progress,
-                lastUpdate: reqData.lastPriceUpdate?.toDate ? reqData.lastPriceUpdate.toDate() : null
-            });
-            
-            const orderRef = doc(db, "companies", "mecald", "orders", orderId);
-            const orderSnap = await getDoc(orderRef);
-            
-            if (!orderSnap.exists()) {
-                console.log('❌ OS não encontrada:', orderId);
-                return;
-            }
-            
-            const orderData = orderSnap.data();
-            const existingCostEntries = orderData.costEntries || [];
-                    console.log('📊 Custos existentes na OS:', existingCostEntries.length);
-        
-        // Log detalhado dos lançamentos existentes
-        existingCostEntries.forEach((entry, index) => {
-            console.log(`📝 Lançamento ${index}: ID=${entry.id}, ReqID=${entry.requisitionId}, Descrição="${entry.description}"`);
-        });
-        
-        // Remover lançamentos antigos desta requisição
-        const oldEntriesForThisReq = existingCostEntries.filter((entry) => 
-            entry.requisitionId === requisitionId
-        );
-        console.log(`🔍 Encontrados ${oldEntriesForThisReq.length} lançamentos antigos da requisição ${requisitionId}:`, oldEntriesForThisReq.map(e => e.id));
-        
-        const filteredCostEntries = existingCostEntries.filter((entry) => 
-            entry.requisitionId !== requisitionId
-        );
-        console.log('🗑️ Removendo custos antigos da requisição, restaram:', filteredCostEntries.length);
-        
-        // Usar valores já calculados e salvos na requisição
-        const requisitionTotal = reqData.totalValue || 0;
-        const itemsWithValues = reqData.itemsWithPrice || 0;
-        const totalItems = items.length;
-        const progress = reqData.progress || 0;
-        
-        console.log('💵 Valor total da requisição (salvo):', requisitionTotal);
-        console.log(`📈 Progresso salvo: ${progress}% (${itemsWithValues}/${totalItems} itens precificados)`);
-        
-        // Criar descrição dinâmica baseada no progresso
-        let description = `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'}`;
-        
-        if (itemsWithValues === 0) {
-            description += ` (Aguardando precificação)`;
-        } else if (itemsWithValues < totalItems) {
-            description += ` (${itemsWithValues}/${totalItems} itens precificados)`;
-        } else {
-            description += ` (Totalmente precificada)`;
-        }
-        
-        // Criar novo lançamento consolidado da requisição - ANTES da limpeza
-        const requisitionCostEntry = {
-            id: `req-${requisitionId}-${Date.now()}`,
-            description: description,
-            quantity: totalItems,
-            unitCost: requisitionTotal > 0 ? requisitionTotal / totalItems : 0,
-            totalCost: requisitionTotal,
-            entryDate: Timestamp.now(),
-            enteredBy: 'Sistema (Auto - Recebimento)',
-            requisitionId: requisitionId,
-            isFromRequisition: true,
-            isPending: requisitionTotal === 0,
-            itemsWithValues: itemsWithValues,
-            totalItems: totalItems,
-            completionPercentage: progress,
-            lastPriceUpdate: reqData.lastPriceUpdate || null, // Evitar undefined
-            sourceType: 'requisition_total',
-            items: items.map(item => ({
-                description: item.description || '',
-                quantity: item.quantityRequested || 0,
-                value: item.invoiceItemValue || 0,
-                weight: item.weight || null, // null ao invés de undefined
-                weightUnit: item.weightUnit || 'kg',
-                hasPricing: !!(item.invoiceItemValue && item.invoiceItemValue > 0)
-            }))
-        };
-        
-        // LIMPAR DADOS antes de salvar no Firestore
-        const cleanedCostEntry = cleanFirestoreData(requisitionCostEntry);
-        
-        console.log('💾 Novo lançamento de custo (antes da limpeza):', requisitionCostEntry);
-        console.log('🧹 Novo lançamento de custo (após limpeza):', cleanedCostEntry);
-        
-        // Verificar se ainda há valores undefined
-        const hasUndefined = JSON.stringify(cleanedCostEntry).includes('undefined');
-        if (hasUndefined) {
-            console.error('❌ AINDA HÁ VALORES UNDEFINED após limpeza!');
-            console.error('Objeto problemático:', cleanedCostEntry);
-            throw new Error('Dados ainda contêm valores undefined após limpeza');
-        }
-        
-        // Primeiro, vamos tentar remover os lançamentos antigos usando arrayRemove
-        if (oldEntriesForThisReq.length > 0) {
-            console.log('🗑️ Removendo lançamentos antigos usando arrayRemove...');
-            
-            // Remover lançamentos antigos um por um
-            for (const oldEntry of oldEntriesForThisReq) {
-                console.log(`🗑️ Removendo lançamento: ${oldEntry.id}`);
-                // Limpar também o objeto a ser removido
-                const cleanedOldEntry = cleanFirestoreData(oldEntry);
-                await updateDoc(orderRef, {
-                    costEntries: arrayRemove(cleanedOldEntry)
-                });
-            }
-            
-            console.log('✅ Lançamentos antigos removidos');
-        }
-        
-        // Adicionar o novo lançamento
-        console.log('📝 Adicionando novo lançamento...');
-        await updateDoc(orderRef, {
-            costEntries: arrayUnion(cleanedCostEntry)
-        });
-        console.log('✅ Novo lançamento adicionado');
-        
-        console.log(`✅ Custo da OS atualizado com sucesso: Requisição ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
-        console.log('🔄 ===== ATUALIZAÇÃO DE CUSTOS CONCLUÍDA =====');
-        
-    } catch (error) {
-        console.error("❌ ===== ERRO NA ATUALIZAÇÃO DE CUSTOS =====");
-        console.error("❌ Error updating order costs:", error);
-        console.error("❌ Detalhes:", { orderId, requisitionId, itemsCount: items.length });
-        throw error; // Re-throw para que possa ser tratado no onItemSubmit
-    }
-    };
-
-    // Função para criar lançamento inicial quando uma requisição é vinculada a uma OS
-    const createInitialOrderCostFromRequisition = async (orderId, requisitionId) => {
-        try {
-            const reqRef = doc(db, "companies", "mecald", "materialRequisitions", requisitionId);
-            const reqSnap = await getDoc(reqRef);
-            
-            if (!reqSnap.exists()) return;
-            
-            const reqData = reqSnap.data();
-            const items = reqData.items || [];
-            
-            // Criar lançamento inicial (mesmo sem valores)
-            const orderRef = doc(db, "companies", "mecald", "orders", orderId);
-            const initialCostEntry = {
-                id: `req-${requisitionId}-initial`,
-                description: `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'} (Aguardando precificação)`,
-                quantity: items.length,
-                unitCost: 0,
-                totalCost: 0,
-                entryDate: Timestamp.now(),
-                enteredBy: 'Sistema (Requisição)',
-                requisitionId: requisitionId,
-                isFromRequisition: true,
-                isPending: true,
-                items: items.map((item) => ({
-                    description: item.description || '',
-                    quantity: item.quantityRequested || 0,
-                    value: 0,
-                    weight: item.weight || null, // null ao invés de undefined
-                    weightUnit: item.weightUnit || 'kg'
-                }))
-            };
-            
-            // Limpar dados antes de salvar
-            const cleanedEntry = cleanFirestoreData(initialCostEntry);
-            
-            await updateDoc(orderRef, {
-                costEntries: arrayUnion(cleanedEntry)
-            });
-            
-        } catch (error) {
-            console.error("Error creating initial order cost:", error);
-        }
-    };
-    
-    const onSupplierSubmit = async (values: z.infer<typeof supplierSchema>) => {
-        try {
-            console.log("Dados do formulário:", values);
-            
-            // Função simples para limpar campos undefined/null/vazios
-            const cleanObject = (obj: any): any => {
-                if (obj === null || obj === undefined || obj === '') {
-                    return null;
-                }
-                
-                if (typeof obj === 'object' && !Array.isArray(obj)) {
-                    const cleaned: any = {};
-                    for (const [key, value] of Object.entries(obj)) {
-                        if (value !== null && value !== undefined && value !== '') {
-                            if (typeof value === 'object' && !Array.isArray(value)) {
-                                const cleanedNested = cleanObject(value);
-                                if (cleanedNested && Object.keys(cleanedNested).length > 0) {
-                                    cleaned[key] = cleanedNested;
-                                }
-                            } else {
-                                cleaned[key] = value;
-                            }
-                        }
-                    }
-                    return Object.keys(cleaned).length > 0 ? cleaned : null;
-                }
-                
-                return obj;
-            };
-
-            // Preparar dados básicos obrigatórios
-            const dataToSave: any = {
-                razaoSocial: values.razaoSocial || values.nomeFantasia || 'Fornecedor',
-                nomeFantasia: values.nomeFantasia || values.razaoSocial || 'Fornecedor',
-                status: values.status || 'ativo',
-                lastUpdate: Timestamp.now(),
-            };
-            
-            // Adicionar campos opcionais apenas se tiverem valor
-            if (values.supplierCode) dataToSave.supplierCode = values.supplierCode;
-            if (values.cnpj) dataToSave.cnpj = values.cnpj;
-            if (values.inscricaoEstadual) dataToSave.inscricaoEstadual = values.inscricaoEstadual;
-            if (values.inscricaoMunicipal) dataToSave.inscricaoMunicipal = values.inscricaoMunicipal;
-            if (values.segment) dataToSave.segment = values.segment;
-            if (values.telefone) dataToSave.telefone = values.telefone;
-            if (values.primaryEmail) dataToSave.primaryEmail = values.primaryEmail;
-            if (values.salesContactName) dataToSave.salesContactName = values.salesContactName;
-            
-            // Tratar objetos aninhados
-            if (values.address) {
-                const cleanAddress = cleanObject(values.address);
-                if (cleanAddress) dataToSave.address = cleanAddress;
-            }
-            
-            if (values.bankInfo) {
-                const cleanBankInfo = cleanObject(values.bankInfo);
-                if (cleanBankInfo) dataToSave.bankInfo = cleanBankInfo;
-            }
-            
-            if (values.commercialInfo) {
-                const cleanCommercialInfo = cleanObject(values.commercialInfo);
-                if (cleanCommercialInfo) dataToSave.commercialInfo = cleanCommercialInfo;
-            }
-            
-            if (values.documentation) {
-                const cleanDocumentation = cleanObject(values.documentation);
-                if (cleanDocumentation) dataToSave.documentation = cleanDocumentation;
-            }
-    
-            dataToSave.name = dataToSave.nomeFantasia;
-            
-            console.log("Dados finais para salvar:", dataToSave);
-            
-            if (selectedSupplier) { // UPDATE
-                await setDoc(doc(db, "companies", "mecald", "suppliers", selectedSupplier.id), dataToSave, { merge: true });
-                toast({ title: "Fornecedor atualizado com sucesso!" });
-            } else { // CREATE
-                const batch = writeBatch(db);
-                const newSupplierRef = doc(collection(db, "companies", "mecald", "suppliers"));
-                const suppliersSnapshot = await getDocs(collection(db, "companies", "mecald", "suppliers"));
-                const highestCode = suppliersSnapshot.docs.reduce((max, s) => {
-                    const codeNum = parseInt(s.data().supplierCode || "0", 10);
-                    return !isNaN(codeNum) && codeNum > max ? codeNum : max;
-                }, 0);
-    
-                dataToSave.id = newSupplierRef.id;
-                dataToSave.supplierCode = (highestCode + 1).toString().padStart(5, '0');
-                dataToSave.firstRegistrationDate = Timestamp.now();
-                batch.set(newSupplierRef, dataToSave);
-                await batch.commit();
-                toast({ title: "Fornecedor criado com sucesso!" });
-            }
-    
-            setIsSupplierFormOpen(false);
-            setSelectedSupplier(null);
-            supplierForm.reset(emptySupplierFormValues);
-            await fetchSuppliers();
-        } catch (error) {
-            console.error("Erro detalhado ao salvar fornecedor:", error);
-            toast({ 
-                variant: "destructive", 
-                title: "Erro ao salvar fornecedor", 
-                description: `Detalhe: ${error instanceof Error ? error.message : 'Erro desconhecido'}` 
-            });
-        }
-    };
-
-    const onCostEntrySubmit = async (values: CostEntryData) => {
-        if (!values.orderId) {
-            toast({ variant: "destructive", title: "Erro", description: "Selecione uma OS." });
-            return;
-        }
-
-        const orderRef = doc(db, "companies", "mecald", "orders", values.orderId);
-        
-        try {
-            if (isEditingCost && editingCostEntry) {
-                // EDITANDO LANÇAMENTO EXISTENTE
-                const orderSnap = await getDoc(orderRef);
-                if (!orderSnap.exists()) {
-                    throw new Error("Ordem de serviço não encontrada.");
-                }
-                
-                const orderData = orderSnap.data();
-                const costEntries = orderData.costEntries || [];
-                
-                // Encontrar o lançamento antigo
-                const oldEntryIndex = costEntries.findIndex((e: any) => e.id === editingCostEntry.id);
-                if (oldEntryIndex === -1) {
-                    throw new Error("Lançamento não encontrado.");
-                }
-                
-                const oldEntry = costEntries[oldEntryIndex];
-                
-                // Criar o lançamento atualizado, preservando campos importantes
-                const updatedEntry = {
-                    ...oldEntry,
-                    // Para lançamentos automáticos, preservar descrição, quantidade e custo originais
-                    description: oldEntry.isFromRequisition ? oldEntry.description : values.description,
-                    quantity: oldEntry.isFromRequisition ? oldEntry.quantity : values.quantity,
-                    unitCost: oldEntry.isFromRequisition ? oldEntry.unitCost : values.unitCost,
-                    totalCost: oldEntry.isFromRequisition ? oldEntry.totalCost : (values.quantity * values.unitCost),
-                    purchaseOrderNumber: values.purchaseOrderNumber || oldEntry.purchaseOrderNumber,
-                    lastEditDate: Timestamp.now(),
-                    lastEditedBy: user?.email || 'Sistema',
-                };
-                
-                // Remover o antigo e adicionar o novo
-                await updateDoc(orderRef, {
-                    costEntries: arrayRemove(oldEntry)
-                });
-                
-                await updateDoc(orderRef, {
-                    costEntries: arrayUnion(updatedEntry)
-                });
-                
-                toast({ 
-                    title: "Lançamento atualizado!", 
-                    description: `As alterações foram salvas com sucesso.` 
-                });
-            } else {
-                // CRIANDO NOVO LANÇAMENTO
-                const costEntry = {
-                    id: Date.now().toString(),
-                    description: values.description,
-                    quantity: values.quantity,
-                    unitCost: values.unitCost,
-                    totalCost: values.quantity * values.unitCost,
-                    entryDate: Timestamp.now(),
-                    enteredBy: user?.email || 'Sistema',
-                    purchaseOrderNumber: values.purchaseOrderNumber,
-                };
-                
-                await updateDoc(orderRef, {
-                    costEntries: arrayUnion(costEntry)
-                });
-                
-                toast({ 
-                    title: "Custo lançado!", 
-                    description: `O custo foi adicionado à OS selecionada.` 
-                });
-            }
-            
-            // Reset form and states
-            costEntryForm.reset();
-            setOsSearchTerm("");
-            setSelectedInsumo("");
-            setItemSpecification("");
-            setIsEditingCost(false);
-            setEditingCostEntry(null);
-            await fetchOrders();
-            
-        } catch (error: any) {
-            console.error("Error saving cost entry:", error);
-            toast({ 
-                variant: "destructive", 
-                title: "Erro ao salvar", 
-                description: error.message 
-            });
-        }
-    };
-
-    const handleAddSupplierClick = () => {
-        setSelectedSupplier(null);
-        supplierForm.reset(emptySupplierFormValues);
-        setIsSupplierFormOpen(true);
-    };
-
-    const handleEditSupplierClick = (supplier: Supplier) => {
-        const formData = {
-            ...emptySupplierFormValues,
-            ...supplier,
-            address: { ...emptySupplierFormValues.address, ...(supplier.address || {}) },
-            bankInfo: { ...emptySupplierFormValues.bankInfo, ...(supplier.bankInfo || {}) },
-            commercialInfo: { ...emptySupplierFormValues.commercialInfo, ...(supplier.commercialInfo || {}) },
-            documentation: { ...emptySupplierFormValues.documentation, ...(supplier.documentation || {}) },
-        };
-        setSelectedSupplier(formData);
-        supplierForm.reset(formData);
-        setIsSupplierFormOpen(true);
-    };
-
-    const handleDeleteSupplierClick = (supplier: Supplier) => {
-        setSupplierToDelete(supplier);
-        setIsDeleteAlertOpen(true);
-    };
-
-    const handleConfirmDeleteSupplier = async () => {
-        if (!supplierToDelete?.id) return;
-        try {
-            await deleteDoc(doc(db, "companies", "mecald", "suppliers", supplierToDelete.id));
-            toast({ title: "Fornecedor removido com sucesso!" });
-        } catch (error) {
-            console.error("Error deleting supplier:", error);
-            toast({ variant: "destructive", title: "Erro ao remover fornecedor" });
-        } finally {
-            setIsDeleteAlertOpen(false);
-            await fetchSuppliers();
-        }
-    };
-
-    const handleDeleteCostEntryClick = (entry: any) => {
-        setCostEntryToDelete(entry);
-        setIsDeleteCostAlertOpen(true);
-    };
-
-    const handleEditCostEntryClick = (entry: any) => {
-        try {
-            setEditingCostEntry(entry);
-            setIsEditingCost(true);
-            
-            // Preencher o formulário com os dados do lançamento
-            costEntryForm.reset({
-                orderId: entry.orderId || "",
-                description: entry.description || "",
-                quantity: entry.quantity || 0,
-                unitCost: entry.unitCost || 0,
-                purchaseOrderNumber: entry.purchaseOrderNumber || "",
-            });
-            
-            // Ir para a aba de lançamento
-            setActiveTab("costEntry");
-            
-            toast({ 
-                title: "Modo de edição ativado", 
-                description: "Modifique os campos desejados e salve as alterações." 
-            });
-        } catch (error) {
-            console.error("Erro ao ativar modo de edição:", error);
-            toast({ 
-                variant: "destructive",
-                title: "Erro", 
-                description: "Não foi possível ativar o modo de edição. Tente novamente." 
-            });
-        }
-    };
-
-    const handleCancelEdit = () => {
-        setIsEditingCost(false);
-        setEditingCostEntry(null);
-        costEntryForm.reset();
-        setOsSearchTerm("");
-        setSelectedInsumo("");
-        setItemSpecification("");
-    };
-
-    // Função para gerar relatório de recebimento de materiais por OS
-    const generateMaterialsReport = (order: OrderInfo) => {
-        try {
-            // Buscar todas as requisições vinculadas a esta OS
-            const orderRequisitions = requisitions.filter(req => req.orderId === order.id);
-            
-            // Agrupar gastos por fornecedor
-            const supplierCosts: { [key: string]: { 
-                supplierName: string; 
-                totalCost: number; 
-                items: Array<{
-                    description: string;
-                    quantity: number;
-                    unitValue: number;
-                    totalValue: number;
-                    invoiceNumber?: string;
-                    requisitionNumber: string;
-                    weight?: number;
-                    weightUnit?: string;
-                    deliveryDate?: Date | null;
-                    inspectionStatus?: string;
-                }>
-            }} = {};
-
-            // Resumo por requisição
-            const requisitionSummary = orderRequisitions.map(req => {
-                const materialsWithValue = req.items.filter(item => 
-                    item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
-                );
-                const totalReqCost = materialsWithValue.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
-                
-                return {
-                    requisitionNumber: req.requisitionNumber,
-                    date: req.date,
-                    totalItems: req.items.length,
-                    itemsWithValue: materialsWithValue.length,
-                    totalCost: totalReqCost,
-                    progress: req.items.length > 0 ? Math.round((materialsWithValue.length / req.items.length) * 100) : 0
-                };
-            });
-
-            let totalOrderCost = 0;
-            let totalItemsReceived = 0;
-            let totalWeight = 0;
-
-            orderRequisitions.forEach(req => {
-                req.items.forEach(item => {
-                    if (item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName) {
-                        const supplierKey = item.supplierName.toLowerCase();
-                        
-                        if (!supplierCosts[supplierKey]) {
-                            supplierCosts[supplierKey] = {
-                                supplierName: item.supplierName,
-                                totalCost: 0,
-                                items: []
-                            };
-                        }
-
-                        supplierCosts[supplierKey].totalCost += item.invoiceItemValue;
-                        supplierCosts[supplierKey].items.push({
-                            description: item.description,
-                            quantity: item.quantityRequested,
-                            unitValue: item.invoiceItemValue / item.quantityRequested,
-                            totalValue: item.invoiceItemValue,
-                            invoiceNumber: item.invoiceNumber,
-                            requisitionNumber: req.requisitionNumber,
-                            weight: item.weight,
-                            weightUnit: item.weightUnit,
-                            deliveryDate: item.deliveryReceiptDate,
-                            inspectionStatus: item.inspectionStatus
-                        });
-
-                        totalOrderCost += item.invoiceItemValue;
-                        totalItemsReceived += item.quantityRequested;
-                        
-                        // Somar peso total (convertendo para kg)
-                        if (item.weight) {
-                            let weightInKg = item.weight;
-                            if (item.weightUnit === 'g') weightInKg = item.weight / 1000;
-                            else if (item.weightUnit === 't') weightInKg = item.weight * 1000;
-                            totalWeight += weightInKg;
-                        }
-                    }
-                });
-            });
-
-            // Ordenar fornecedores por maior gasto
-            const sortedSuppliers = Object.values(supplierCosts).sort((a, b) => b.totalCost - a.totalCost);
-
-            return {
-                order,
-                suppliers: sortedSuppliers,
-                requisitionSummary,
-                totalOrderCost,
-                totalItemsReceived,
-                totalWeight,
-                totalSuppliers: sortedSuppliers.length,
-                requisitionsCount: orderRequisitions.length,
-                reportDate: new Date()
-            };
-        } catch (error) {
-            console.error("Erro ao gerar relatório:", error);
-            toast({
-                variant: "destructive",
-                title: "Erro ao gerar relatório",
-                description: "Não foi possível processar os dados para o relatório."
-            });
-            return null;
-        }
-    };
-
-    const handleGenerateReport = (order: OrderInfo) => {
-        const reportData = generateMaterialsReport(order);
-        if (reportData && reportData.suppliers.length > 0) {
-            setSelectedOrderForReport(order);
-            setIsReportModalOpen(true);
-        } else {
-            const orderReqs = requisitions.filter(req => req.orderId === order.id);
-            const totalReqItems = orderReqs.reduce((sum, req) => sum + req.items.length, 0);
-            
-            if (totalReqItems > 0) {
-                toast({
-                    title: "📦 Relatório não disponível",
-                    description: `Esta OS possui ${totalReqItems} itens em ${orderReqs.length} requisições, mas nenhum material foi recebido e precificado ainda.`
-                });
-            } else {
-                toast({
-                    title: "📋 Nenhuma requisição",
-                    description: "Esta OS não possui requisições de materiais vinculadas."
-                });
-            }
-        }
-    };
-
-    const handleConfirmDeleteCostEntry = async () => {
-        if (!costEntryToDelete) return;
-        const orderRef = doc(db, "companies", "mecald", "orders", costEntryToDelete.orderId);
-        try {
-            const orderSnap = await getDoc(orderRef);
-            if (!orderSnap.exists()) {
-                throw new Error("Ordem de serviço não encontrada.");
-            }
-            const orderData = orderSnap.data();
-            const costEntries = orderData.costEntries || [];
-            
-            const entryToRemove = costEntries.find((e: any) => e.id === costEntryToDelete.id);
-
-            if (!entryToRemove) {
-                toast({ variant: "destructive", title: "Erro", description: "O lançamento de custo já foi removido ou não foi encontrado." });
-                setIsDeleteCostAlertOpen(false);
-                return;
-            }
-
-            await updateDoc(orderRef, {
-                costEntries: arrayRemove(entryToRemove)
-            });
-            
-            toast({ title: "Custo removido!", description: `O lançamento foi removido da OS.` });
-            
-            setIsDeleteCostAlertOpen(false);
-            setCostEntryToDelete(null);
-            await fetchOrders();
-        } catch (error: any) {
-            console.error("Error deleting cost entry:", error);
-            toast({ variant: "destructive", title: "Erro ao remover custo", description: error.message });
-        }
-    };
-
-    const getStatusVariant = (status?: string) => {
-        if (!status) return "outline";
-        const lowerStatus = status.toLowerCase();
-        if (lowerStatus.includes("aprovado")) return "default";
-        if (lowerStatus.includes("rejeitado")) return "destructive";
-        if (lowerStatus.includes("recebido")) return "secondary";
-        if (lowerStatus.includes("ativo")) return "default";
-        if (lowerStatus.includes("inativo")) return "destructive";
-        return "outline";
-    };
-
-    // Filtrar ordens baseado no termo de busca
-    const filteredOrders = orders.filter(order => 
-        order.internalOS.toLowerCase().includes(osSearchTerm.toLowerCase()) ||
-        order.customerName.toLowerCase().includes(osSearchTerm.toLowerCase())
+    return (
+        <TooltipProvider>
+            <div className="flex items-center justify-center gap-2">
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button className="focus:outline-none"><File className={iconClass(documents.drawings)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Desenhos {documents.drawings ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                        <button className="focus:outline-none"><ClipboardCheck className={iconClass(documents.inspectionTestPlan)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Plano de Inspeção {documents.inspectionTestPlan ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                    <TooltipTrigger asChild>
+                       <button className="focus:outline-none"><Palette className={iconClass(documents.paintPlan)} /></button>
+                    </TooltipTrigger>
+                    <TooltipContent>
+                        <p>Plano de Pintura {documents.paintPlan ? '(OK)' : '(Pendente)'}</p>
+                    </TooltipContent>
+                </Tooltip>
+            </div>
+        </TooltipProvider>
     );
+}
 
-    // Função para selecionar insumo da biblioteca
-    const handleInsumoSelect = (insumo: string) => {
-        setSelectedInsumo(insumo);
-        updateItemDescription(insumo, itemSpecification);
-    };
-
-    // Função para atualizar descrição completa do item
-    const updateItemDescription = (baseItem: string, specification: string) => {
-        const fullDescription = specification ? `${baseItem} - ${specification}` : baseItem;
-        costEntryForm.setValue('description', fullDescription);
-    };
-
-    // Função para atualizar especificação
-    const handleSpecificationChange = (specification: string) => {
-        setItemSpecification(specification);
-        if (selectedInsumo) {
-            updateItemDescription(selectedInsumo, specification);
-        }
-    };
-
-
-
-    // Proteção contra erros de renderização
-    try {
+function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: (order: Order) => void; }) {
+    if (orders.length === 0) {
         return (
-        <>
-          <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-        <div className="flex items-center justify-between space-y-2">
-          <h1 className="text-3xl font-bold tracking-tight font-headline">Centro de Custos</h1>
-        </div>
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-            <TabsList>
-                <TabsTrigger value="receipts">Recebimento de Materiais</TabsTrigger>
-                <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
-                <TabsTrigger value="costEntry">Lançamento de Custos</TabsTrigger>
-            </TabsList>
-            <TabsContent value="receipts">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between">
-                    <div>
-                    <CardTitle>Recebimento de Materiais</CardTitle>
-                    <CardDescription>
-                      Gerencie o recebimento de materiais das requisições, adicione valores das notas fiscais e realize a inspeção de qualidade. 
-                      <strong>Os valores totais de cada requisição serão automaticamente lançados como custos nas OS vinculadas.</strong>
-                    </CardDescription>
-                    </div>
-                    <Button variant="outline" onClick={fetchRequisitions} disabled={isLoadingRequisitions}>
-                      {isLoadingRequisitions ? 'Carregando...' : '🔄 Atualizar'}
-                    </Button>
-                  </CardHeader>
-                  <CardContent>
-                    {isLoadingRequisitions ? (
-                        <Skeleton className="h-64 w-full" />
-                    ) : requisitions.length > 0 ? (
-                        <Accordion type="single" collapsible className="w-full">
-                            {requisitions.map((req) => (
-                                <AccordionItem value={req.id} key={req.id}>
-                                    <AccordionTrigger className="hover:bg-muted/50 px-4">
-                                        {(() => {
-                                            const totalValue = req.items.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
-                                            const itemsWithPrice = req.items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
-                                            const progress = req.items.length > 0 ? Math.round((itemsWithPrice / req.items.length) * 100) : 0;
-                                            
-                                            return (
-                                                <div className="flex-1 text-left">
-                                                    <div className="flex items-center gap-4">
-                                                        <span className="font-bold text-primary">Requisição Nº {req.requisitionNumber}</span>
-                                                        <span className="text-muted-foreground text-sm">Data: {safeFormatDate(req.date, 'dd/MM/yyyy')}</span>
-                                                        {totalValue > 0 && (
-                                                            <Badge variant="default" className="bg-green-600 text-white">
-                                                                💰 {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                            </Badge>
-                                                        )}
-                                                    </div>
-                                                    <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
-                                                        <span>
-                                                            {req.orderId ? 
-                                                                (() => {
-                                                                    const order = orders.find(o => o.id === req.orderId);
-                                                                    return order ? `OS: ${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
-                                                                })() : 'Sem OS vinculada'
-                                                            }
-                                                        </span>
-                                                        <span>•</span>
-                                                        <span>{req.items.length} itens</span>
-                                                        <span>•</span>
-                                                        <span className={`font-medium ${progress === 100 ? 'text-green-600' : progress > 0 ? 'text-blue-600' : 'text-orange-600'}`}>
-                                                            {progress === 100 ? '✅ Completo' : progress > 0 ? `📊 ${progress}% precificado` : '⏳ Aguardando preços'}
-                                                        </span>
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-                                    </AccordionTrigger>
-                                    <AccordionContent className="p-2">
-                                        {(() => {
-                                            // Calcular valores da requisição
-                                            const totalValue = req.items.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
-                                            const itemsWithPrice = req.items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
-                                            const totalItems = req.items.length;
-                                            const progress = totalItems > 0 ? Math.round((itemsWithPrice / totalItems) * 100) : 0;
-                                            
-                                            return (
-                                                <div className="mb-6">
-                                                    {/* Resumo da OS */}
-                                                    <div className="mb-4 p-4 bg-muted/30 rounded-lg">
-                                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                                                            <div>
-                                                                <span className="font-semibold text-muted-foreground">OS Vinculada:</span>
-                                                                <p className="font-medium">
-                                                                    {req.orderId ? 
-                                                                        (() => {
-                                                                            const order = orders.find(o => o.id === req.orderId);
-                                                                            return order ? `${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
-                                                                        })() : 'Nenhuma OS vinculada'
-                                                                    }
-                                                                </p>
-                                                            </div>
-                                                            <div>
-                                                                <span className="font-semibold text-muted-foreground">Total de Itens:</span>
-                                                                <p className="font-medium">{req.items.length}</p>
-                                                            </div>
-                                                            <div>
-                                                                <span className="font-semibold text-muted-foreground">Status Geral:</span>
-                                                                <p><Badge variant={getStatusVariant(req.status)}>{req.status}</Badge></p>
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                    
-                                                    {/* Resumo Financeiro da Requisição */}
-                                                    <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                                        <div className="flex items-center justify-between mb-3">
-                                                            <h4 className="font-semibold text-blue-900 flex items-center gap-2">
-                                                                💰 Resumo Financeiro da Requisição
-                                                            </h4>
-                                                            <Badge variant={progress === 100 ? "default" : progress > 0 ? "secondary" : "outline"} className="text-xs">
-                                                                {progress === 100 ? "✅ Completo" : progress > 0 ? `${progress}% Precificado` : "⏳ Aguardando"}
-                                                            </Badge>
-                                                        </div>
-                                                        
-                                                        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                                                            <div className="bg-white p-3 rounded border">
-                                                                <span className="text-xs text-muted-foreground block">Valor Total</span>
-                                                                <span className={`text-lg font-bold ${totalValue > 0 ? 'text-green-600' : 'text-gray-400'}`}>
-                                                                    {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                                </span>
-                                                            </div>
-                                                            
-                                                            <div className="bg-white p-3 rounded border">
-                                                                <span className="text-xs text-muted-foreground block">Itens Precificados</span>
-                                                                <span className="text-lg font-bold text-blue-600">
-                                                                    {itemsWithPrice} / {totalItems}
-                                                                </span>
-                                                            </div>
-                                                            
-                                                            <div className="bg-white p-3 rounded border">
-                                                                <span className="text-xs text-muted-foreground block">Progresso</span>
-                                                                <div className="flex items-center gap-2">
-                                                                    <div className="flex-1 bg-gray-200 rounded-full h-2">
-                                                                        <div 
-                                                                            className={`h-2 rounded-full transition-all ${progress === 100 ? 'bg-green-500' : progress > 0 ? 'bg-blue-500' : 'bg-gray-300'}`}
-                                                                            style={{ width: `${progress}%` }}
-                                                                        ></div>
-                                                                    </div>
-                                                                    <span className="text-sm font-medium">{progress}%</span>
-                                                                </div>
-                                                            </div>
-                                                            
-                                                            <div className="bg-white p-3 rounded border">
-                                                                <span className="text-xs text-muted-foreground block">Valor Médio/Item</span>
-                                                                <span className="text-lg font-bold text-purple-600">
-                                                                    {itemsWithPrice > 0 ? (totalValue / itemsWithPrice).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00'}
-                                                                </span>
-                                                            </div>
-                                                        </div>
-                                                        
-                                                        {req.orderId && totalValue > 0 && (
-                                                            <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
-                                                                ✅ <strong>Este valor será automaticamente lançado como custo na OS {
-                                                                    (() => {
-                                                                        const order = orders.find(o => o.id === req.orderId);
-                                                                        return order ? order.internalOS : req.orderId;
-                                                                    })()
-                                                                }</strong>
-                                                            </div>
-                                                        )}
-                                                        
-                                                        {req.orderId && totalValue === 0 && (
-                                                            <div className="mt-3 p-2 bg-orange-100 border border-orange-300 rounded text-sm text-orange-800">
-                                                                ⏳ Adicione os valores dos itens para que sejam lançados automaticamente na OS {
-                                                                    (() => {
-                                                                        const order = orders.find(o => o.id === req.orderId);
-                                                                        return order ? order.internalOS : req.orderId;
-                                                                    })()
-                                                                }
-                                                            </div>
-                                                        )}
-                                                        
-                                                        {req.orderId && !orders.find(o => o.id === req.orderId) && (
-                                                            <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
-                                                                ⚠️ <strong>Problema de vinculação:</strong> A OS vinculada (ID: {req.orderId}) não foi encontrada. 
-                                                                Verifique se a OS ainda existe ou se houve erro na vinculação.
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            );
-                                        })()}
-                                        <Table>
-                                            <TableHeader>
-                                                <TableRow>
-                                                    <TableHead>Item</TableHead>
-                                                    <TableHead>Qtd</TableHead>
-                                                    <TableHead>Peso</TableHead>
-                                                    <TableHead>Valor (R$)</TableHead>
-                                                    <TableHead>Fornecedor</TableHead>
-                                                    <TableHead>NF</TableHead>
-                                                    <TableHead>Status</TableHead>
-                                                    <TableHead className="text-right">Ações</TableHead>
-                                                </TableRow>
-                                            </TableHeader>
-                                            <TableBody>
-                                                {req.items.map(item => (
-                                                    <TableRow key={item.id} className={item.invoiceItemValue && item.invoiceItemValue > 0 ? 'bg-green-50 border-l-4 border-green-400' : ''}>
-                                                        <TableCell className="font-medium">
-                                                            <div>
-                                                                <span>{item.description}</span>
-                                                                {item.invoiceItemValue && item.invoiceItemValue > 0 && (
-                                                                    <div className="text-xs text-green-600 mt-1">✓ Precificado</div>
-                                                                )}
-                                                            </div>
-                                                        </TableCell>
-                                                        <TableCell className="text-center">
-                                                            <Badge variant="outline" className="text-xs">
-                                                                {item.quantityRequested}
-                                                            </Badge>
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            {item.weight ? (
-                                                                <span className="font-medium text-green-600">
-                                                                    {item.weight} {item.weightUnit || 'kg'}
-                                                                </span>
-                                                            ) : (
-                                                                <span className="text-orange-500 text-sm">
-                                                                    ⚠️ Não informado
-                                                                </span>
-                                                            )}
-                                                        </TableCell>
-                                                        <TableCell>
-                                                            {item.invoiceItemValue && item.invoiceItemValue > 0 ? (
-                                                                <div className="text-green-600 font-bold">
-                                                                    {item.invoiceItemValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                                    {item.weight && (
-                                                                        <div className="text-xs text-gray-500 font-normal">
-                                                                            {(item.invoiceItemValue / item.weight).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}{'/' + (item.weightUnit || 'kg')}
-                                                                        </div>
-                                                                    )}
-                                                                </div>
-                                                            ) : (
-                                                                <span className="text-gray-400 text-sm">
-                                                                    Não informado
-                                                                </span>
-                                                            )}
-                                                        </TableCell>
-                                                        <TableCell className="text-sm">{item.supplierName || '-'}</TableCell>
-                                                        <TableCell className="text-sm">{item.invoiceNumber || '-'}</TableCell>
-                                                        <TableCell>
-                                                            <div className="space-y-1">
-                                                                <Badge variant={getStatusVariant(item.status)} className="text-xs block text-center">
-                                                                    {item.status}
-                                                                </Badge>
-                                                                <Badge variant={getStatusVariant(item.inspectionStatus)} className="text-xs block text-center">
-                                                                    {item.inspectionStatus}
-                                                                </Badge>
-                                                            </div>
-                                                        </TableCell>
-                                                        <TableCell className="text-right">
-                                                            <Button variant="outline" size="sm" onClick={() => handleOpenForm(item, req.id)}>
-                                                                <FilePen className="mr-2 h-4 w-4" />
-                                                                {item.invoiceItemValue && item.invoiceItemValue > 0 ? 'Editar' : 'Precificar'}
-                                                            </Button>
-                                                        </TableCell>
-                                                    </TableRow>
-                                                ))}
-                                            </TableBody>
-                                        </Table>
-                                    </AccordionContent>
-                                </AccordionItem>
-                            ))}
-                        </Accordion>
-                    ) : (
-                        <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64 border-dashed border-2 rounded-lg">
-                            <PackageSearch className="h-12 w-12 mb-4" />
-                            <h3 className="text-lg font-semibold">Nenhuma Requisição Encontrada</h3>
-                            <p className="text-sm">Quando novas requisições de material forem criadas, elas aparecerão aqui.</p>
-                        </div>
-                    )}
-                  </CardContent>
-                </Card>
-            </TabsContent>
-            <TabsContent value="suppliers">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                        <div>
-                            <CardTitle>Fornecedores</CardTitle>
-                            <CardDescription>Cadastre e gerencie os fornecedores da sua empresa.</CardDescription>
-                        </div>
-                        <Button onClick={handleAddSupplierClick}>
-                            <PlusCircle className="mr-2 h-4 w-4" />
-                            Adicionar Fornecedor
-                        </Button>
-                    </CardHeader>
-                    <CardContent>
-                        {isLoadingSuppliers ? (
-                            <Skeleton className="h-64 w-full" />
-                        ) : (
-                             <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>Código</TableHead>
-                                        <TableHead>Nome Fantasia</TableHead>
-                                        <TableHead>CNPJ</TableHead>
-                                        <TableHead>Segmento</TableHead>
-                                        <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">Ações</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {suppliers.length > 0 ? (
-                                        suppliers.map((supplier) => (
-                                            <TableRow key={supplier.id}>
-                                                <TableCell className="font-mono">{supplier.supplierCode || 'N/A'}</TableCell>
-                                                <TableCell className="font-medium">{supplier.nomeFantasia || supplier.razaoSocial}</TableCell>
-                                                <TableCell>{supplier.cnpj}</TableCell>
-                                                <TableCell>{supplier.segment || '-'}</TableCell>
-                                                <TableCell><Badge variant={getStatusVariant(supplier.status)}>{supplier.status}</Badge></TableCell>
-                                                <TableCell className="text-right">
-                                                    <div className="flex items-center justify-end gap-2">
-                                                        <Button variant="ghost" size="icon" onClick={() => handleEditSupplierClick(supplier)}>
-                                                            <Pencil className="h-4 w-4" />
-                                                        </Button>
-                                                        <Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" onClick={() => handleDeleteSupplierClick(supplier)}>
-                                                            <Trash2 className="h-4 w-4" />
-                                                        </Button>
-                                                    </div>
-                                                </TableCell>
-                                            </TableRow>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={6} className="h-24 text-center">Nenhum fornecedor cadastrado.</TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        )}
-                    </CardContent>
-                </Card>
-            </TabsContent>
-            <TabsContent value="costEntry" className="space-y-4">
-                <Card>
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <div>
-                                <CardTitle>
-                                    {isEditingCost ? "Editar Lançamento de Custo" : "Lançamento de Custo na OS"}
-                                </CardTitle>
-                                <CardDescription>
-                                    {isEditingCost 
-                                        ? `Editando: ${editingCostEntry?.description || 'Lançamento selecionado'}`
-                                        : "Registre custos de itens de almoxarifado, consumíveis ou outros serviços diretamente em uma Ordem de Serviço."
-                                    }
-                                </CardDescription>
-                            </div>
-                            {isEditingCost && (
-                                <Button variant="outline" onClick={handleCancelEdit}>
-                                    Cancelar Edição
-                                </Button>
-                            )}
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        {isEditingCost && (
-                            <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                <div className="flex items-center gap-2 text-blue-800">
-                                    <Pencil className="h-4 w-4" />
-                                    <span className="font-semibold">Modo de Edição Ativo</span>
-                                </div>
-                                <p className="text-sm text-blue-600 mt-1">
-                                    Você está editando o lançamento: <strong>{editingCostEntry?.description}</strong>
-                                </p>
-                                <p className="text-xs text-blue-500 mt-2">
-                                    💡 Dica: Para lançamentos automáticos de materiais, você pode editar campos como o número do pedido de compra, mas valores serão recalculados automaticamente com base no recebimento.
-                                </p>
-                            </div>
-                        )}
-                        <Form {...costEntryForm}>
-                            <form onSubmit={costEntryForm.handleSubmit(onCostEntrySubmit)} className="space-y-6">
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                    <FormField control={costEntryForm.control} name="orderId" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Ordem de Serviço (OS)</FormLabel>
-                                            <div className="space-y-2">
-                                                <Input
-                                                    placeholder="🔍 Buscar OS por número ou cliente..."
-                                                    value={osSearchTerm}
-                                                    onChange={(e) => setOsSearchTerm(e.target.value)}
-                                                    className="mb-2"
-                                                    disabled={isEditingCost}
-                                                />
-                                                <Select onValueChange={field.onChange} defaultValue={field.value} disabled={isEditingCost}>
-                                                    <FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS" /></SelectTrigger></FormControl>
-                                                    <SelectContent>
-                                                        {isLoadingOrders ? <SelectItem value="loading" disabled>Carregando...</SelectItem> : 
-                                                        filteredOrders.length > 0 ? (
-                                                            filteredOrders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS} - {o.customerName}</SelectItem>)
-                                                        ) : (
-                                                            <SelectItem value="no-results" disabled>Nenhuma OS encontrada</SelectItem>
-                                                        )}
-                                                    </SelectContent>
-                                                </Select>
-                                                {isEditingCost && (
-                                                    <p className="text-xs text-muted-foreground">
-                                                        A OS não pode ser alterada durante a edição
-                                                    </p>
-                                                )}
-                                            </div>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )} />
-                                    <FormField control={costEntryForm.control} name="description" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Descrição do Item/Serviço</FormLabel>
-                                            <div className="space-y-3">
-                                                <FormControl>
-                                                    <Input 
-                                                        placeholder="Digite livremente ou selecione da biblioteca abaixo" 
-                                                        {...field} 
-                                                        value={field.value ?? ''} 
-                                                        disabled={isEditingCost && editingCostEntry?.isFromRequisition}
-                                                    />
-                                                </FormControl>
-                                                {isEditingCost && editingCostEntry?.isFromRequisition && (
-                                                    <p className="text-xs text-orange-600">
-                                                        ⚠️ Descrição baseada na requisição (não editável)
-                                                    </p>
-                                                )}
-                                                
-                                                {!(isEditingCost && editingCostEntry?.isFromRequisition) && (
-                                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                                                        <div>
-                                                            <label className="text-sm font-medium">📚 Biblioteca de Insumos</label>
-                                                            <Select onValueChange={handleInsumoSelect}>
-                                                                <SelectTrigger className="mt-1">
-                                                                    <SelectValue placeholder="Selecione da biblioteca" />
-                                                                </SelectTrigger>
-                                                                <SelectContent className="max-h-60">
-                                                                    {Object.entries(insumosBiblioteca).map(([categoria, itens]) => (
-                                                                        <div key={categoria}>
-                                                                            <div className="sticky top-0 bg-background p-2 border-b">
-                                                                                <div className="text-xs font-medium text-muted-foreground">
-                                                                                    {categoria === 'MATERIAS_PRIMAS' && '🧱 MATÉRIAS PRIMAS'}
-                                                                                    {categoria === 'FERRAMENTAS_CORTE' && '⚙️ FERRAMENTAS DE CORTE'}
-                                                                                    {categoria === 'CONSUMIVEIS_USINAGEM' && '🔧 CONSUMÍVEIS USINAGEM'}
-                                                                                    {categoria === 'FIXACAO' && '🔩 FIXAÇÃO'}
-                                                                                    {categoria === 'SOLDAGEM' && '🔥 SOLDAGEM'}
-                                                                                    {categoria === 'ACABAMENTO_PINTURA' && '🎨 ACABAMENTO E PINTURA'}
-                                                                                    {categoria === 'LUBRIFICACAO' && '🛢️ LUBRIFICAÇÃO'}
-                                                                                    {categoria === 'DISPOSITIVOS_FIXACAO' && '🗜️ DISPOSITIVOS DE FIXAÇÃO'}
-                                                                                    {categoria === 'ELEMENTOS_MAQUINAS' && '⚙️ ELEMENTOS DE MÁQUINAS'}
-                                                                                    {categoria === 'INSTRUMENTOS_MEDICAO' && '📏 INSTRUMENTOS DE MEDIÇÃO'}
-                                                                                </div>
-                                                                            </div>
-                                                                            {itens.map((insumo: string) => (
-                                                                                <SelectItem key={insumo} value={insumo}>{insumo}</SelectItem>
-                                                                            ))}
-                                                                        </div>
-                                                                    ))}
-                                                                </SelectContent>
-                                                            </Select>
-                                                        </div>
-                                                        
-                                                        <div>
-                                                            <label className="text-sm font-medium">🔧 Especificação</label>
-                                                            <Input
-                                                                placeholder="Ex: diâmetro 20mm, espessura 3mm"
-                                                                value={itemSpecification}
-                                                                onChange={(e) => handleSpecificationChange(e.target.value)}
-                                                                className="mt-1"
-                                                            />
-                                                            <div className="text-xs text-muted-foreground mt-1">
-                                                                Adicione detalhes técnicos do item
-                                                            </div>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                                
-                                                {selectedInsumo && (
-                                                    <div className="p-3 bg-muted/30 rounded-lg border-l-4 border-primary">
-                                                        <div className="text-sm">
-                                                            <span className="font-medium text-muted-foreground">Item selecionado:</span>
-                                                            <p className="font-medium mt-1">{selectedInsumo}</p>
-                                                            {itemSpecification && (
-                                                                <p className="text-muted-foreground text-xs mt-1">
-                                                                    Especificação: {itemSpecification}
-                                                                </p>
-                                                            )}
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )} />
-                                </div>
-                                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                                    <FormField control={costEntryForm.control} name="quantity" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Quantidade</FormLabel>
-                                            <FormControl>
-                                                <Input 
-                                                    type="number" 
-                                                    step="0.01" 
-                                                    placeholder="1" 
-                                                    {...field} 
-                                                    value={field.value ?? ''} 
-                                                    disabled={isEditingCost && editingCostEntry?.isFromRequisition}
-                                                />
-                                            </FormControl>
-                                            {isEditingCost && editingCostEntry?.isFromRequisition && (
-                                                <p className="text-xs text-orange-600">
-                                                    ⚠️ Quantidade baseada na requisição (não editável)
-                                                </p>
-                                            )}
-                                            <FormMessage />
-                                        </FormItem>
-                                    )} />
-                                    <FormField control={costEntryForm.control} name="unitCost" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Custo Unitário (R$)</FormLabel>
-                                            <FormControl>
-                                                <Input 
-                                                    type="number" 
-                                                    step="0.01" 
-                                                    placeholder="0.00" 
-                                                    {...field} 
-                                                    value={field.value ?? ''} 
-                                                    disabled={isEditingCost && editingCostEntry?.isFromRequisition}
-                                                />
-                                            </FormControl>
-                                            {isEditingCost && editingCostEntry?.isFromRequisition && (
-                                                <p className="text-xs text-orange-600">
-                                                    ⚠️ Custo calculado automaticamente (não editável)
-                                                </p>
-                                            )}
-                                            <FormMessage />
-                                        </FormItem>
-                                    )} />
-                                    <FormField control={costEntryForm.control} name="purchaseOrderNumber" render={({ field }) => (
-                                        <FormItem>
-                                            <FormLabel>Nº Pedido de Compra MECALD</FormLabel>
-                                            <FormControl><Input placeholder="Ex: PC-2024-001" {...field} value={field.value ?? ''} /></FormControl>
-                                            <FormDescription>Número do pedido interno da MECALD (opcional)</FormDescription>
-                                            <FormMessage />
-                                        </FormItem>
-                                    )} />
-                                </div>
-                                <div className="flex justify-end gap-3">
-                                    {isEditingCost && (
-                                        <Button type="button" variant="outline" onClick={handleCancelEdit}>
-                                            Cancelar
-                                        </Button>
-                                    )}
-                                    <Button type="submit" disabled={costEntryForm.formState.isSubmitting}>
-                                        {costEntryForm.formState.isSubmitting 
-                                            ? (isEditingCost ? 'Salvando...' : 'Lançando...') 
-                                            : (isEditingCost ? 'Salvar Alterações' : 'Lançar Custo')
-                                        }
-                                    </Button>
-                                </div>
-                            </form>
-                        </Form>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between">
-                        <div>
-                        <CardTitle>Custos Organizados por OS</CardTitle>
-                        <CardDescription>
-                            Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço. 
-                            <strong>Os custos de materiais são automaticamente calculados a partir dos valores das requisições no painel de recebimento.</strong>
-                        </CardDescription>
-                        </div>
-                                                <div className="flex items-center gap-3">
-                            <div className="text-xs text-muted-foreground flex items-center gap-2">
-                                <div className={`w-2 h-2 rounded-full ${isLoadingOrders ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
-                                <span>
-                                     {isLoadingOrders ? 'Carregando dados...' : (lastUpdateTime ? `Atualizado às ${lastUpdateTime.toLocaleTimeString('pt-BR')}` : 'Sem dados')}
-                                 </span>
-                            </div>
-                            <Button variant="outline" onClick={forceRefreshCosts} disabled={isLoadingOrders}>
-                                {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar'}
-                            </Button>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        {isLoadingOrders ? <Skeleton className="h-48 w-full" /> : 
-                        (() => {
-                            const ordersWithCosts = (osSearchTerm ? filteredOrders : orders)
-                                .filter(order => order.costEntries && order.costEntries.length > 0);
-                            return ordersWithCosts.length > 0 ? (
-                                <div className="space-y-4">
-                                    {osSearchTerm && (
-                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                            <span>🔍 Buscando por: "{osSearchTerm}"</span>
-                                            <Button 
-                                                variant="ghost" 
-                                                size="sm" 
-                                                onClick={() => setOsSearchTerm("")}
-                                                className="h-auto p-1 text-xs"
-                                            >
-                                                Limpar busca
-                                            </Button>
+             <Table>
+                <TableBody>
+                    <TableRow>
+                        <TableCell colSpan={11} className="h-24 text-center">Nenhum pedido encontrado com os filtros atuais.</TableCell>
+                    </TableRow>
+                </TableBody>
+            </Table>
+        );
+    }
+    
+    return (
+        <Table>
+            <TableHeader>
+                <TableRow>
+                    <TableHead className="w-[100px]">Nº Pedido</TableHead>
+                    <TableHead className="w-[120px]">OS Interna</TableHead>
+                    <TableHead>Projeto Cliente</TableHead>
+                    <TableHead>Cliente</TableHead>
+                    <TableHead className="w-[100px] text-center">Docs</TableHead>
+                    <TableHead className="w-[120px]">Data Entrega</TableHead>
+                    <TableHead className="w-[120px]">Data Conclusão</TableHead>
+                    <TableHead className="w-[120px]">Data Book</TableHead>
+                    <TableHead className="w-[120px] text-right">Peso Total</TableHead>
+                    <TableHead className="w-[150px]">Progresso</TableHead>
+                    <TableHead className="w-[180px]">Status</TableHead>
+                </TableRow>
+            </TableHeader>
+            <TableBody>
+                {orders.map((order) => {
+                    const statusProps = getStatusProps(order.status);
+                    const orderProgress = calculateOrderProgress(order);
+                    return (
+                        <TableRow key={order.id} onClick={() => onOrderClick(order)} className="cursor-pointer">
+                            <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
+                            <TableCell className="font-medium">{order.internalOS || 'N/A'}</TableCell>
+                            <TableCell>{order.projectName || 'N/A'}</TableCell>
+                            <TableCell>{order.customer?.name || 'Cliente não informado'}</TableCell>
+                            <TableCell>
+                                <DocumentStatusIcons documents={order.documents} />
+                            </TableCell>
+                            <TableCell>{order.deliveryDate ? format(order.deliveryDate, "dd/MM/yyyy") : 'A definir'}</TableCell>
+                            <TableCell>
+                                {order.completedAt ? format(order.completedAt, "dd/MM/yyyy") : '-'}
+                            </TableCell>
+                            <TableCell>
+                                {order.status === 'Concluído' ? (
+                                    order.dataBookSent ? (
+                                        <div className="flex items-center gap-1">
+                                            <CheckCircle className="h-4 w-4 text-green-600" />
+                                            <span className="text-sm text-green-700 font-medium">
+                                                Enviado
+                                            </span>
                                         </div>
-                                    )}
-                                    
-                                    {/* Aviso se há requisições com valores que ainda não apareceram nos custos */}
+                                    ) : (
+                                        <div className="flex items-center gap-1">
+                                            <Clock className="h-4 w-4 text-orange-500" />
+                                            <span className="text-sm text-orange-600 font-medium">Pendente</span>
+                                        </div>
+                                    )
+                                ) : (
+                                    <span className="text-sm text-muted-foreground">-</span>
+                                )}
+                            </TableCell>
+                            <TableCell className="text-right font-medium">
+                                {(order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                            </TableCell>
+                            <TableCell>
+                                <div className="flex items-center gap-2">
+                                    <Progress value={orderProgress} className="h-2" />
+                                    <span className="text-xs font-medium text-muted-foreground">{Math.round(orderProgress)}%</span>
                                     {(() => {
-                                        const reqsWithValues = requisitions.filter(req => req.orderId && req.totalValue && req.totalValue > 0);
-                                        const osWithoutCosts = reqsWithValues.filter(req => {
-                                            const order = orders.find(o => o.id === req.orderId);
-                                            const hasReqCost = order?.costEntries?.find((entry: any) => 
-                                                entry.requisitionId === req.id && entry.totalCost > 0
-                                            );
-                                            return !hasReqCost;
+                                        // Verifica se há itens concluídos com atraso no embarque
+                                        const hasDelayedShipping = order.items.some(item => {
+                                            const itemProgress = calculateItemProgress(item);
+                                            return itemProgress === 100 && 
+                                                   item.shippingDate && 
+                                                   order.deliveryDate && 
+                                                   item.shippingDate > order.deliveryDate;
                                         });
                                         
-                                        if (osWithoutCosts.length > 0) {
+                                        if (hasDelayedShipping) {
                                             return (
-                                                <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm">
-                                                    ⚠️ <span className="font-medium">{osWithoutCosts.length} requisições</span> com valores não apareceram nos custos. 
-                                                    <span className="text-orange-700"> A sincronização será automática em alguns instantes.</span>
-                                                </div>
+                                                <TooltipProvider>
+                                                    <Tooltip>
+                                                        <TooltipTrigger asChild>
+                                                            <div className="flex items-center">
+                                                                <AlertTriangle className="h-3 w-3 text-red-500" />
+                                                            </div>
+                                                        </TooltipTrigger>
+                                                        <TooltipContent>
+                                                            <p>Há itens com atraso no embarque</p>
+                                                        </TooltipContent>
+                                                    </Tooltip>
+                                                </TooltipProvider>
                                             );
                                         }
                                         return null;
                                     })()}
-                                    <Accordion type="single" collapsible className="w-full">
-                                        {ordersWithCosts
-                                    .map(order => {
-                                        const totalCost = order.costEntries?.reduce((sum, entry) => sum + (entry.totalCost || 0), 0) || 0;
-                                        const entriesCount = order.costEntries?.length || 0;
-                                        
-                                        return (
-                                            <AccordionItem value={order.id} key={order.id}>
-                                                <AccordionTrigger className="hover:bg-muted/50 px-4">
-                                                    <div className="flex-1 text-left">
-                                                        <div className="flex items-center gap-4">
-                                                            <span className="font-bold text-primary">OS: {order.internalOS}</span>
-                                                            <span className="text-muted-foreground">{order.customerName}</span>
-                                                            <Button
-                                                                variant="outline"
-                                                                size="sm"
-                                                                onClick={(e) => {
-                                                                    e.stopPropagation();
-                                                                    handleGenerateReport(order);
-                                                                }}
-                                                                className="ml-auto text-xs h-7 px-2"
-                                                                title={(() => {
-                                                                    const orderReqs = requisitions.filter(req => req.orderId === order.id);
-                                                                    const hasValues = orderReqs.some(req => 
-                                                                        req.items.some(item => 
-                                                                            item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
-                                                                        )
-                                                                    );
-                                                                    const totalItems = orderReqs.reduce((sum, req) => sum + req.items.length, 0);
-                                                                    
-                                                                    if (!hasValues && totalItems > 0) {
-                                                                        return `Esta OS possui ${totalItems} itens em requisições, mas ainda não foram precificados`;
-                                                                    } else if (!hasValues) {
-                                                                        return "Esta OS não possui requisições de materiais";
-                                                                    }
-                                                                    return "Gerar relatório de recebimento de materiais por fornecedor";
-                                                                })()}
-                                                                disabled={(() => {
-                                                                    const orderReqs = requisitions.filter(req => req.orderId === order.id);
-                                                                    const hasValues = orderReqs.some(req => 
-                                                                        req.items.some(item => 
-                                                                            item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
-                                                                        )
-                                                                    );
-                                                                    return !hasValues;
-                                                                })()}
-                                                            >
-                                                                📊 Relatório
-                                                            </Button>
-                                                        </div>
-                                                        <div className="flex items-center gap-6 mt-1 text-sm text-muted-foreground">
-                                                            <span>{entriesCount} lançamento{entriesCount !== 1 ? 's' : ''}</span>
-                                                            <span className="font-semibold text-green-600">
-                                                                Total: {totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                            </span>
-                                                            {(() => {
-                                                                const orderReqs = requisitions.filter(req => req.orderId === order.id);
-                                                                const materialsCount = orderReqs.reduce((sum, req) => 
-                                                                    sum + req.items.filter(item => 
-                                                                        item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
-                                                                    ).length, 0
-                                                                );
-                                                                if (materialsCount > 0) {
-                                                                    return (
-                                                                        <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
-                                                                            📦 {materialsCount} materiais recebidos
-                                                                        </Badge>
-                                                                    );
-                                                                }
-                                                                return null;
-                                                            })()}
-                                                        </div>
-                                                    </div>
-                                                </AccordionTrigger>
-                                                <AccordionContent className="p-2">
-                                                    <Table>
-                                                        <TableHeader>
-                                                            <TableRow>
-                                                                <TableHead>Data</TableHead>
-                                                                <TableHead>Descrição</TableHead>
-                                                                <TableHead className="text-right">Qtd</TableHead>
-                                                                <TableHead className="text-right">Valor Unit.</TableHead>
-                                                                <TableHead className="text-right">Total</TableHead>
-                                                                <TableHead>Lançado por / PC</TableHead>
-                                                                <TableHead className="text-right">Ações</TableHead>
-                                                            </TableRow>
-                                                        </TableHeader>
-                                                        <TableBody>
-                                                            {order.costEntries
-                                                                ?.sort((a, b) => (b.entryDate?.getTime() || 0) - (a.entryDate?.getTime() || 0))
-                                                                .map(entry => (
-                                                                <TableRow key={entry.id}>
-                                                                    <TableCell className="text-sm">
-                                                                        {safeFormatDate(entry.entryDate, 'dd/MM/yyyy HH:mm', 'N/A')}
-                                                                    </TableCell>
-                                                                    <TableCell className="font-medium">
-                                                                        <div>
-                                                                            {entry.description}
-                                                                                                                                                                                                                                 {entry.isFromRequisition && (
-                                                                             <div className="flex items-center gap-1 mt-1 flex-wrap">
-                                                                                 <Badge variant="secondary" className="text-xs">
-                                                                                     📋 Materiais (Auto)
-                                                                                 </Badge>
-                                                                                 {entry.sourceType === 'requisition_total' && (
-                                                                                     <Badge variant="outline" className="text-xs text-blue-600">
-                                                                                         💰 Valor do Recebimento
-                                                                                     </Badge>
-                                                                                 )}
-                                                                                 {entry.isPending && (
-                                                                                     <Badge variant="outline" className="text-xs text-orange-600">
-                                                                                         ⏳ Aguardando preços
-                                                                                     </Badge>
-                                                                                 )}
-                                                                                 {!entry.isPending && entry.completionPercentage && entry.completionPercentage < 100 && (
-                                                                                     <Badge variant="outline" className="text-xs text-blue-600">
-                                                                                         🔄 {entry.completionPercentage}% precificado
-                                                                                     </Badge>
-                                                                                 )}
-                                                                                 {entry.completionPercentage === 100 && (
-                                                                                     <Badge variant="default" className="text-xs text-green-600">
-                                                                                         ✅ Completo
-                                                                                     </Badge>
-                                                                                 )}
-                                                                                 {entry.lastPriceUpdate && (
-                                                                                     <Badge variant="outline" className="text-xs text-gray-500">
-                                                                                         🕒 {safeFormatDate(entry.lastPriceUpdate, 'dd/MM HH:mm')}
-                                                                                     </Badge>
-                                                                                 )}
-                                                                             </div>
-                                                                         )}
-                                                                            {entry.items && entry.items.length > 0 && (
-                                                                                <details className="mt-2">
-                                                                                    <summary className="text-xs text-muted-foreground cursor-pointer hover:text-primary">
-                                                                                        Ver {entry.items.length} item(ns) ↓
-                                                                                    </summary>
-                                                                                    <div className="mt-1 pl-2 border-l-2 border-muted">
-                                                                                                                                                                                 {entry.items.map((item: any, idx: number) => (
-                                                                                             <div key={idx} className={`text-xs py-1 px-2 rounded border-l-2 ${item.hasPricing ? 'border-green-400 bg-green-50' : 'border-orange-400 bg-orange-50'}`}>
-                                                                                                 <div className="flex items-center gap-2">
-                                                                                                     <span className={`w-2 h-2 rounded-full ${item.hasPricing ? 'bg-green-500' : 'bg-orange-500'}`}></span>
-                                                                                                     <span className="font-medium text-gray-800">{item.description}</span>
-                                                                                                     {item.hasPricing && <span className="text-green-600 text-xs">✓</span>}
-                                                                                                 </div>
-                                                                                                 <div className="text-xs ml-4 mt-1">
-                                                                                                     <span className="text-gray-600">Qtd: {item.quantity}</span>
-                                                                                                     {item.weight && <span className="text-gray-600"> • Peso: {item.weight}{item.weightUnit}</span>}
-                                                                                                     <br />
-                                                                                                     <span className={`font-medium ${item.hasPricing ? 'text-green-700' : 'text-orange-600'}`}>
-                                                                                                         Valor: {item.value?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'Não informado'}
-                                                                                                     </span>
-                                                                                                 </div>
-                                                                                             </div>
-                                                                                         ))}
-                                                                                    </div>
-                                                                                </details>
-                                                                            )}
-                                                                        </div>
-                                                                    </TableCell>
-                                                                    <TableCell className="text-right">{entry.quantity}</TableCell>
-                                                                    <TableCell className="text-right">
-                                                                        {entry.unitCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                                    </TableCell>
-                                                                    <TableCell className="text-right font-medium text-green-600">
-                                                                        {entry.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                                    </TableCell>
-                                                                    <TableCell className="text-sm text-muted-foreground">
-                                                                        <div>
-                                                                            <div>{entry.enteredBy}</div>
-                                                                            {entry.purchaseOrderNumber && (
-                                                                                <div className="text-xs text-blue-600 font-medium mt-1">
-                                                                                    📋 PC: {entry.purchaseOrderNumber}
-                                                                                </div>
-                                                                            )}
-                                                                            {entry.lastEditDate && (
-                                                                                <div className="text-xs text-orange-600 mt-1">
-                                                                                    ✏️ Editado: {safeFormatDate(entry.lastEditDate, 'dd/MM/yy HH:mm')}
-                                                                                </div>
-                                                                            )}
-                                                                        </div>
-                                                                    </TableCell>
-                                                                    <TableCell className="text-right">
-                                                                        <div className="flex items-center justify-end gap-2">
-                                                                            {/* Botão de Editar - disponível para todos os lançamentos */}
-                                                                            <Button 
-                                                                                variant="ghost" 
-                                                                                size="icon" 
-                                                                                className="text-blue-600 hover:text-blue-800" 
-                                                                                onClick={() => handleEditCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
-                                                                                title={entry.isFromRequisition ? "Editar dados do lançamento (ex: nº pedido)" : "Editar lançamento"}
-                                                                            >
-                                                                                <Pencil className="h-4 w-4" />
-                                                                            </Button>
-                                                                            
-                                                                            {/* Botão de Deletar - apenas para lançamentos manuais */}
-                                                                            {!entry.isFromRequisition && (
-                                                                                <Button 
-                                                                                    variant="ghost" 
-                                                                                    size="icon" 
-                                                                                    className="text-destructive hover:text-destructive" 
-                                                                                    onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
-                                                                                    title="Excluir lançamento"
-                                                                                >
-                                                                                    <Trash2 className="h-4 w-4" />
-                                                                                </Button>
-                                                                            )}
-                                                                            
-                                                                            {/* Badge para lançamentos automáticos */}
-                                                                            {entry.isFromRequisition && (
-                                                                                <Badge variant="outline" className="text-xs">
-                                                                                    Auto
-                                                                                </Badge>
-                                                                            )}
-                                                                        </div>
-                                                                    </TableCell>
-                                                                </TableRow>
-                                                            ))}
-                                                        </TableBody>
-                                                    </Table>
-                                                </AccordionContent>
-                                            </AccordionItem>
-                                        );
-                                    })}
-                                    </Accordion>
                                 </div>
-                            ) : (
-                                <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-32 border-dashed border-2 rounded-lg">
-                                    <PackageSearch className="h-8 w-8 mb-2" />
-                                    <h3 className="font-semibold">
-                                        {osSearchTerm ? `Nenhuma OS encontrada para "${osSearchTerm}"` : "Nenhum Custo Lançado"}
-                                    </h3>
-                                    <p className="text-sm">
-                                        {osSearchTerm 
-                                            ? "Tente buscar por outro termo ou limpe a busca para ver todas as OS."
-                                            : "Quando custos forem lançados nas OS, eles aparecerão aqui organizados."
-                                        }
-                                    </p>
-                                </div>
-                            );
-                        })()}
-                    </CardContent>
-                </Card>
-            </TabsContent>
-        </Tabs>
-      </div>
+                            </TableCell>
+                            <TableCell>
+                                <Badge variant={statusProps.variant} className={statusProps.colorClass}>
+                                    <statusProps.icon className="mr-2 h-4 w-4" />
+                                    {statusProps.label}
+                                </Badge>
+                            </TableCell>
+                        </TableRow>
+                    );
+                })}
+            </TableBody>
+        </Table>
+    );
+}
 
-      <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-        <DialogContent className="sm:max-w-3xl"> {/* Aumentado para acomodar mais informações */}
-            <DialogHeader>
-                <DialogTitle>Atualizar Item de Requisição</DialogTitle>
-                <DialogDescription>
-                    {selectedItem?.description}
-                </DialogDescription>
+export default function OrdersPage() {
+    const [orders, setOrders] = useState<Order[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [isSheetOpen, setIsSheetOpen] = useState(false);
+    const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
+    const [packingSlipQuantities, setPackingSlipQuantities] = useState<Map<string, number>>(new Map());
+    const [isPackingSlipDialogOpen, setIsPackingSlipDialogOpen] = useState(false);
+    const [isEditing, setIsEditing] = useState(false);
+    const { toast } = useToast();
+    const { user, loading: authLoading } = useAuth();
+    const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
+    const [orderToDelete, setOrderToDelete] = useState<Order | null>(null);
+    
+    // Estados para deletar itens do pedido
+    const [isItemDeleteDialogOpen, setIsItemDeleteDialogOpen] = useState(false);
+    const [itemToDelete, setItemToDelete] = useState<{ index: number; item: OrderItem } | null>(null);
+
+    // Estados para adicionar novos itens
+    const [isAddingItem, setIsAddingItem] = useState(false);
+    const [newItemForm, setNewItemForm] = useState({
+      description: '',
+      itemNumber: '',
+      code: '',
+      quantity: 1,
+      unitWeight: 0,
+    });
+
+    // Progress tracking state
+    const [isProgressModalOpen, setIsProgressModalOpen] = useState(false);
+    const [itemToTrack, setItemToTrack] = useState<OrderItem | null>(null);
+    const [editedPlan, setEditedPlan] = useState<ProductionStage[]>([]);
+    const [isFetchingPlan, setIsFetchingPlan] = useState(false);
+    const [expandedRow, setExpandedRow] = useState<number | null>(null);
+    const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
+    const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
+    
+    
+    // Filter states
+    const [searchQuery, setSearchQuery] = useState("");
+    const [customers, setCustomers] = useState<CustomerInfo[]>([]);
+    const [statusFilter, setStatusFilter] = useState<string>("all");
+    const [customerFilter, setCustomerFilter] = useState<string>("all");
+    const [dateFilter, setDateFilter] = useState<Date | undefined>(undefined);
+    const [dataBookFilter, setDataBookFilter] = useState<string>("all");
+    const [monthFilter, setMonthFilter] = useState<string>("all");
+    
+    // View states
+    const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
+    const [calendarDate, setCalendarDate] = useState(new Date());
+
+    // Estados para controlar posição do scroll no Kanban
+    const kanbanScrollRef = useRef<HTMLDivElement>(null);
+    const scrollPositionRef = useRef<number>(0);
+    // ADICIONAR ESTE NOVO:
+    const columnScrollPositions = useRef<Map<string, number>>(new Map());
+    
+    // Estados para controlar colunas colapsadas
+    const [collapsedYearColumns, setCollapsedYearColumns] = useState<Set<string>>(new Set());
+
+    const form = useForm<z.infer<typeof orderSchema>>({
+        resolver: zodResolver(orderSchema),
+    });
+
+    const { fields, append, remove } = useFieldArray({
+        control: form.control,
+        name: "items"
+    });
+
+    const fetchCustomers = async () => {
+        if (!user) return;
+        try {
+            const querySnapshot = await getDocs(collection(db, "companies", "mecald", "customers"));
+            const customersList = querySnapshot.docs.map((doc) => ({
+                id: doc.id,
+                name: doc.data().nomeFantasia || doc.data().name || "Cliente sem nome",
+            }));
+            setCustomers(customersList);
+        } catch (error) {
+            console.error("Error fetching customers for filter:", error);
+        }
+    };
+    
+    // Função helper para converter timestamps do Firestore de forma segura
+    const safeToDate = (timestamp: any): Date | null => {
+        if (!timestamp) return null;
+        
+        // Se já é uma data JavaScript válida
+        if (timestamp instanceof Date) {
+            return isNaN(timestamp.getTime()) ? null : timestamp;
+        }
+        
+        // Se é um timestamp do Firestore com método toDate
+        if (timestamp && typeof timestamp.toDate === 'function') {
+            try {
+                const date = timestamp.toDate();
+                return (date instanceof Date && !isNaN(date.getTime())) ? date : null;
+            } catch (error) {
+                console.warn("Erro ao converter timestamp do Firestore:", error);
+                return null;
+            }
+        }
+        
+        // Se é um objeto com propriedades seconds e nanoseconds (formato Firestore)
+        if (timestamp && typeof timestamp === 'object' && 'seconds' in timestamp) {
+            try {
+                const date = new Date(timestamp.seconds * 1000);
+                return isNaN(date.getTime()) ? null : date;
+            } catch (error) {
+                console.warn("Erro ao converter objeto timestamp:", error);
+                return null;
+            }
+        }
+        
+        // Tenta converter string ou number para data
+        if (typeof timestamp === 'string' || typeof timestamp === 'number') {
+            try {
+                const date = new Date(timestamp);
+                return isNaN(date.getTime()) ? null : date;
+            } catch (error) {
+                console.warn("Erro ao converter string/number para data:", error);
+                return null;
+            }
+        }
+        
+        console.warn("Tipo de timestamp não reconhecido:", typeof timestamp, timestamp);
+        return null;
+    };
+
+    const fetchOrders = async (): Promise<Order[]> => {
+        if (!user) return [];
+        setIsLoading(true);
+        let ordersList: Order[] = [];
+        try {
+            const productsSnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
+            const productsMap = new Map<string, { unitWeight: number, productionPlanTemplate?: any[] }>();
+            productsSnapshot.forEach(doc => {
+                const productCode = (doc.id || '').trim().toUpperCase();
+                if (productCode) {
+                    const data = doc.data();
+                    productsMap.set(productCode, { 
+                        unitWeight: data.unitWeight || 0,
+                        productionPlanTemplate: data.productionPlanTemplate
+                    });
+                }
+            });
+
+            const querySnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
+            ordersList = querySnapshot.docs.map(doc => {
+                try {
+                    const data = doc.data();
+
+                    // LOG TEMPORÁRIO - REMOVER DEPOIS
+                    console.log('📋 DOC:', doc.id, '| quotationNumber:', data.quotationNumber, '| items tipo:', typeof data.items, '| isArray:', Array.isArray(data.items));
+                    const createdAtDate = safeToDate(data.createdAt) || new Date();
+                    const deliveryDate = safeToDate(data.deliveryDate);
                 
-                {/* MELHORIA: Mostrar informações detalhadas do item para melhor identificação */}
-                <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                        <div>
-                            <span className="font-semibold text-blue-800">📏 Dimensão:</span>
-                            <p className="font-medium">
-                                {(() => {
-                                    // Buscar dados completos do item na requisição original
-                                    const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
-                                    const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
-                                    return fullItem?.dimensao || 'Não especificada';
-                                })()}
-                            </p>
-                        </div>
-                        <div>
-                            <span className="font-semibold text-blue-800">🔧 Material:</span>
-                            <p className="font-medium">
-                                {(() => {
-                                    const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
-                                    const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
-                                    return fullItem?.material || 'Não especificado';
-                                })()}
-                            </p>
-                        </div>
-                        <div>
-                            <span className="font-semibold text-blue-800">📦 Código:</span>
-                            <p className="font-medium">
-                                {(() => {
-                                    const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
-                                    const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
-                                    return fullItem?.code || 'Não informado';
-                                })()}
-                            </p>
-                        </div>
-                    </div>
+                const rawItems = data.items;
+                let itemsArray: any[] = [];
+
+                if (Array.isArray(rawItems)) {
+                    itemsArray = rawItems;
+                } else if (rawItems && typeof rawItems === 'object') {
+                    // Reconstrói preservando todos os campos aninhados
+                    itemsArray = Object.keys(rawItems)
+                        .sort((a, b) => Number(a) - Number(b)) // mantém ordem original
+                        .map(key => {
+                            const item = rawItems[key];
+                            // Garante que é um objeto válido com campos esperados
+                            if (typeof item === 'object' && item !== null) {
+                                return {
+                                    description: '',
+                                    quantity: 0,
+                                    unitWeight: 0,
+                                    ...item  // spread preserva todos os campos
+                                };
+                            }
+                            return null;
+                        })
+                        .filter(Boolean); // remove nulos
+                }
+
+                const enrichedItems = itemsArray.map((item: any, index: number) => {
+                    const itemCode = item.code || item.product_code || '';
+                    const enrichedItem = { 
+                        ...item, 
+                        id: item.id || `${doc.id}-${index}`,
+                        code: itemCode,
+                        itemNumber: item.itemNumber || '', // Preserva o número do item no pedido de compra
+                    };
+                    delete enrichedItem.product_code;
+
+                    enrichedItem.unitWeight = Number(enrichedItem.unitWeight) || 0;
+
+                    const productCodeToSearch = (itemCode).trim().toUpperCase();
+                    const productData = productCodeToSearch ? productsMap.get(productCodeToSearch) : undefined;
                     
-                    {/* Mostrar quantidade solicitada */}
-                    <div className="mt-3 pt-3 border-t border-blue-200">
-                        <span className="font-semibold text-blue-800">📊 Quantidade Solicitada:</span>
-                        <span className="ml-2 font-bold text-blue-900">
-                            {selectedItem?.quantityRequested} {(() => {
-                                const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
-                                const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
-                                return fullItem?.unit || 'unidades';
-                            })()}
-                        </span>
-                    </div>
-                </div>
+                    if (enrichedItem.unitWeight === 0) {
+                        if (productData && productData.unitWeight) {
+                            enrichedItem.unitWeight = Number(productData.unitWeight) || 0;
+                        }
+                    }
+
+                    let finalProductionPlan = (item.productionPlan || []).map((p: any) => ({
+                        ...p,
+                        startDate: safeToDate(p.startDate),
+                        completedDate: safeToDate(p.completedDate),
+                    }));
+
+                    if (finalProductionPlan.length === 0) {
+                        if (productData && productData.productionPlanTemplate && productData.productionPlanTemplate.length > 0) {
+                            finalProductionPlan = productData.productionPlanTemplate.map((stage: any) => ({
+                                ...stage,
+                                status: "Pendente",
+                                startDate: null,
+                                completedDate: null,
+                            }));
+                        }
+                    }
+                    enrichedItem.productionPlan = finalProductionPlan;
+
+                    return {
+                        ...enrichedItem,
+                        itemDeliveryDate: safeToDate(item.itemDeliveryDate) || deliveryDate,
+                        shippingList: item.shippingList || '',
+                        invoiceNumber: item.invoiceNumber || '',
+                        shippingDate: safeToDate(item.shippingDate),
+                    };
+                });
+
+                let finalStatus = mapOrderStatus(data.status);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+
+                if (deliveryDate && deliveryDate < today && !['Concluído', 'Cancelado'].includes(finalStatus)) {
+                    finalStatus = 'Atrasado';
+                }
                 
-                <div className={`mt-3 p-3 rounded-lg border ${selectedItem?.weight ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
-                    <div className="flex items-center gap-2">
-                        <span className="font-semibold">⚖️ Peso do Material:</span>
-                        <span className="text-lg font-bold">
-                            {selectedItem?.weight ? (
-                                <span className="text-green-700">
-                                    {selectedItem.weight} {selectedItem.weightUnit || 'kg'}
-                                </span>
-                            ) : (
-                                <span className="text-orange-700">Não informado</span>
-                            )}
-                        </span>
-                    </div>
-                    
-                    {selectedItem?.weight && selectedItem?.invoiceItemValue && selectedItem.weight > 0 && (
-                        <div className="mt-2 text-sm text-green-600">
-                            💰 Custo por {selectedItem.weightUnit || 'kg'}: {' '}
-                            <span className="font-semibold">
-                                {(selectedItem.invoiceItemValue / selectedItem.weight).toLocaleString('pt-BR', { 
-                                    style: 'currency', 
-                                    currency: 'BRL' 
-                                })}
-                            </span>
-                        </div>
-                    )}
-                    
-                    <div className="mt-2 text-xs">
-                        {selectedItem?.weight ? (
-                            <span className="text-green-600">✅ Peso cadastrado - Os custos serão calculados automaticamente</span>
-                        ) : (
-                            <span className="text-orange-600">⚠️ Informe o peso abaixo para cálculo automático do custo por unidade</span>
-                        )}
-                    </div>
-                </div>
-            </DialogHeader>
-            <Form {...itemForm}>
-                <form onSubmit={itemForm.handleSubmit(onItemSubmit)} className="space-y-6 pt-4">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <FormField control={itemForm.control} name="supplierName" render={({ field }) => (
-                           <FormItem>
-                               <FormLabel>Nome do Fornecedor</FormLabel>
-                               <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                   <FormControl>
-                                       <SelectTrigger>
-                                           <SelectValue placeholder="Selecione um fornecedor" />
-                                       </SelectTrigger>
-                                   </FormControl>
-                                   <SelectContent>
-                                       {suppliers.map(s => <SelectItem key={s.id} value={s.nomeFantasia || s.razaoSocial || ''}>{s.nomeFantasia || s.razaoSocial || 'Fornecedor sem nome'}</SelectItem>)}
-                                   </SelectContent>
-                               </Select>
-                               <FormMessage />
-                           </FormItem>
-                        )}/>
-                        <FormField control={itemForm.control} name="deliveryReceiptDate" render={({ field }) => (
-                            <FormItem className="flex flex-col"><FormLabel>Data de Entrega</FormLabel>
-                                <Popover><PopoverTrigger asChild>
-                                    <FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl>
-                                </PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value || undefined} onSelect={field.onChange} /></PopoverContent></Popover>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
-                    </div>
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-                        <FormField control={itemForm.control} name="weight" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="flex items-center gap-2">
-                                    ⚖️ Peso do Material
-                                    {!selectedItem?.weight && <span className="text-orange-500 text-xs">(Obrigatório)</span>}
-                                </FormLabel>
-                                <FormControl>
-                                    <Input 
-                                        type="number" 
-                                        step="0.001" 
-                                        placeholder={selectedItem?.weight ? selectedItem.weight.toString() : "Ex: 15.5"} 
-                                        {...field} 
-                                        value={field.value ?? ''} 
-                                        className={!selectedItem?.weight && !field.value ? 'border-orange-300 focus:border-orange-500' : ''}
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                        <FormField control={itemForm.control} name="weightUnit" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Unidade</FormLabel>
-                                <Select onValueChange={field.onChange} value={field.value || "kg"}>
-                                    <FormControl>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Unidade" />
-                                        </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                        <SelectItem value="kg">kg (quilograma)</SelectItem>
-                                        <SelectItem value="g">g (grama)</SelectItem>
-                                        <SelectItem value="t">t (tonelada)</SelectItem>
-                                        <SelectItem value="m">m (metro)</SelectItem>
-                                        <SelectItem value="m²">m² (metro quadrado)</SelectItem>
-                                        <SelectItem value="m³">m³ (metro cúbico)</SelectItem>
-                                        <SelectItem value="l">l (litro)</SelectItem>
-                                        <SelectItem value="un">un (unidade)</SelectItem>
-                                        <SelectItem value="pç">pç (peça)</SelectItem>
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                        <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel className="flex items-center gap-2">
-                                    💰 Valor do Item (R$)
-                                    {!selectedItem?.invoiceItemValue && <span className="text-blue-500 text-xs">(Para cálculo de custo)</span>}
-                                </FormLabel>
-                                <FormControl>
-                                    <Input 
-                                        type="number" 
-                                        step="0.01" 
-                                        placeholder="0.00" 
-                                        {...field} 
-                                        value={field.value ?? ''} 
-                                    />
-                                </FormControl>
-                                <FormMessage />
-                            </FormItem>
-                        )}/>
-                    </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                        <FormField control={itemForm.control} name="invoiceNumber" render={({ field }) => (
-                            <FormItem><FormLabel>Nota Fiscal</FormLabel><FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                        )}/>
-                        <FormField control={itemForm.control} name="certificateNumber" render={({ field }) => (
-                            <FormItem><FormLabel>Nº do Certificado</FormLabel><FormControl><Input placeholder="Certificado de qualidade/material" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                        )}/>
-                    </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                         <FormField control={itemForm.control} name="storageLocation" render={({ field }) => (
-                            <FormItem><FormLabel>Local de Armazenamento</FormLabel><FormControl><Input placeholder="Ex: Prateleira A-10" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
-                        )}/>
-                    <FormField control={itemForm.control} name="inspectionStatus" render={({ field }) => (
-                        <FormItem><FormLabel>Status da Inspeção</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
-                                <SelectTrigger><SelectValue placeholder="Selecione o status da inspeção" /></SelectTrigger>
-                            </FormControl><SelectContent>
-                                {inspectionStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
-                            </SelectContent></Select><FormMessage />
-                        </FormItem>
-                    )}/>
-                    </div>
-                    
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
-                        <Button type="submit" disabled={itemForm.formState.isSubmitting}>
-                            {itemForm.formState.isSubmitting ? "Salvando..." : "Salvar Atualizações"}
-                        </Button>
-                    </DialogFooter>
-                </form>
-            </Form>
-        </DialogContent>
-      </Dialog>
-      
-      <Dialog open={isSupplierFormOpen} onOpenChange={setIsSupplierFormOpen}>
-        <DialogContent className="max-w-4xl h-[90vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle>{selectedSupplier?.id ? `Editar Fornecedor: ${selectedSupplier.nomeFantasia || selectedSupplier.razaoSocial || ''}` : "Adicionar Novo Fornecedor"}</DialogTitle>
-              <DialogDescription>Preencha os dados completos do fornecedor.</DialogDescription>
-            </DialogHeader>
-            <Form {...supplierForm}>
-                <form onSubmit={supplierForm.handleSubmit(onSupplierSubmit)} className="flex-1 flex flex-col min-h-0">
-                  <Tabs defaultValue="general" className="flex-1 flex flex-col min-h-0">
-                    <TabsList>
-                      <TabsTrigger value="general">Gerais</TabsTrigger>
-                      <TabsTrigger value="contact">Contato e Endereço</TabsTrigger>
-                      <TabsTrigger value="commercial">Comercial e Bancário</TabsTrigger>
-                      <TabsTrigger value="docs">Documentos</TabsTrigger>
-                    </TabsList>
-                    <ScrollArea className="flex-1 mt-4 pr-6">
-                      <TabsContent value="general" className="space-y-4">
-                        <FormField control={supplierForm.control} name="status" render={({ field }) => (<FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="ativo">Ativo</SelectItem><SelectItem value="inativo">Inativo</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="cnpj" render={({ field }) => (<FormItem><FormLabel>CNPJ</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <div className="grid md:grid-cols-2 gap-4">
-                          <FormField control={supplierForm.control} name="inscricaoEstadual" render={({ field }) => (<FormItem><FormLabel>Inscrição Estadual</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="inscricaoMunicipal" render={({ field }) => (<FormItem><FormLabel>Inscrição Municipal</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        </div>
-                        <FormField control={supplierForm.control} name="segment" render={({ field }) => (
-                            <FormItem>
-                                <FormLabel>Segmento</FormLabel>
-                                <Select onValueChange={field.onChange} defaultValue={field.value}>
-                                    <FormControl>
-                                        <SelectTrigger>
-                                            <SelectValue placeholder="Selecione um segmento" />
-                                        </SelectTrigger>
-                                    </FormControl>
-                                    <SelectContent>
-                                        {segmentOptions.map(option => (
-                                            <SelectItem key={option} value={option}>{option}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                <FormMessage />
-                            </FormItem>
-                        )} />
-                         {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>Código: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {safeFormatDate(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm', 'N/A')}</p><p>Última atualização: {safeFormatDate(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm', 'N/A')}</p></div>)}
-                      </TabsContent>
-                      <TabsContent value="contact" className="space-y-4">
-                        <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do Responsável Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <div className="grid md:grid-cols-2 gap-4">
-                          <FormField control={supplierForm.control} name="telefone" render={({ field }) => (<FormItem><FormLabel>Telefone</FormLabel><FormControl><Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="primaryEmail" render={({ field }) => (<FormItem><FormLabel>E-mail Principal</FormLabel><FormControl><Input placeholder="contato@fornecedor.com (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        </div>
-                        <FormField control={supplierForm.control} name="address.street" render={({ field }) => (<FormItem><FormLabel>Logradouro</FormLabel><FormControl><Input placeholder="Rua, Avenida..." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <div className="grid md:grid-cols-3 gap-4">
-                          <FormField control={supplierForm.control} name="address.number" render={({ field }) => (<FormItem><FormLabel>Número</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="address.complement" render={({ field }) => (<FormItem><FormLabel>Complemento</FormLabel><FormControl><Input placeholder="Apto, Bloco, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                           <FormField control={supplierForm.control} name="address.zipCode" render={({ field }) => (<FormItem><FormLabel>CEP</FormLabel><FormControl><Input placeholder="00000-000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        </div>
-                        <div className="grid md:grid-cols-2 gap-4">
-                          <FormField control={supplierForm.control} name="address.neighborhood" render={({ field }) => (<FormItem><FormLabel>Bairro</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="address.cityState" render={({ field }) => (<FormItem><FormLabel>Cidade / Estado</FormLabel><FormControl><Input placeholder="Ex: São Paulo / SP" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        </div>
-                      </TabsContent>
-                      <TabsContent value="commercial" className="space-y-4">
-                        <Card><CardHeader><CardTitle className="text-lg">Informações Comerciais</CardTitle></CardHeader>
-                            <CardContent className="space-y-4">
-                                <FormField control={supplierForm.control} name="commercialInfo.paymentTerms" render={({ field }) => (<FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input placeholder="Ex: 28 DDL" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                <FormField control={supplierForm.control} name="commercialInfo.avgLeadTimeDays" render={({ field }) => (<FormItem><FormLabel>Prazo Médio de Entrega (dias)</FormLabel><FormControl><Input type="number" placeholder="Ex: 15" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                <FormField control={supplierForm.control} name="commercialInfo.shippingMethods" render={({ field }) => (<FormItem><FormLabel>Formas de Envio</FormLabel><FormControl><Input placeholder="Ex: Transportadora, Retirada" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                <FormField control={supplierForm.control} name="commercialInfo.shippingIncluded" render={({ field }) => (
-                                    <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
-                                        <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
-                                        <div className="space-y-1 leading-none"><FormLabel>Frete incluso no preço?</FormLabel></div>
-                                    </FormItem>
-                                )}/>
-                            </CardContent>
-                        </Card>
-                        <Card><CardHeader><CardTitle className="text-lg">Dados Bancários</CardTitle></CardHeader>
-                            <CardContent className="space-y-4">
-                                <FormField control={supplierForm.control} name="bankInfo.bank" render={({ field }) => (<FormItem><FormLabel>Banco</FormLabel><FormControl><Input placeholder="Nome do banco" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                <div className="grid md:grid-cols-2 gap-4">
-                                    <FormField control={supplierForm.control} name="bankInfo.agency" render={({ field }) => (<FormItem><FormLabel>Agência</FormLabel><FormControl><Input placeholder="0000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                    <FormField control={supplierForm.control} name="bankInfo.accountNumber" render={({ field }) => (<FormItem><FormLabel>Conta Corrente</FormLabel><FormControl><Input placeholder="00000-0" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                </div>
-                                <div className="grid md:grid-cols-2 gap-4">
-                                    <FormField control={supplierForm.control} name="bankInfo.accountType" render={({ field }) => (<FormItem><FormLabel>Tipo de Conta</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione..."/></SelectTrigger></FormControl><SelectContent><SelectItem value="Pessoa Jurídica">Pessoa Jurídica</SelectItem><SelectItem value="Pessoa Física">Pessoa Física</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
-                                    <FormField control={supplierForm.control} name="bankInfo.pix" render={({ field }) => (<FormItem><FormLabel>Chave PIX</FormLabel><FormControl><Input placeholder="CNPJ, e-mail, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                </div>
-                            </CardContent>
-                        </Card>
-                      </TabsContent>
-                      <TabsContent value="docs" className="space-y-4">
-                        <FormDescription>Anexe os documentos do fornecedor. Salve os arquivos em um serviço de nuvem (como Google Drive) e cole o link compartilhável aqui.</FormDescription>
-                        <FormField control={supplierForm.control} name="documentation.contratoSocialUrl" render={({ field }) => (<FormItem><FormLabel>Link do Contrato Social</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.cartaoCnpjUrl" render={({ field }) => (<FormItem><FormLabel>Link do Cartão CNPJ</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.certidoesNegativasUrl" render={({ field }) => (<FormItem><FormLabel>Link das Certidões Negativas</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.isoCertificateUrl" render={({ field }) => (<FormItem><FormLabel>Link do Certificado ISO (se aplicável)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.alvaraUrl" render={({ field }) => (<FormItem><FormLabel>Link do Alvará/Licença (se aplicável)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                      </TabsContent>
-                    </ScrollArea>
-                  </Tabs>
-                    <DialogFooter className="pt-4 border-t flex-shrink-0">
-                        <Button type="button" variant="outline" onClick={() => setIsSupplierFormOpen(false)}>Cancelar</Button>
-                        <Button type="submit" disabled={supplierForm.formState.isSubmitting}>
-                            {supplierForm.formState.isSubmitting ? "Salvando..." : (selectedSupplier?.id ? 'Salvar Alterações' : 'Adicionar Fornecedor')}
-                        </Button>
-                    </DialogFooter>
-                </form>
-            </Form>
-        </DialogContent>
-      </Dialog>
+                let customerInfo: CustomerInfo = { id: '', name: 'Cliente não informado' };
+                if (data.customer && typeof data.customer === 'object' && data.customer.name) {
+                    customerInfo = { id: data.customer.id || '', name: data.customer.name };
+                } else if (typeof data.customerName === 'string') {
+                    customerInfo = { id: data.customerId || '', name: data.customerName };
+                } else if (typeof data.customer === 'string') { 
+                    customerInfo = { id: '', name: data.customer };
+                }
 
-      <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
-        <AlertDialogContent>
-            <AlertDialogHeader>
-                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-                <AlertDialogDescription>
-                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o fornecedor <span className="font-bold">{supplierToDelete?.nomeFantasia || supplierToDelete?.razaoSocial}</span>.
-                </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={handleConfirmDeleteSupplier} className="bg-destructive hover:bg-destructive/90">
-                    Sim, excluir
-                </AlertDialogAction>
-            </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+                const orderNum = (data.orderNumber || data.quotationNumber || 'N/A').toString();
+                
+                console.log('📊 [DEBUG] Processando pedido:', {
+                    docId: doc.id,
+                    orderNumber: data.orderNumber,
+                    quotationNumber: data.quotationNumber,
+                    orderNumFinal: orderNum
+                });
 
-      <AlertDialog open={isDeleteCostAlertOpen} onOpenChange={setIsDeleteCostAlertOpen}>
-        <AlertDialogContent>
-            <AlertDialogHeader>
-                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
-                <AlertDialogDescription>
-                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o lançamento de custo: <span className="font-bold">{costEntryToDelete?.description}</span> no valor de <span className="font-bold">{costEntryToDelete?.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>.
-                </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-                <AlertDialogCancel>Cancelar</AlertDialogCancel>
-                <AlertDialogAction onClick={handleConfirmDeleteCostEntry} className="bg-destructive hover:bg-destructive/90">
-                    Sim, excluir
-                </AlertDialogAction>
-            </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Modal do Relatório de Recebimento de Materiais */}
-      <Dialog open={isReportModalOpen} onOpenChange={setIsReportModalOpen}>
-        <DialogContent className="max-w-6xl h-[90vh] flex flex-col">
-            <DialogHeader>
-                <DialogTitle className="flex items-center gap-2">
-                    📊 Relatório de Recebimento de Materiais
-                </DialogTitle>
-                <DialogDescription>
-                    {selectedOrderForReport && (
-                        <>OS: {selectedOrderForReport.internalOS} - {selectedOrderForReport.customerName}</>
-                    )}
-                </DialogDescription>
-            </DialogHeader>
+                return {
+                    id: doc.id,
+                    quotationId: data.quotationId || '',
+                    quotationNumber: orderNum,
+                    internalOS: data.internalOS || '',
+                    projectName: data.projectName || '',
+                    customer: customerInfo,
+                    items: enrichedItems,
+                    totalValue: data.totalValue || 0,
+                    status: finalStatus,
+                    createdAt: createdAtDate,
+                    deliveryDate: deliveryDate,
+                    completedAt: safeToDate(data.completedAt),
+                    dataBookSent: Boolean(data.dataBookSent),
+                    dataBookSentAt: safeToDate(data.dataBookSentAt),
+                    totalWeight: calculateTotalWeight(enrichedItems),
+                    driveLink: data.driveLink || '',
+                    documents: data.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                } as Order;
+                } catch (error) {
+                    console.error("Erro ao processar pedido:", doc.id, error);
+                    // Retorna um pedido com dados mínimos em caso de erro
+                    return {
+                        id: doc.id,
+                        quotationId: '',
+                        quotationNumber: 'Erro ao carregar',
+                        internalOS: '',
+                        projectName: '',
+                        customer: { id: '', name: 'Erro ao carregar' },
+                        items: [],
+                        totalValue: 0,
+                        status: 'Erro',
+                        createdAt: new Date(),
+                        deliveryDate: undefined,
+                        completedAt: undefined,
+                        dataBookSent: false,
+                        dataBookSentAt: undefined,
+                        totalWeight: 0,
+                        driveLink: '',
+                        documents: { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                    } as Order;
+                }
+            });
             
-            {selectedOrderForReport && (() => {
-                const reportData = generateMaterialsReport(selectedOrderForReport);
-                if (!reportData) return <div>Erro ao gerar dados do relatório</div>;
+            setOrders(ordersList);
+        } catch (error) {
+            console.error("Error fetching orders:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao buscar pedidos",
+                description: "Ocorreu um erro ao carregar a lista de pedidos.",
+            });
+        } finally {
+            setIsLoading(false);
+        }
+        return ordersList;
+    };
+
+
+    useEffect(() => {
+        if (!authLoading && user) {
+            fetchOrders();
+            fetchCustomers();
+        }
+    }, [user, authLoading]);
+
+    // Efeito para limpar estados quando mudar de modo de visualização
+    useEffect(() => {
+        if (viewMode !== 'kanban') {
+            scrollPositionRef.current = 0;
+            sessionStorage.removeItem('kanbanScrollPosition');
+        }
+    }, [viewMode]);
+
+    // Debug dos componentes para verificar se estão carregados corretamente
+    useEffect(() => {
+        console.log('🔍 Verificando componentes:', {
+            Popover: typeof Popover,
+            Calendar: typeof Calendar,
+            PopoverTrigger: typeof PopoverTrigger,
+            PopoverContent: typeof PopoverContent
+        });
+    }, []);
+
+    // COMPONENTE PERSONALIZADO PARA DATA DE ENTREGA DO ITEM (ALTERNATIVA MAIS ROBUSTA)
+    const ItemDeliveryDateField = ({ form, index }: { form: any; index: number }) => {
+      const [inputValue, setInputValue] = useState("");
+      const fieldValue = form.watch(`items.${index}.itemDeliveryDate`);
+
+      // Sincronizar valor do input com o valor do formulário
+      useEffect(() => {
+        if (fieldValue) {
+          try {
+            const dateToFormat = fieldValue instanceof Date ? fieldValue : new Date(fieldValue);
+            if (!isNaN(dateToFormat.getTime())) {
+              setInputValue(format(dateToFormat, "yyyy-MM-dd"));
+            } else {
+              setInputValue("");
+            }
+          } catch (error) {
+            console.warn('Erro ao formatar data:', error);
+            setInputValue("");
+          }
+        } else {
+          setInputValue("");
+        }
+      }, [fieldValue]);
+
+      const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const newValue = e.target.value;
+        console.log('📅 [CUSTOM] Valor do input:', newValue);
+        
+        setInputValue(newValue);
+        
+        if (newValue) {
+          try {
+            const [year, month, day] = newValue.split('-').map(Number);
+            const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+            
+            if (!isNaN(newDate.getTime())) {
+              console.log('📅 [CUSTOM] Data válida criada:', newDate);
+              form.setValue(`items.${index}.itemDeliveryDate`, newDate);
+            } else {
+              console.warn('📅 [CUSTOM] Data inválida:', newValue);
+            }
+          } catch (error) {
+            console.error('📅 [CUSTOM] Erro ao processar data:', error);
+          }
+        } else {
+          console.log('📅 [CUSTOM] Data limpa');
+          form.setValue(`items.${index}.itemDeliveryDate`, null);
+        }
+      };
+
+      return (
+        <FormItem>
+          <FormLabel>Entrega do Item</FormLabel>
+          <FormControl>
+            <Input
+              type="date"
+              value={inputValue}
+              onChange={handleDateChange}
+              className="w-full"
+              placeholder="Selecione a data de entrega"
+            />
+          </FormControl>
+          <FormMessage />
+          <FormDescription className="text-xs text-muted-foreground">
+            Data específica de entrega deste item (opcional)
+          </FormDescription>
+        </FormItem>
+      );
+    };
+
+    const handleViewOrder = (order: Order) => {
+        // Salvar posição do scroll horizontal do Kanban
+        if (viewMode === 'kanban' && kanbanScrollRef.current) {
+            scrollPositionRef.current = kanbanScrollRef.current.scrollLeft;
+            sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
+            console.log('💾 Salvando posição horizontal:', scrollPositionRef.current);
+        }
+        
+        // NOVO: Salvar posição do scroll vertical de cada coluna
+        if (viewMode === 'kanban') {
+            const columns = document.querySelectorAll('[data-column-scroll]');
+            columns.forEach((column) => {
+                const columnId = column.getAttribute('data-column-id');
+                if (columnId) {
+                    const scrollTop = column.scrollTop;
+                    columnScrollPositions.current.set(columnId, scrollTop);
+                    console.log(`💾 Salvando scroll da coluna ${columnId}:`, scrollTop);
+                }
+            });
+        }
+        
+        console.log('🔍 [DEBUG] Inicializando formulário com:', {
+            quotationNumber: order.quotationNumber,
+            orderId: order.id
+        });
+        
+        setSelectedOrder(order);
+        form.reset({
+            ...order,
+            status: order.status as any,
+            documents: order.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+            quotationNumber: order.quotationNumber || '',
+        });
+        setIsEditing(false);
+        setSelectedItems(new Set());
+        setIsSheetOpen(true);
+    };
+
+        // Função helper para remover campos undefined (Firestore não aceita undefined)
+    const removeUndefinedFields = (obj: any): any => {
+        if (obj === null || obj === undefined) {
+            return null;
+        }
+        
+        if (Array.isArray(obj)) {
+            return obj.map(removeUndefinedFields);
+        }
+        
+        if (typeof obj === 'object') {
+            const cleaned: any = {};
+            Object.keys(obj).forEach(key => {
+                const value = obj[key];
+                if (value !== undefined) {
+                    cleaned[key] = removeUndefinedFields(value);
+                }
+            });
+            return cleaned;
+        }
+        
+        return obj;
+    };
+
+    const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
+        if (!selectedOrder) {
+            console.error('❌ [DEBUG] selectedOrder não encontrado');
+            return;
+        }
+
+        console.log('🚀 [DEBUG] Iniciando salvamento robusto:', {
+            orderId: selectedOrder.id,
+            quotationNumberAntigo: selectedOrder.quotationNumber,
+            quotationNumberNovo: values.quotationNumber
+        });
+
+        console.log('🔍 [DEBUG] Iniciando salvamento:', {
+            orderId: selectedOrder.id,
+            quotationNumber: values.quotationNumber,
+            originalQuotationNumber: selectedOrder.quotationNumber
+        });
+
+        console.log('💾 [SUBMIT] Valores do formulário:', values);
+
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            
+            // Primeiro, verificar se o documento existe
+            const currentDoc = await getDoc(orderRef);
+            if (!currentDoc.exists()) {
+                throw new Error(`Documento ${selectedOrder.id} não encontrado no Firestore`);
+            }
+            
+            console.log('✅ [DEBUG] Documento encontrado, dados atuais:', {
+                quotationNumber: currentDoc.data().quotationNumber
+            });
+            
+            // CORREÇÃO: Processamento mais cuidadoso das datas dos itens
+            const itemsToSave = values.items.map((formItem, itemIndex) => {
+              console.log(`💾 [SUBMIT] Processando item ${itemIndex + 1}:`, formItem);
+              
+              const originalItem = selectedOrder.items.find(i => i.id === formItem.id);
+              const planToSave = originalItem?.productionPlan?.map(p => ({
+                ...p,
+                startDate: p.startDate && !(p.startDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.startDate)) : (p.startDate || null),
+                completedDate: p.completedDate && !(p.completedDate instanceof Timestamp) ? Timestamp.fromDate(new Date(p.completedDate)) : (p.completedDate || null),
+                status: p.status || 'Pendente',
+                stageName: p.stageName || '',
+                durationDays: p.durationDays || 0,
+              })) || [];
+
+              // CORREÇÃO: Conversão cuidadosa das datas do item
+              let itemDeliveryTimestamp = null;
+              let shippingTimestamp = null;
+
+              if (formItem.itemDeliveryDate) {
+                try {
+                  const deliveryDate = formItem.itemDeliveryDate instanceof Date 
+                    ? formItem.itemDeliveryDate 
+                    : new Date(formItem.itemDeliveryDate);
+                  
+                  if (!isNaN(deliveryDate.getTime())) {
+                    itemDeliveryTimestamp = Timestamp.fromDate(deliveryDate);
+                    console.log('✅ [SUBMIT] Data de entrega convertida:', deliveryDate.toISOString());
+                  }
+                } catch (error) {
+                  console.warn('⚠️ [SUBMIT] Erro ao converter data de entrega:', error);
+                }
+              }
+
+              if (formItem.shippingDate) {
+                try {
+                  const shippingDate = formItem.shippingDate instanceof Date 
+                    ? formItem.shippingDate 
+                    : new Date(formItem.shippingDate);
+                  
+                  if (!isNaN(shippingDate.getTime())) {
+                    shippingTimestamp = Timestamp.fromDate(shippingDate);
+                    console.log('✅ [SUBMIT] Data de embarque convertida:', shippingDate.toISOString());
+                  }
+                } catch (error) {
+                  console.warn('⚠️ [SUBMIT] Erro ao converter data de embarque:', error);
+                }
+              }
+
+              return {
+                ...formItem,
+                id: formItem.id || '',
+                itemNumber: formItem.itemNumber || '',
+                description: formItem.description || '',
+                quantity: formItem.quantity || 0,
+                unitWeight: formItem.unitWeight || 0,
+                unitPrice: formItem.unitPrice || 0,
+                code: formItem.code || '',
+                itemDeliveryDate: itemDeliveryTimestamp,
+                shippingDate: shippingTimestamp,
+                shippingList: formItem.shippingList || '',
+                invoiceNumber: formItem.invoiceNumber || '',
+                productionPlan: planToSave,
+              };
+            });
+
+            console.log('💾 [SUBMIT] Itens processados para salvamento:', itemsToSave);
+
+            const totalWeight = calculateTotalWeight(itemsToSave);
+            
+            // Preparar apenas os campos que realmente mudaram
+            const updateData: any = {};
+            
+            if (values.quotationNumber !== selectedOrder.quotationNumber) {
+                updateData.quotationNumber = values.quotationNumber || null;
+                console.log('📝 [DEBUG] Atualizando quotationNumber:', values.quotationNumber);
+            }
+            
+            if (values.customer?.id !== selectedOrder.customer?.id) {
+                updateData.customer = values.customer || null;
+                updateData.customerId = values.customer?.id || null;
+                updateData.customerName = values.customer?.name || null;
+            }
+            
+            if (values.status !== selectedOrder.status) {
+                updateData.status = values.status || null;
+            }
+            
+            // Outros campos que sempre devem ser atualizados
+            updateData.internalOS = values.internalOS || null;
+            updateData.projectName = values.projectName || null;
+            updateData.deliveryDate = values.deliveryDate ? Timestamp.fromDate(new Date(values.deliveryDate)) : null;
+            updateData.driveLink = values.driveLink || null;
+            updateData.documents = values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false };
+            updateData.items = itemsToSave || [];
+            updateData.totalWeight = totalWeight || 0;
+            updateData.lastUpdate = Timestamp.now();
+            
+            console.log('📦 [DEBUG] Dados que serão enviados para o Firestore:', updateData);
+            
+            const dataToSave = {
+                customer: values.customer || null,
+                customerId: values.customer?.id || null,
+                customerName: values.customer?.name || null,
+                internalOS: values.internalOS || null,
+                projectName: values.projectName || null,
+                quotationNumber: values.quotationNumber || null,
+                deliveryDate: values.deliveryDate ? Timestamp.fromDate(new Date(values.deliveryDate)) : null,
+                status: values.status || null,
+                driveLink: values.driveLink || null,
+                documents: values.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
+                items: itemsToSave || [],
+                totalWeight: totalWeight || 0,
+            };
+
+            console.log('💾 [SUBMIT] Dados finais para Firestore:', dataToSave);
+
+            // Remove campos undefined antes de enviar para o Firestore
+            const cleanedData = removeUndefinedFields(dataToSave);
+
+            // Salvar no Firestore usando updateData (mais eficiente)
+            await updateDoc(orderRef, updateData);
+            console.log('✅ [DEBUG] updateDoc executado com sucesso');
+
+            // Verificar se foi salvo corretamente
+            const verificationDoc = await getDoc(orderRef);
+            if (verificationDoc.exists()) {
+                const savedData = verificationDoc.data();
+                console.log('🔍 [DEBUG] Verificação - dados salvos:', {
+                    quotationNumber: savedData.quotationNumber,
+                    lastUpdate: savedData.lastUpdate
+                });
                 
-                return (
-                    <div className="flex-1 flex flex-col min-h-0">
-                        {/* Resumo Executivo */}
-                        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6 p-4 bg-muted/30 rounded-lg">
-                            <div className="text-center">
-                                <div className="text-2xl font-bold text-green-600">
-                                    {reportData.totalOrderCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                </div>
-                                <div className="text-sm text-muted-foreground">Total Gasto</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold text-blue-600">{reportData.totalSuppliers}</div>
-                                <div className="text-sm text-muted-foreground">Fornecedores</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold text-purple-600">{reportData.totalItemsReceived}</div>
-                                <div className="text-sm text-muted-foreground">Itens Recebidos</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold text-orange-600">{reportData.requisitionsCount}</div>
-                                <div className="text-sm text-muted-foreground">Requisições</div>
-                            </div>
-                            <div className="text-center">
-                                <div className="text-2xl font-bold text-teal-600">
-                                    {reportData.totalWeight > 0 ? `${reportData.totalWeight.toFixed(2)} kg` : '-'}
-                                </div>
-                                <div className="text-sm text-muted-foreground">Peso Total</div>
-                            </div>
-                        </div>
+                if (savedData.quotationNumber === values.quotationNumber) {
+                    console.log('✅ [DEBUG] Confirmado: quotationNumber foi salvo corretamente');
+                } else {
+                    console.error('❌ [DEBUG] Erro: quotationNumber não foi salvo corretamente', {
+                        esperado: values.quotationNumber,
+                        salvo: savedData.quotationNumber
+                    });
+                }
+            }
+    
+            toast({
+                title: "Pedido atualizado!",
+                description: "Os dados do pedido foram salvos com sucesso.",
+            });
 
-                        {/* Resumo por Requisição */}
-                        {reportData.requisitionSummary.length > 1 && (
-                            <div className="mb-6">
-                                <h3 className="text-lg font-semibold mb-3">📋 Resumo por Requisição</h3>
-                                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                    {reportData.requisitionSummary.map(req => (
-                                        <div key={req.requisitionNumber} className="p-3 border rounded-lg bg-white">
-                                            <div className="flex justify-between items-start mb-2">
-                                                <span className="font-semibold text-primary">Req. {req.requisitionNumber}</span>
-                                                <Badge variant="outline" className="text-xs">
-                                                    {req.progress}%
-                                                </Badge>
-                                            </div>
-                                            <div className="text-sm space-y-1">
-                                                <div className="flex justify-between">
-                                                    <span>Itens:</span>
-                                                    <span>{req.itemsWithValue}/{req.totalItems}</span>
-                                                </div>
-                                                <div className="flex justify-between">
-                                                    <span>Valor:</span>
-                                                    <span className="font-semibold text-green-600">
-                                                        {req.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                    </span>
-                                                </div>
-                                                <div className="text-xs text-muted-foreground">
-                                                    {safeFormatDate(req.date, 'dd/MM/yyyy')}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
+            console.log('🔄 [DEBUG] Recarregando dados do servidor...');
+
+            // Aguardar um pouco para garantir que o Firestore processou
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Buscar dados atualizados
+            const updatedOrderDoc = await getDoc(orderRef);
+            if (updatedOrderDoc.exists()) {
+                const updatedData = updatedOrderDoc.data();
+                console.log('✅ [DEBUG] Dados atualizados do servidor:', {
+                    quotationNumber: updatedData.quotationNumber,
+                    orderId: updatedOrderDoc.id
+                });
+                
+                // Recarregar lista completa
+                const allOrders = await fetchOrders();
+                const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
+                
+                if (updatedOrderInList) {
+                    console.log('✅ [DEBUG] Pedido encontrado na lista atualizada:', {
+                        quotationNumber: updatedOrderInList.quotationNumber
+                    });
+                    
+                    setSelectedOrder(updatedOrderInList);
+                    form.reset({
+                        ...updatedOrderInList,
+                        status: updatedOrderInList.status as any,
+                    });
+                } else {
+                    console.warn('⚠️ [DEBUG] Pedido não encontrado na lista após recarregamento');
+                }
+            } else {
+                console.error('❌ [DEBUG] Documento não encontrado após salvamento');
+            }
+
+            setIsEditing(false);
+        } catch (error) {
+            console.error("❌ [DEBUG] Erro detalhado no salvamento:", {
+                error: error.message,
+                stack: error.stack,
+                orderId: selectedOrder.id
+            });
+            
+            toast({
+                variant: "destructive",
+                title: "Erro ao salvar",
+                description: `Não foi possível atualizar o pedido: ${error.message}`,
+            });
+        }
+    };
+    
+    const toggleYearCollapse = useCallback((year: string) => {
+        setCollapsedYearColumns(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(year)) {
+                newSet.delete(year);
+            } else {
+                newSet.add(year);
+            }
+            return newSet;
+        });
+    }, []);
+    
+    const uniqueStatuses = useMemo(() => {
+        const statuses = new Set(orders.map(order => order.status).filter(Boolean));
+        return Array.from(statuses);
+    }, [orders]);
+
+    // Adicione esta função para gerar lista de meses disponíveis
+    const availableMonths = useMemo(() => {
+        const months = new Set<string>();
+        orders.forEach(order => {
+            if (order.deliveryDate) {
+                const monthKey = format(order.deliveryDate, 'yyyy-MM');
+                months.add(monthKey);
+            }
+        });
+        
+        // Converter para array e ordenar
+        return Array.from(months).sort().map(monthKey => {
+            const [year, month] = monthKey.split('-');
+            const date = new Date(parseInt(year), parseInt(month) - 1, 1);
+            return {
+                value: monthKey,
+                label: date.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+            };
+        });
+    }, [orders]);
+
+    const filteredOrders = useMemo(() => {
+        const filtered = orders.filter(order => {
+            const query = searchQuery.toLowerCase();
+            const customerName = order.customer?.name?.toLowerCase() || '';
+            const status = order.status?.toLowerCase() || '';
+            const quotationNumber = order.quotationNumber?.toString() || '';
+            const internalOS = order.internalOS?.toLowerCase() || '';
+            const projectName = order.projectName?.toLowerCase() || '';
+
+            const textMatch = quotationNumber.includes(query) ||
+                customerName.includes(query) ||
+                status.includes(query) ||
+                internalOS.includes(query) ||
+                projectName.includes(query);
+
+            const statusMatch = statusFilter === 'all' || order.status === statusFilter;
+            const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
+            const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
+            
+            // NOVO FILTRO DE MÊS
+            let monthMatch = true;
+            if (monthFilter !== 'all') {
+                if (order.deliveryDate) {
+                    const orderMonth = format(order.deliveryDate, 'yyyy-MM');
+                    monthMatch = orderMonth === monthFilter;
+                } else {
+                    monthMatch = false;
+                }
+            }
+            
+            // NOVO FILTRO DE DATA BOOK
+            let dataBookMatch = true;
+            if (dataBookFilter === 'pendente') {
+                dataBookMatch = order.status === 'Concluído' && !order.dataBookSent;
+            } else if (dataBookFilter === 'enviado') {
+                dataBookMatch = order.dataBookSent === true;
+            }
+
+            return textMatch && statusMatch && customerMatch && dateMatch && monthMatch && dataBookMatch;
+        });
+
+        return filtered.sort((a, b) => {
+            const aIsCompleted = a.status === 'Concluído';
+            const bIsCompleted = b.status === 'Concluído';
+
+            if (aIsCompleted && !bIsCompleted) return 1;
+            if (!aIsCompleted && bIsCompleted) return -1;
+            
+            const aDate = a.deliveryDate;
+            const bDate = b.deliveryDate;
+
+            if (aDate && !bDate) return -1;
+            if (!aDate && bDate) return 1;
+            if (aDate && bDate) {
+                const dateComparison = aDate.getTime() - bDate.getTime();
+                if (dateComparison !== 0) return dateComparison;
+            }
+
+            return b.createdAt.getTime() - a.createdAt.getTime();
+        });
+    }, [orders, searchQuery, statusFilter, customerFilter, dateFilter, monthFilter, dataBookFilter]);
+    
+    // Adicione esta função para calcular o peso total do mês filtrado
+    const monthWeightStats = useMemo(() => {
+        if (monthFilter === 'all') {
+            return null;
+        }
+        
+        let totalWeight = 0;
+        let completedWeight = 0;
+        const orderSet = new Set<string>();
+        
+        orders.forEach(order => {
+            order.items.forEach(item => {
+                const itemDeliveryDate = item.itemDeliveryDate || order.deliveryDate;
+                if (!itemDeliveryDate) return;
+
+                const itemMonth = format(itemDeliveryDate, 'yyyy-MM');
+                if (itemMonth !== monthFilter) return;
+
+                const quantity = Number(item.quantity) || 0;
+                const unitWeight = Number(item.unitWeight) || 0;
+                const itemWeight = quantity * unitWeight;
+
+                totalWeight += itemWeight;
+
+                const itemProgress = calculateItemProgress(item);
+                if (itemProgress === 100) {
+                    completedWeight += itemWeight;
+                }
+
+                orderSet.add(order.id);
+            });
+        });
+        
+        const pendingWeight = totalWeight - completedWeight;
+        
+        return {
+            totalOrders: orderSet.size,
+            totalWeight,
+            completedWeight,
+            pendingWeight,
+            completedPercentage: totalWeight > 0 ? (completedWeight / totalWeight) * 100 : 0
+        };
+    }, [orders, monthFilter]);
+    
+    const watchedItems = form.watch("items");
+    const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
+
+    const clearFilters = () => {
+        setSearchQuery("");
+        setStatusFilter("all");
+        setCustomerFilter("all");
+        setDateFilter(undefined);
+        setDataBookFilter("all");
+        setMonthFilter("all");
+    };
+
+    const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter || dataBookFilter !== 'all' || monthFilter !== 'all';
+
+    // Organiza os pedidos por data de entrega para visualização em calendário
+    const ordersByDate = useMemo(() => {
+        const grouped = new Map<string, Order[]>();
+        
+        filteredOrders.forEach(order => {
+            if (order.deliveryDate) {
+                const dateKey = format(order.deliveryDate, 'yyyy-MM-dd');
+                if (!grouped.has(dateKey)) {
+                    grouped.set(dateKey, []);
+                }
+                grouped.get(dateKey)!.push(order);
+            }
+        });
+        
+        return grouped;
+    }, [filteredOrders]);
+
+    // Organiza os pedidos por mês para visualização Kanban - CORRIGIDO
+    const ordersByMonth = useMemo(() => {
+        const grouped = new Map<string, {
+            orders: Order[];
+            totalWeight: number;
+            itemsByOrder: Map<string, OrderItem[]>;
+        }>();
+        
+        // NOVO: Agrupar concluídos por ano
+        const completedByYear = new Map<string, {
+            orders: Order[];
+            totalWeight: number;
+        }>();
+
+        filteredOrders.forEach(order => {
+            if (order.status === 'Concluído') {
+                let completionYear: string;
+                
+                if (order.completedAt) {
+                    // Prioridade 1: Data de conclusão oficial
+                    completionYear = format(new Date(order.completedAt), 'yyyy');
+                    console.log('📅 Usando completedAt:', order.quotationNumber, completionYear);
+                } else {
+                    // Prioridade 2: Data de embarque mais recente dos itens
+                    const shippingDates = order.items
+                        .map(item => item.shippingDate)
+                        .filter(date => date !== null && date !== undefined)
+                        .map(date => new Date(date));
+                    
+                    if (shippingDates.length > 0) {
+                        // Pegar a data de embarque mais recente
+                        const latestShipping = new Date(Math.max(...shippingDates.map(d => d.getTime())));
+                        completionYear = format(latestShipping, 'yyyy');
+                        console.log('📦 Usando shippingDate:', order.quotationNumber, completionYear);
+                    } else if (order.createdAt) {
+                        // Prioridade 3: Data de criação do pedido
+                        completionYear = format(new Date(order.createdAt), 'yyyy');
+                        console.log('📝 Usando createdAt:', order.quotationNumber, completionYear);
+                    } else {
+                        completionYear = 'Sem Data';
+                        console.log('❌ Sem data:', order.quotationNumber);
+                    }
+                }
+                
+                if (!completedByYear.has(completionYear)) {
+                    completedByYear.set(completionYear, {
+                        orders: [],
+                        totalWeight: 0
+                    });
+                }
+                
+                const yearData = completedByYear.get(completionYear)!;
+                yearData.orders.push(order);
+                yearData.totalWeight += order.totalWeight || 0;
+                return;
+            }
+
+            // CORREÇÃO: Usar apenas a data de entrega do pedido, não dos itens
+            if (!order.deliveryDate) return;
+
+            const monthKey = format(order.deliveryDate, 'yyyy-MM');
+
+            if (!grouped.has(monthKey)) {
+                grouped.set(monthKey, {
+                    orders: [],
+                    totalWeight: 0,
+                    itemsByOrder: new Map()
+                });
+            }
+
+            const monthData = grouped.get(monthKey)!;
+
+            // Adicionar pedido apenas uma vez
+            if (!monthData.orders.find(o => o.id === order.id)) {
+                monthData.orders.push(order);
+            }
+
+            // Adicionar TODOS os itens do pedido para esta coluna
+            if (!monthData.itemsByOrder.has(order.id)) {
+                monthData.itemsByOrder.set(order.id, []);
+            }
+
+            // Adicionar todos os itens do pedido
+            order.items.forEach(item => {
+                monthData.itemsByOrder.get(order.id)!.push(item);
+                const quantity = Number(item.quantity) || 0;
+                const unitWeight = Number(item.unitWeight) || 0;
+                monthData.totalWeight += quantity * unitWeight;
+            });
+        });
+
+        const sortedEntries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
+
+        return {
+            monthColumns: sortedEntries,
+            completedByYear: Array.from(completedByYear.entries())
+                .sort(([a], [b]) => b.localeCompare(a)) // Anos mais recentes primeiro
+        };
+    }, [filteredOrders]);
+
+    // Gera os dias do mês atual para o calendário
+    const generateCalendarDays = (date: Date): { days: Date[], firstDay: Date, lastDay: Date } => {
+        const year = date.getFullYear();
+        const month = date.getMonth();
+        
+        const firstDay = new Date(year, month, 1);
+        const lastDay = new Date(year, month + 1, 0);
+        const startDate = new Date(firstDay);
+        startDate.setDate(startDate.getDate() - firstDay.getDay()); // Começa no domingo
+        
+        const days: Date[] = [];
+        const current = new Date(startDate);
+        
+        // Gera 42 dias (6 semanas) para preencher o calendário
+        for (let i = 0; i < 42; i++) {
+            days.push(new Date(current));
+            current.setDate(current.getDate() + 1);
+        }
+        
+        return { days, firstDay, lastDay };
+    };
+
+    const { days: calendarDays, firstDay, lastDay } = generateCalendarDays(calendarDate);
+
+    // Componente Kanban - SEÇÃO CORRIGIDA
+    const KanbanView = () => {
+        const allColumns = [
+            ...ordersByMonth.monthColumns,
+            // NOVO: Adicionar colunas de anos concluídos
+            ...ordersByMonth.completedByYear.map(([year, data]) => [
+                `completed-${year}`,
+                {
+                    orders: data.orders,
+                    totalWeight: data.totalWeight,
+                    itemsByOrder: new Map<string, OrderItem[]>()
+                }
+            ] as [string, { orders: Order[]; totalWeight: number; itemsByOrder?: Map<string, OrderItem[]> }])
+        ];
+
+        const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
+        
+        // Efeito para restaurar scroll horizontal E vertical quando modal fecha
+        useEffect(() => {
+            if (viewMode === 'kanban' && !isSheetOpen) {
+                // Restaurar scroll horizontal
+                if (kanbanScrollRef.current) {
+                    const savedPosition = scrollPositionRef.current || 
+                        parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
+                    
+                    if (savedPosition > 0) {
+                        setTimeout(() => {
+                            if (kanbanScrollRef.current) {
+                                kanbanScrollRef.current.scrollLeft = savedPosition;
+                                console.log('🔄 Posição horizontal restaurada:', savedPosition);
+                            }
+                        }, 50);
+                    }
+                }
+                
+                // NOVO: Restaurar scroll vertical de cada coluna
+                setTimeout(() => {
+                    const columns = document.querySelectorAll('[data-column-scroll]');
+                    columns.forEach((column) => {
+                        const columnId = column.getAttribute('data-column-id');
+                        if (columnId) {
+                            const savedScroll = columnScrollPositions.current.get(columnId);
+                            if (savedScroll !== undefined) {
+                                column.scrollTop = savedScroll;
+                                console.log(`🔄 Scroll da coluna ${columnId} restaurado:`, savedScroll);
+                            }
+                        }
+                    });
+                }, 100);
+            }
+        }, [viewMode, isSheetOpen]);
+        
+        if (totalOrdersToShow === 0) {
+            return (
+                <div className="text-center py-12">
+                    <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                    <h3 className="text-lg font-medium mb-2 text-foreground">Nenhum pedido para exibir no Kanban</h3>
+                    <p className="text-foreground/70">
+                        Os pedidos aparecerão aqui quando tiverem data de entrega definida ou estiverem concluídos.
+                        {hasActiveFilters && (
+                            <span className="block mt-2 text-sm">
+                                Verifique se os filtros aplicados não estão ocultando os pedidos.
+                            </span>
                         )}
+                    </p>
+                </div>
+            );
+        }
 
-                        {/* Lista de Fornecedores */}
-                        <ScrollArea className="flex-1">
-                            <div className="space-y-4">
-                                {reportData.suppliers.map((supplier, index) => {
-                                    const percentage = (supplier.totalCost / reportData.totalOrderCost) * 100;
-                                    
-                                    return (
-                                        <Card key={supplier.supplierName} className="overflow-hidden">
-                                            <CardHeader className="pb-2">
-                                                <div className="flex items-center justify-between">
-                                                    <div className="flex items-center gap-3">
-                                                        <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center text-primary font-bold">
-                                                            {index + 1}
+        return (
+            <div className="w-full">
+                <div 
+                    className="w-full overflow-x-auto" 
+                    data-kanban-scroll
+                    ref={kanbanScrollRef}
+                    onScroll={(e) => {
+                        const target = e.target as HTMLDivElement;
+                        scrollPositionRef.current = target.scrollLeft;
+                        sessionStorage.setItem('kanbanScrollPosition', target.scrollLeft.toString());
+                    }}
+                >
+                    <div className="flex w-max space-x-4 p-4 min-w-full">
+                        {allColumns.map(([monthKey, monthData]) => {
+                            const isCompletedYear = monthKey.startsWith('completed-');
+                            
+                            // CORREÇÃO PRINCIPAL: Formatação correta do nome do mês
+                            let monthLabel = '';
+                            if (isCompletedYear) {
+                                const year = monthKey.replace('completed-', '');
+                                monthLabel = `Concluídos ${year}`;
+                            } else {
+                                // Criar uma data válida a partir da chave YYYY-MM
+                                const [year, month] = monthKey.split('-');
+                                const dateForLabel = new Date(parseInt(year), parseInt(month) - 1, 1);
+                                
+                                monthLabel = dateForLabel.toLocaleDateString('pt-BR', { 
+                                    month: 'short', 
+                                    year: 'numeric' 
+                                }).replace('.', '');
+                            }
+                            
+                            return (
+                                <div key={monthKey} className="flex-shrink-0 w-72">
+                                    {/* Header da coluna */}
+                                    <div 
+                                        className={`rounded-lg border-2 p-4 mb-4 ${
+                                            isCompletedYear
+                                                ? 'bg-green-50 border-green-300' 
+                                                : 'bg-blue-50 border-blue-300'
+                                        } ${isCompletedYear ? 'cursor-pointer hover:bg-green-100 transition-colors' : ''}`}
+                                        onClick={isCompletedYear ? () => {
+                                            const year = monthKey.replace('completed-', '');
+                                            toggleYearCollapse(year);
+                                        } : undefined}
+                                    >
+                                        <div className="flex items-center justify-between mb-2">
+                                            <h3 className={`font-semibold text-lg flex items-center gap-2 ${
+                                                isCompletedYear
+                                                    ? 'text-green-800' 
+                                                    : 'text-blue-800'
+                                            }`}>
+                                                {isCompletedYear ? (
+                                                    <CheckCircle className="h-5 w-5 text-green-700" />
+                                                ) : (
+                                                    <CalendarDays className="h-5 w-5 text-blue-700" />
+                                                )}
+                                                {monthLabel}
+                                                {isCompletedYear && (
+                                                    <button 
+                                                        className="ml-2 p-1 hover:bg-green-200 rounded transition-colors"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            const year = monthKey.replace('completed-', '');
+                                                            toggleYearCollapse(year);
+                                                        }}
+                                                    >
+                                                        {collapsedYearColumns.has(monthKey.replace('completed-', '')) ? (
+                                                            <ChevronDown className="h-4 w-4 text-green-700" />
+                                                        ) : (
+                                                            <ChevronUp className="h-4 w-4 text-green-700" />
+                                                        )}
+                                                    </button>
+                                                )}
+                                            </h3>
+                                            <Badge variant="secondary" className="font-medium">
+                                                {monthData.orders.length}
+                                            </Badge>
+                                        </div>
+                                        <div className={`text-sm ${
+                                            isCompletedYear
+                                                ? 'text-green-700' 
+                                                : 'text-blue-700'
+                                        }`}>
+                                            <div className="flex items-center gap-1">
+                                                <Weight className="h-4 w-4" />
+                                                <span className="font-medium">
+                                                    {monthData.totalWeight.toLocaleString('pt-BR', { 
+                                                        minimumFractionDigits: 2, 
+                                                        maximumFractionDigits: 2 
+                                                    })} kg
+                                                </span>
+                                            </div>
+                                            {!isCompletedYear && (
+                                                <p className="text-xs mt-1 text-muted-foreground">
+                                                    Peso dos itens com entrega neste mês
+                                                </p>
+                                            )}
+                                        </div>
+                                    </div>
+
+                                    {/* NOVO: Indicador quando colapsado */}
+                                    {isCompletedYear && collapsedYearColumns.has(monthKey.replace('completed-', '')) && (
+                                        <div className="text-center py-4 text-green-700">
+                                            <p className="text-sm font-medium">
+                                                Clique para expandir e ver os {monthData.orders.length} pedidos
+                                            </p>
+                                        </div>
+                                    )}
+
+                                    {/* Cards dos pedidos - ADICIONAR CONTROLE DE COLAPSO */}
+                                    {(!isCompletedYear || !collapsedYearColumns.has(monthKey.replace('completed-', ''))) && (
+                                        <div 
+                                            className="space-y-3 max-h-[600px] overflow-y-auto pr-2"
+                                            data-column-scroll
+                                            data-column-id={monthKey}
+                                            onScroll={(e) => {
+                                                const target = e.target as HTMLDivElement;
+                                                columnScrollPositions.current.set(monthKey, target.scrollTop);
+                                            }}
+                                        >
+                                        {monthData.orders.map(order => {
+                                            const statusProps = getStatusProps(order.status);
+                                            const orderProgress = calculateOrderProgress(order);
+
+                                            // CORREÇÃO: Sempre mostrar peso total e todos os itens do pedido
+                                            const monthSpecificWeight = order.totalWeight || 0;
+                                            const monthSpecificItems = order.items.length;
+
+                                            return (
+                                                <Card 
+                                                    key={order.id} 
+                                                    className="p-4 cursor-pointer hover:shadow-md transition-shadow duration-200 border-l-4"
+                                                    style={{
+                                                        borderLeftColor: isCompletedYear 
+                                                            ? '#16a34a' 
+                                                            : statusProps.colorClass.includes('bg-green-600') ? '#16a34a'
+                                                            : statusProps.colorClass.includes('bg-blue-500') ? '#3b82f6'
+                                                            : statusProps.colorClass.includes('bg-orange-500') ? '#f97316'
+                                                            : statusProps.colorClass.includes('bg-red-') ? '#dc2626'
+                                                            : '#6b7280'
+                                                    }}
+                                                    onClick={() => handleViewOrder(order)}
+                                                >
+                                                    <div className="space-y-3">
+                                                        {/* Header do card */}
+                                                        <div className="flex items-start justify-between">
+                                                            <div className="flex-1 min-w-0">
+                                                                <h4 className="font-semibold text-sm truncate">
+                                                                    Pedido {order.quotationNumber}
+                                                                </h4>
+                                                                <p className="text-xs text-muted-foreground truncate">
+                                                                    {order.customer.name}
+                                                                </p>
+                                                            </div>
+                                                            <Badge variant={statusProps.variant} className={`text-xs ${statusProps.colorClass}`}>
+                                                                <statusProps.icon className="mr-1 h-3 w-3" />
+                                                                {statusProps.label}
+                                                            </Badge>
                                                         </div>
-                                                        <div>
-                                                            <CardTitle className="text-lg">{supplier.supplierName}</CardTitle>
-                                                            <div className="text-sm text-muted-foreground">
-                                                                {supplier.items.length} ite{supplier.items.length !== 1 ? 'ns' : 'm'}
+
+                                                        {/* Informações do projeto e OS */}
+                                                        {(order.projectName || order.internalOS) && (
+                                                            <div className="space-y-1">
+                                                                {order.projectName && (
+                                                                    <p className="text-xs text-muted-foreground truncate">
+                                                                        📋 {order.projectName}
+                                                                    </p>
+                                                                )}
+                                                                {order.internalOS && (
+                                                                    <div className="flex items-center gap-2 flex-wrap">
+                                                                        <p className="text-xs text-muted-foreground">
+                                                                            🏷️ OS: {order.internalOS}
+                                                                        </p>
+                                                                        {order.status === 'Concluído' && (
+                                                                            <Badge variant="default" className="bg-green-600 text-white text-xs">
+                                                                                ✓ Concluído
+                                                                            </Badge>
+                                                                        )}
+                                                                    </div>
+                                                                )}
+                                                            </div>
+                                                        )}
+
+                                                        {/* Dados importantes */}
+                                                        <div className="grid grid-cols-2 gap-2 text-xs">
+                                                            <div>
+                                                                <span className="text-muted-foreground">
+                                                                    Peso Total:
+                                                                </span>
+                                                                <p className="font-medium">
+                                                                    {monthSpecificWeight.toLocaleString('pt-BR', { 
+                                                                        minimumFractionDigits: 1, 
+                                                                        maximumFractionDigits: 1 
+                                                                    })} kg
+                                                                </p>
+                                                            </div>
+                                                            <div>
+                                                                <span className="text-muted-foreground">
+                                                                    Total de Itens:
+                                                                </span>
+                                                                <p className="font-medium">{monthSpecificItems}</p>
                                                             </div>
                                                         </div>
-                                                    </div>
-                                                    <div className="text-right">
-                                                        <div className="text-xl font-bold text-green-600">
-                                                            {supplier.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+
+                                                        {/* Data de entrega */}
+                                                        {order.deliveryDate && (
+                                                            <div className="text-xs">
+                                                                <span className="text-muted-foreground">Entrega Geral:</span>
+                                                                <p className="font-medium">
+                                                                    {format(order.deliveryDate, "dd/MM/yyyy")}
+                                                                </p>
+                                                            </div>
+                                                        )}
+
+                                                        {/* Progresso */}
+                                                        {!isCompletedYear && (
+                                                            <div>
+                                                                <div className="flex items-center gap-2 mb-1">
+                                                                    <span className="text-xs text-muted-foreground">Progresso:</span>
+                                                                    <span className="text-xs font-medium">{Math.round(orderProgress)}%</span>
+                                                                </div>
+                                                                <Progress value={orderProgress} className="h-1.5" />
+                                                            </div>
+                                                        )}
+
+                                                        {/* Status dos documentos */}
+                                                        <div className="flex items-center justify-center pt-2 border-t border-border/50">
+                                                            <DocumentStatusIcons documents={order.documents} />
                                                         </div>
-                                                        <div className="text-sm text-muted-foreground">
-                                                            {percentage.toFixed(1)}% do total
-                                                        </div>
                                                     </div>
-                                                </div>
-                                                
-                                                {/* Barra de Progresso */}
-                                                <div className="w-full bg-gray-200 rounded-full h-2 mt-2">
-                                                    <div 
-                                                        className="bg-gradient-to-r from-green-400 to-green-600 h-2 rounded-full transition-all" 
-                                                        style={{ width: `${percentage}%` }}
-                                                    ></div>
-                                                </div>
-                                            </CardHeader>
-                                            
-                                            <CardContent className="pt-0">
-                                                                                                 <Table>
-                                                     <TableHeader>
-                                                         <TableRow>
-                                                             <TableHead>Item</TableHead>
-                                                             <TableHead className="text-right">Qtd</TableHead>
-                                                             <TableHead className="text-right">Peso</TableHead>
-                                                             <TableHead className="text-right">Valor Unit.</TableHead>
-                                                             <TableHead className="text-right">Total</TableHead>
-                                                             <TableHead>NF</TableHead>
-                                                             <TableHead>Req.</TableHead>
-                                                             <TableHead>Status</TableHead>
-                                                         </TableRow>
-                                                     </TableHeader>
-                                                     <TableBody>
-                                                         {supplier.items.map((item, itemIndex) => (
-                                                             <TableRow key={itemIndex}>
-                                                                 <TableCell className="font-medium">{item.description}</TableCell>
-                                                                 <TableCell className="text-right">{item.quantity}</TableCell>
-                                                                 <TableCell className="text-right text-sm">
-                                                                     {item.weight ? `${item.weight} ${item.weightUnit || 'kg'}` : '-'}
-                                                                 </TableCell>
-                                                                 <TableCell className="text-right">
-                                                                     {item.unitValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                                 </TableCell>
-                                                                 <TableCell className="text-right font-semibold text-green-600">
-                                                                     {item.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                                                                 </TableCell>
-                                                                 <TableCell className="text-sm">{item.invoiceNumber || '-'}</TableCell>
-                                                                 <TableCell className="text-sm">{item.requisitionNumber}</TableCell>
-                                                                 <TableCell>
-                                                                     <div className="space-y-1">
-                                                                         {item.deliveryDate && (
-                                                                             <div className="text-xs text-green-600">
-                                                                                 📅 {safeFormatDate(item.deliveryDate, 'dd/MM/yy')}
-                                                                             </div>
-                                                                         )}
-                                                                         {item.inspectionStatus && (
-                                                                             <Badge variant={
-                                                                                 item.inspectionStatus.includes('Aprovado') ? 'default' :
-                                                                                 item.inspectionStatus.includes('Rejeitado') ? 'destructive' :
-                                                                                 'secondary'
-                                                                             } className="text-xs">
-                                                                                 {item.inspectionStatus}
-                                                                             </Badge>
-                                                                         )}
-                                                                     </div>
-                                                                 </TableCell>
-                                                             </TableRow>
-                                                         ))}
-                                                     </TableBody>
-                                                 </Table>
-                                            </CardContent>
-                                        </Card>
-                                    );
-                                })}
-                            </div>
-                        </ScrollArea>
-
-                        {/* Rodapé com ações */}
-                        <div className="flex items-center justify-between pt-4 border-t">
-                            <div className="text-xs text-muted-foreground">
-                                Relatório gerado em: {safeFormatDate(reportData.reportDate, 'dd/MM/yyyy HH:mm')}
-                            </div>
-                            <div className="flex gap-2">
-                                                                 <Button 
-                                     variant="outline" 
-                                     onClick={() => {
-                                         // Gerar CSV
-                                         const csvHeaders = ['Fornecedor', 'Item', 'Quantidade', 'Peso', 'Unidade Peso', 'Valor Unitário', 'Valor Total', 'Nota Fiscal', 'Requisição', 'Data Entrega', 'Status Inspeção', '% do Total'];
-                                         const csvData = reportData.suppliers.flatMap(supplier => 
-                                             supplier.items.map(item => {
-                                                 const percentage = (item.totalValue / reportData.totalOrderCost) * 100;
-                                                 return [
-                                                     supplier.supplierName,
-                                                     item.description,
-                                                     item.quantity.toString(),
-                                                     item.weight?.toString() || '',
-                                                     item.weightUnit || '',
-                                                     item.unitValue.toFixed(2).replace('.', ','),
-                                                     item.totalValue.toFixed(2).replace('.', ','),
-                                                     item.invoiceNumber || '',
-                                                     item.requisitionNumber,
-                                                     item.deliveryDate ? safeFormatDate(item.deliveryDate, 'dd/MM/yyyy') : '',
-                                                     item.inspectionStatus || '',
-                                                     percentage.toFixed(2).replace('.', ',') + '%'
-                                                 ];
-                                             })
-                                         );
-
-                                         const csvContent = [
-                                             csvHeaders.join(';'),
-                                             ...csvData.map(row => row.join(';'))
-                                         ].join('\n');
-
-                                         // Adicionar BOM para caracteres especiais
-                                         const BOM = '\uFEFF';
-                                         const blob = new Blob([BOM + csvContent], { type: 'text/csv;charset=utf-8' });
-                                         const url = window.URL.createObjectURL(blob);
-                                         const link = document.createElement('a');
-                                         link.href = url;
-                                         link.download = `relatorio_materiais_OS_${selectedOrderForReport.internalOS.replace('/', '_')}_${new Date().toISOString().split('T')[0]}.csv`;
-                                         link.click();
-                                         window.URL.revokeObjectURL(url);
-                                     }}
-                                 >
-                                     📊 Exportar CSV
-                                 </Button>
-                                 <Button 
-                                     variant="outline" 
-                                     onClick={() => {
-                                         const printWindow = window.open('', '_blank');
-                                         if (printWindow) {
-                                             printWindow.document.write(`
-                                                 <html>
-                                                     <head>
-                                                         <title>Relatório - OS ${selectedOrderForReport.internalOS}</title>
-                                                         <style>
-                                                             body { font-family: Arial, sans-serif; margin: 20px; }
-                                                             .header { text-align: center; margin-bottom: 30px; }
-                                                             .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin: 30px 0; text-align: center; }
-                                                             .summary-item { border: 1px solid #ccc; padding: 15px; border-radius: 5px; }
-                                                             .supplier { margin: 30px 0; border: 2px solid #ccc; padding: 15px; border-radius: 5px; }
-                                                             .supplier-header { background-color: #f5f5f5; padding: 10px; margin: -15px -15px 15px -15px; border-radius: 5px 5px 0 0; }
-                                                             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-                                                             th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-                                                             th { background-color: #f8f9fa; font-weight: bold; }
-                                                             .total { text-align: center; margin-top: 30px; font-size: 18px; font-weight: bold; }
-                                                         </style>
-                                                     </head>
-                                                     <body>
-                                                         <div class="header">
-                                                             <h1>Relatório de Recebimento de Materiais</h1>
-                                                             <h2>OS: ${selectedOrderForReport.internalOS} - ${selectedOrderForReport.customerName}</h2>
-                                                             <p>Gerado em: ${safeFormatDate(reportData.reportDate, 'dd/MM/yyyy HH:mm')}</p>
-                                                         </div>
-                                                         <div class="summary">
-                                                             <div class="summary-item">
-                                                                 <h3 style="color: #059669; margin: 0;">${reportData.totalOrderCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</h3>
-                                                                 <p style="margin: 5px 0 0 0;">Total Gasto</p>
-                                                             </div>
-                                                             <div class="summary-item">
-                                                                 <h3 style="color: #2563eb; margin: 0;">${reportData.totalSuppliers}</h3>
-                                                                 <p style="margin: 5px 0 0 0;">Fornecedores</p>
-                                                             </div>
-                                                             <div class="summary-item">
-                                                                 <h3 style="color: #7c3aed; margin: 0;">${reportData.totalItemsReceived}</h3>
-                                                                 <p style="margin: 5px 0 0 0;">Itens Recebidos</p>
-                                                             </div>
-                                                             <div class="summary-item">
-                                                                 <h3 style="color: #ea580c; margin: 0;">${reportData.requisitionsCount}</h3>
-                                                                 <p style="margin: 5px 0 0 0;">Requisições</p>
-                                                             </div>
-                                                         </div>
-                                                         ${reportData.suppliers.map((supplier, index) => {
-                                                             const percentage = (supplier.totalCost / reportData.totalOrderCost) * 100;
-                                                             return `
-                                                                 <div class="supplier">
-                                                                     <div class="supplier-header">
-                                                                         <h3 style="margin: 0; display: flex; justify-content: space-between;">
-                                                                             <span>${index + 1}. ${supplier.supplierName}</span>
-                                                                             <span style="color: #059669;">${supplier.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} (${percentage.toFixed(1)}%)</span>
-                                                                         </h3>
-                                                                     </div>
-                                                                     <table>
-                                                                         <tr><th>Item</th><th>Qtd</th><th>Peso</th><th>Valor Unit.</th><th>Valor Total</th><th>NF</th><th>Req.</th><th>Status</th></tr>
-                                                                         ${supplier.items.map(item => `
-                                                                             <tr>
-                                                                                 <td>${item.description}</td>
-                                                                                 <td style="text-align: center;">${item.quantity}</td>
-                                                                                 <td style="text-align: center;">${item.weight ? `${item.weight} ${item.weightUnit || 'kg'}` : '-'}</td>
-                                                                                 <td style="text-align: right;">${item.unitValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
-                                                                                 <td style="text-align: right; font-weight: bold;">${item.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
-                                                                                 <td style="text-align: center;">${item.invoiceNumber || '-'}</td>
-                                                                                 <td style="text-align: center;">${item.requisitionNumber}</td>
-                                                                                 <td style="text-align: center; font-size: 11px;">${item.inspectionStatus || '-'}</td>
-                                                                             </tr>
-                                                                         `).join('')}
-                                                                     </table>
-                                                                 </div>
-                                                             `;
-                                                         }).join('')}
-                                                         <div class="total">
-                                                             <p>TOTAL GERAL: ${reportData.totalOrderCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-                                                         </div>
-                                                     </body>
-                                                 </html>
-                                             `);
-                                             printWindow.document.close();
-                                             printWindow.print();
-                                         }
-                                     }}
-                                 >
-                                     🖨️ Imprimir
-                                 </Button>
-                                <Button variant="outline" onClick={() => setIsReportModalOpen(false)}>
-                                    Fechar
-                                </Button>
-                            </div>
-                        </div>
+                                                </Card>
+                                            );
+                                        })}
+                                        
+                                        {monthData.orders.length === 0 && (
+                                            <div className="text-center py-8 text-gray-500">
+                                                <Package className="h-8 w-8 mx-auto mb-2" />
+                                                <p className="text-sm">Nenhum pedido</p>
+                                            </div>
+                                        )}
+                                    </div>
+                                    )}
+                                </div>
+                            );
+                        })}
                     </div>
-                );
-            })()}
-        </DialogContent>
-      </Dialog>
-    </>
-    );
-    } catch (error) {
-        console.error("Erro crítico na renderização da página:", error);
-        return (
-            <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
-                <div className="flex items-center justify-between space-y-2">
-                    <h1 className="text-3xl font-bold tracking-tight font-headline">Centro de Custos</h1>
-                </div>
-                <div className="flex flex-col items-center justify-center text-center text-destructive h-64 border-dashed border-2 rounded-lg">
-                    <h3 className="text-lg font-semibold">Erro ao carregar a página</h3>
-                    <p className="text-sm">Ocorreu um erro inesperado. Recarregue a página para tentar novamente.</p>
-                    <Button variant="outline" onClick={() => window.location.reload()} className="mt-4">
-                        🔄 Recarregar Página
-                    </Button>
                 </div>
             </div>
         );
+    };
+
+    // Componente de calendário
+    const CalendarView = () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        return (
+            <div className="bg-white rounded-lg border">
+                {/* Header do calendário */}
+                <div className="flex items-center justify-between p-4 border-b">
+                    <h2 className="text-lg font-semibold text-foreground">
+                        {calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
+                    </h2>
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                const newDate = new Date(calendarDate);
+                                newDate.setMonth(newDate.getMonth() - 1);
+                                setCalendarDate(newDate);
+                            }}
+                        >
+                            ←
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCalendarDate(new Date())}
+                        >
+                            Hoje
+                        </Button>
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => {
+                                const newDate = new Date(calendarDate);
+                                newDate.setMonth(newDate.getMonth() + 1);
+                                setCalendarDate(newDate);
+                            }}
+                        >
+                            →
+                        </Button>
+                    </div>
+                </div>
+
+                {/* Dias da semana */}
+                <div className="grid grid-cols-7 border-b">
+                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
+                        <div key={day} className="p-2 text-center text-sm font-medium text-gray-700 border-r last:border-r-0">
+                            {day}
+                        </div>
+                    ))}
+                </div>
+
+                {/* Grid do calendário */}
+                <div className="grid grid-cols-7">
+                    {calendarDays.map((day, index) => {
+                        const dateKey = format(day, 'yyyy-MM-dd');
+                        const ordersForDay = ordersByDate.get(dateKey) || [];
+                        const isCurrentMonth = day.getMonth() === calendarDate.getMonth();
+                        const isToday = isSameDay(day, today);
+                        const isPast = day < today;
+                        
+                        return (
+                            <div
+                                key={index}
+                                className={cn(
+                                    "min-h-[120px] p-1 border-r border-b last:border-r-0",
+                                    !isCurrentMonth && "bg-muted/20",
+                                    isToday && "bg-blue-50"
+                                )}
+                            >
+                                <div className={cn(
+                                    "text-sm mb-1 p-1",
+                                    !isCurrentMonth && "text-gray-400",
+                                    isToday && "font-bold text-blue-700",
+                                    isPast && isCurrentMonth && "text-gray-600"
+                                )}>
+                                    {day.getDate()}
+                                </div>
+                                
+                                <div className="space-y-1">
+                                    {ordersForDay.slice(0, 3).map(order => {
+                                        const statusProps = getStatusProps(order.status);
+                                        let bgColor = "bg-gray-600"; // Default
+                                        
+                                        if (statusProps.colorClass.includes('bg-green-600')) bgColor = "bg-green-600";
+                                        else if (statusProps.colorClass.includes('bg-blue-500')) bgColor = "bg-blue-500";
+                                        else if (statusProps.colorClass.includes('bg-orange-500')) bgColor = "bg-orange-500";
+                                        else if (statusProps.colorClass.includes('bg-red-')) bgColor = "bg-red-600";
+                                        
+                                        return (
+                                            <div
+                                                key={order.id}
+                                                className={cn(
+                                                    "text-xs p-1 rounded cursor-pointer hover:opacity-80 truncate",
+                                                    bgColor,
+                                                    "text-white"
+                                                )}
+                                                onClick={() => handleViewOrder(order)}
+                                                title={`${order.quotationNumber} - ${order.customer.name} - ${order.status}`}
+                                            >
+                                                <div className="font-medium truncate">
+                                                    {order.quotationNumber}
+                                                </div>
+                                                <div className="text-white/90 truncate text-[10px]">
+                                                    {order.customer.name}
+                                                </div>
+                                            </div>
+                                        );
+                                    })}
+                                    
+                                    {ordersForDay.length > 3 && (
+                                        <div className="text-xs text-muted-foreground p-1">
+                                            +{ordersForDay.length - 3} mais
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
+
+    const handleDeleteClick = (order: Order) => {
+        setOrderToDelete(order);
+        setIsDeleteDialogOpen(true);
+    };
+
+    const handleConfirmDelete = async () => {
+        if (!orderToDelete) return;
+        try {
+            await deleteDoc(doc(db, "companies", "mecald", "orders", orderToDelete.id));
+            toast({ title: "Pedido excluído!", description: "O pedido foi removido do sistema." });
+            setOrderToDelete(null);
+            setIsDeleteDialogOpen(false);
+            setIsSheetOpen(false);
+            await fetchOrders();
+        } catch (error) {
+            console.error("Error deleting order: ", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao excluir pedido",
+                description: "Não foi possível remover o pedido. Tente novamente.",
+            });
+        }
+    };
+
+    // FUNÇÃO PARA DELETAR UM ITEM
+    const handleDeleteItem = (index: number) => {
+      const currentItems = form.getValues("items");
+      const itemToRemove = currentItems[index];
+      
+      setItemToDelete({ index, item: itemToRemove });
+      setIsItemDeleteDialogOpen(true);
+    };
+
+    // FUNÇÃO PARA CONFIRMAR A EXCLUSÃO
+    const handleConfirmDeleteItem = () => {
+      if (!itemToDelete) return;
+      
+      // Remove o item usando o useFieldArray
+      const currentItems = form.getValues("items");
+      const updatedItems = currentItems.filter((_, index) => index !== itemToDelete.index);
+      form.setValue("items", updatedItems);
+      
+      // Fechar dialog
+      setIsItemDeleteDialogOpen(false);
+      setItemToDelete(null);
+      
+      toast({
+        title: "Item removido!",
+        description: `O item "${itemToDelete.item.description}" foi removido do pedido.`,
+      });
+    };
+
+    // Função para adicionar novo item
+    const handleAddNewItem = () => {
+      if (!newItemForm.description.trim()) {
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "A descrição do item é obrigatória.",
+        });
+        return;
+      }
+
+      const currentItems = form.getValues("items");
+      const newItem = {
+        id: `new-item-${Date.now()}`,
+        description: newItemForm.description.trim(),
+        itemNumber: newItemForm.itemNumber.trim(),
+        code: newItemForm.code.trim(),
+        quantity: Number(newItemForm.quantity) || 1,
+        unitWeight: Number(newItemForm.unitWeight) || 0,
+        itemDeliveryDate: null,
+        shippingDate: null,
+        shippingList: '',
+        invoiceNumber: '',
+        productionPlan: [],
+      };
+
+      form.setValue("items", [...currentItems, newItem]);
+      
+      // Limpar formulário
+      setNewItemForm({
+        description: '',
+        itemNumber: '',
+        code: '',
+        quantity: 1,
+        unitWeight: 0,
+      });
+      setIsAddingItem(false);
+
+      toast({
+        title: "Item adicionado!",
+        description: "O novo item foi adicionado ao pedido.",
+      });
+    };
+
+    // Função para cancelar adição de item
+    const handleCancelAddItem = () => {
+      setNewItemForm({
+        description: '',
+        itemNumber: '',
+        code: '',
+        quantity: 1,
+        unitWeight: 0,
+      });
+      setIsAddingItem(false);
+    };
+
+    const handlePlanChange = (stageIndex: number, field: string, value: any) => {
+      const newPlan = [...editedPlan];
+      const updatedStage = { ...newPlan[stageIndex] };
+      
+      if (field === 'workSchedule') {
+        updatedStage[field] = value;
+        // Automaticamente define useBusinessDays baseado no horário
+        updatedStage.useBusinessDays = value === 'normal';
+      } else if (field === 'startDate' || field === 'completedDate') {
+        // Código existente para datas
+        if (value === null || value === '' || value === undefined) {
+          updatedStage[field] = null;
+        } else {
+          if (typeof value === 'string' && value.includes('-')) {
+            const [year, month, day] = value.split('-').map(Number);
+            updatedStage[field] = new Date(year, month - 1, day);
+          } else {
+            updatedStage[field] = new Date(value);
+          }
+        }
+      } else if (field === 'durationDays') {
+        const numValue = value === '' ? 0 : parseFloat(value);
+        updatedStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
+      } else if (field === 'status' && value === 'Concluído') {
+        updatedStage[field] = value;
+        if (!updatedStage.completedDate) {
+          updatedStage.completedDate = new Date();
+        }
+      } else {
+        updatedStage[field] = value;
+      }
+      
+      newPlan[stageIndex] = updatedStage;
+      
+      // Manter lógica sequencial existente
+      if (field === 'startDate' || field === 'durationDays' || field === 'workSchedule') {
+        recalculateSequentialTasks(newPlan, stageIndex);
+      }
+      
+      setEditedPlan(newPlan);
+    };
+
+    // NOVA FUNÇÃO SIMPLES PARA RECÁLCULO SEQUENCIAL
+    const recalculateSequentialTasks = (plan: ProductionStage[], fromIndex: number) => {
+      console.log('🔄 Recalculando tarefas sequenciais a partir do índice:', fromIndex);
+      
+      // Primeiro, calcular a data de conclusão da tarefa atual
+      const currentStage = plan[fromIndex];
+      if (currentStage.startDate && currentStage.durationDays) {
+        const duration = Math.max(0.125, Number(currentStage.durationDays));
+        const useBusinessDays = currentStage.useBusinessDays !== false;
+        
+        if (duration <= 1) {
+          // Tarefas de 1 dia ou menos: terminam no mesmo dia
+          currentStage.completedDate = new Date(currentStage.startDate);
+        } else {
+          // Tarefas de mais de 1 dia
+          if (useBusinessDays) {
+            // Dias úteis: adicionar dias úteis
+            currentStage.completedDate = addBusinessDaysSimple(currentStage.startDate, Math.ceil(duration) - 1);
+          } else {
+            // Dias corridos: adicionar dias normais
+            currentStage.completedDate = new Date(currentStage.startDate);
+            currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration) - 1);
+          }
+        }
+      }
+      
+      // Agora recalcular todas as tarefas seguintes SEQUENCIALMENTE
+      for (let i = fromIndex + 1; i < plan.length; i++) {
+        const previousStage = plan[i - 1];
+        const currentStage = plan[i];
+        
+        if (previousStage.completedDate) {
+          // CORREÇÃO PRINCIPAL: A próxima tarefa SEMPRE inicia no mesmo dia que a anterior termina
+          currentStage.startDate = new Date(previousStage.completedDate);
+          
+          // Calcular data de conclusão
+          const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
+          const useBusinessDays = currentStage.useBusinessDays !== false;
+          
+          if (duration <= 1) {
+            // Tarefas de 1 dia ou menos: terminam no mesmo dia
+            currentStage.completedDate = new Date(currentStage.startDate);
+          } else {
+            // Tarefas de mais de 1 dia
+            if (useBusinessDays) {
+              // Se for dia útil e a data de início for fim de semana, ajustar
+              if (!isBusinessDay(currentStage.startDate)) {
+                currentStage.startDate = getNextBusinessDay(currentStage.startDate);
+              }
+              currentStage.completedDate = addBusinessDaysSimple(currentStage.startDate, Math.ceil(duration) - 1);
+            } else {
+              // Dias corridos
+              currentStage.completedDate = new Date(currentStage.startDate);
+              currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration) - 1);
+            }
+          }
+          
+          console.log(`✅ Etapa ${i + 1}: ${currentStage.stageName} | Início: ${currentStage.startDate.toLocaleDateString()} | Fim: ${currentStage.completedDate.toLocaleDateString()}`);
+        } else {
+          // Se a etapa anterior não tem data de conclusão, limpar as datas desta etapa
+          currentStage.startDate = null;
+          currentStage.completedDate = null;
+        }
+      }
+      
+      // DEBUG: Mostrar análise detalhada do acúmulo
+      if (fromIndex === 0) {
+        console.log('\n📊 EXECUTANDO DEBUG DETALHADO DO CRONOGRAMA:');
+        debugTaskAccumulation(plan);
+      }
+    };
+
+    // FUNÇÃO AUXILIAR SIMPLES PARA ADICIONAR DIAS ÚTEIS
+    const addBusinessDaysSimple = (startDate: Date, daysToAdd: number): Date => {
+      if (daysToAdd === 0) return new Date(startDate);
+      
+      let currentDate = new Date(startDate);
+      let remainingDays = daysToAdd;
+      
+      while (remainingDays > 0) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        if (isBusinessDay(currentDate)) {
+          remainingDays--;
+        }
+      }
+      
+      return currentDate;
+    };
+
+    // VERSÃO SIMPLIFICADA - Recalcular a partir de uma etapa específica
+    const recalculateFromStage = (plan: ProductionStage[], fromIndex: number) => {
+      recalculateSequentialTasks(plan, fromIndex);
+    };
+
+    // VERSÃO SIMPLIFICADA - Recalcular cronograma completo
+    const recalculateFromFirstStage = (plan: ProductionStage[]) => {
+      // Só recalcular se a primeira etapa tem data de início
+      if (plan[0] && plan[0].startDate) {
+        recalculateSequentialTasks(plan, 0);
+      }
+    };
+
+    // FUNÇÃO AUXILIAR PARA FORMATAÇÃO DE DATAS
+    const formatDate = (date: Date | null): string => {
+      if (!date) return 'N/A';
+      return date.toLocaleDateString('pt-BR', { 
+        weekday: 'short', 
+        day: '2-digit', 
+        month: '2-digit', 
+        year: 'numeric' 
+      });
+    };
+
+    // FUNÇÃO PARA MARCAR DATA BOOK COMO ENVIADO
+    const handleDataBookSent = async () => {
+        if (!selectedOrder || selectedOrder.status !== 'Concluído') {
+            toast({
+                variant: "destructive",
+                title: "Erro",
+                description: "Só é possível marcar Data Book para pedidos concluídos.",
+            });
+            return;
+        }
+
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            const updateData = {
+                dataBookSent: true,
+                dataBookSentAt: Timestamp.now(),
+                lastUpdate: Timestamp.now(),
+            };
+
+            await updateDoc(orderRef, updateData);
+
+            toast({
+                title: "Data Book marcado como enviado!",
+                description: "A informação foi salva com sucesso.",
+            });
+
+            // Atualizar estado local
+            const updatedOrder = {
+                ...selectedOrder,
+                dataBookSent: true,
+                dataBookSentAt: new Date(),
+            };
+            setSelectedOrder(updatedOrder);
+
+            // Recarregar lista
+            await fetchOrders();
+        } catch (error) {
+            console.error("Erro ao marcar Data Book:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao salvar",
+                description: "Não foi possível marcar o Data Book como enviado.",
+            });
+        }
+    };
+
+    // FUNÇÃO AUXILIAR PARA ADICIONAR APENAS DIAS ÚTEIS
+    const addBusinessDaysOnly = (startDate: Date, daysToAdd: number): Date => {
+      if (daysToAdd === 0) return new Date(startDate);
+      
+      let currentDate = new Date(startDate);
+      let remainingDays = daysToAdd;
+      
+      while (remainingDays > 0) {
+        currentDate.setDate(currentDate.getDate() + 1);
+        if (isBusinessDay(currentDate)) {
+          remainingDays--;
+        }
+      }
+      
+      return currentDate;
+    };
+
+    // FUNÇÃO DE DEBUG PARA MOSTRAR O CÁLCULO PASSO A PASSO
+    const debugTaskAccumulation = (plan: ProductionStage[]) => {
+      console.group('🔍 DEBUG - Sistema de Acúmulo de Tarefas');
+      
+      if (plan.length === 0) {
+        console.log('❌ Nenhuma tarefa para processar');
+        console.groupEnd();
+        return;
+      }
+      
+      console.log('📋 Processando', plan.length, 'tarefas...');
+      
+      // Primeira tarefa
+      const firstStage = plan[0];
+      if (!firstStage.startDate) {
+        console.log('❌ Primeira tarefa sem data de início');
+        console.groupEnd();
+        return;
+      }
+      
+      console.log(`\n1️⃣ TAREFA 1: ${firstStage.stageName}`);
+      console.log(`   Início: ${formatDate(firstStage.startDate)}`);
+      console.log(`   Duração: ${firstStage.durationDays} dias`);
+      console.log(`   Fim: ${formatDate(firstStage.completedDate)}`);
+      
+      // Variáveis de controle
+      let currentWorkingDate = new Date(firstStage.completedDate || firstStage.startDate);
+      let dailyAccumulator = 0;
+      
+      console.log(`   📍 Data de trabalho atual: ${formatDate(currentWorkingDate)}`);
+      console.log(`   📊 Acumulador inicial: ${dailyAccumulator}`);
+      
+      // Processar tarefas seguintes
+      for (let i = 1; i < plan.length; i++) {
+        const stage = plan[i];
+        const duration = Number(stage.durationDays) || 0;
+        
+        console.log(`\n${i + 1}️⃣ TAREFA ${i + 1}: ${stage.stageName}`);
+        console.log(`   Duração: ${duration} dias`);
+        console.log(`   Acumulador antes: ${dailyAccumulator}`);
+        
+        dailyAccumulator += duration;
+        console.log(`   Acumulador depois: ${dailyAccumulator}`);
+        console.log(`   Inicia em: ${formatDate(currentWorkingDate)}`);
+        
+        if (dailyAccumulator <= 1) {
+          console.log(`   ✅ Acumulador ≤ 1 → Termina no mesmo dia`);
+          console.log(`   Fim: ${formatDate(currentWorkingDate)}`);
+        } else {
+          const daysNeeded = Math.ceil(dailyAccumulator) - 1;
+          const newEndDate = addBusinessDaysOnly(currentWorkingDate, daysNeeded);
+          
+          console.log(`   🚀 Acumulador > 1 → Avança ${daysNeeded} dias úteis`);
+          console.log(`   Fim: ${formatDate(newEndDate)}`);
+          
+          currentWorkingDate = new Date(newEndDate);
+          dailyAccumulator = dailyAccumulator - Math.ceil(dailyAccumulator);
+          
+          console.log(`   📍 Nova data de trabalho: ${formatDate(currentWorkingDate)}`);
+          console.log(`   📊 Acumulador resetado: ${dailyAccumulator}`);
+        }
+      }
+      
+      console.groupEnd();
+    };
+
+    // EXEMPLO DE USO DO DEBUG EM OUTRAS FUNÇÕES:
+    // 
+    // Para usar no handleSaveProgress, adicione esta linha logo antes de salvar:
+    // debugTaskAccumulation(editedPlan);
+    //
+    // Para usar em qualquer lugar do código:
+    // console.log('🔍 ANÁLISE DO CRONOGRAMA:');
+    // debugTaskAccumulation(planArray);
+    //
+    // Exemplos de saída do debug:
+    // 🔍 DEBUG - Sistema de Acúmulo de Tarefas
+    // 📋 Processando 4 tarefas...
+    // 1️⃣ TAREFA 1: Preparação
+    //    Início: seg., 24/07/2024
+    //    Duração: 1 dias
+    //    Fim: seg., 24/07/2024
+    // 2️⃣ TAREFA 2: Corte
+    //    Duração: 0.5 dias
+    //    Acumulador antes: 0
+    //    Acumulador depois: 0.5
+    //    ✅ Acumulador ≤ 1 → Termina no mesmo dia
+
+    const dashboardStats = useMemo(() => {
+        const totalOrders = orders.length;
+        const totalWeight = orders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+        
+        const completedOrdersList = orders.filter(order => order.status === 'Concluído');
+        const completedOrders = completedOrdersList.length;
+        const completedWeight = completedOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+
+        const inProgressOrdersList = orders.filter(order => ['Em Produção', 'Aguardando Produção'].includes(order.status));
+        const inProgressOrders = inProgressOrdersList.length;
+        const inProgressWeight = inProgressOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
+
+        const delayedOrders = orders.filter(order => order.status === 'Atrasado').length;
+
+        return { 
+            totalOrders, 
+            totalWeight,
+            completedOrders, 
+            completedWeight,
+            inProgressOrders, 
+            inProgressWeight,
+            delayedOrders 
+        };
+    }, [orders]);
+
+    const handleItemSelection = (itemId: string) => {
+        setSelectedItems(prev => {
+            const newSet = new Set(prev);
+            if (newSet.has(itemId)) {
+                newSet.delete(itemId);
+            } else {
+                newSet.add(itemId);
+            }
+            return newSet;
+        });
+    };
+
+    const handleSelectAll = (checked: boolean | 'indeterminate') => {
+        if (checked === true && selectedOrder) {
+            const allItemIds = new Set(selectedOrder.items.map(item => item.id!));
+            setSelectedItems(allItemIds);
+        } else {
+            setSelectedItems(new Set());
+        }
+    };
+
+    const resetPackingSlipQuantities = () => {
+        if (!selectedOrder) return;
+        const newQuantities = new Map<string, number>();
+        selectedOrder.items.forEach(item => {
+            if (selectedItems.has(item.id!)) {
+                newQuantities.set(item.id!, item.quantity);
+            }
+        });
+        setPackingSlipQuantities(newQuantities);
+    };
+
+    // Função para gerar e salvar número sequencial do romaneio
+    const getNextPackingSlipNumber = async (): Promise<string> => {
+        try {
+            const counterRef = doc(db, "companies", "mecald", "settings", "counters");
+            const counterSnap = await getDoc(counterRef);
+            
+            let currentNumber = 1;
+            
+            if (counterSnap.exists()) {
+                currentNumber = (counterSnap.data().packingSlipNumber || 0) + 1;
+            }
+            
+            // Atualizar o contador no Firestore
+            await updateDoc(counterRef, {
+                packingSlipNumber: currentNumber,
+                lastPackingSlipDate: Timestamp.now()
+            }).catch(async (error) => {
+                // Se o documento não existe, criar
+                if (error.code === 'not-found') {
+                    await setDoc(counterRef, {
+                        packingSlipNumber: currentNumber,
+                        lastPackingSlipDate: Timestamp.now()
+                    });
+                }
+            });
+            
+            // Formatar com zeros à esquerda (ex: 000001)
+            return currentNumber.toString().padStart(6, '0');
+        } catch (error) {
+            console.error("Erro ao gerar número do romaneio:", error);
+            // Fallback: usar timestamp se houver erro
+            return Date.now().toString().slice(-6);
+        }
+    };
+    
+    const handleGeneratePackingSlip = async () => {
+        if (!selectedOrder || selectedItems.size === 0) return;
+
+        toast({ title: "Gerando Romaneio...", description: "Por favor, aguarde." });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            // Gerar número sequencial do romaneio
+            const packingSlipNumber = await getNextPackingSlipNumber();
+            
+            // Filtrar itens selecionados e usar quantidades customizadas
+            const itemsToInclude = selectedOrder.items
+                .filter(item => selectedItems.has(item.id!))
+                .map(item => {
+                    const selectedQty = packingSlipQuantities.get(item.id!) || item.quantity;
+                    return {
+                        ...item,
+                        displayQuantity: selectedQty // Quantidade a ser exibida no romaneio
+                    };
+                });
+            
+            // Calcular peso total baseado nas quantidades selecionadas
+            const totalWeightOfSelection = itemsToInclude.reduce((acc, item) => {
+                const qty = Number(item.displayQuantity) || 0;
+                const unitWeight = Number(item.unitWeight) || 0;
+                return acc + (qty * unitWeight);
+            }, 0);
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let yPos = 15;
+
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+
+            let textX = 65;
+            let textY = yPos;
+            docPdf.setFontSize(18).setFont('helvetica', 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+            textY += 6;
+            
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+                docPdf.text(addressLines, textX, textY);
+                textY += (addressLines.length * 3.5);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+            }
+            
+            yPos = 55;
+            docPdf.setFontSize(14).setFont('helvetica', 'bold');
+            docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 10;
+
+            // Número do Romaneio centralizado e destacado
+            docPdf.setFontSize(10).setFont('helvetica', 'bold');
+            docPdf.setTextColor(37, 99, 235); // Cor azul
+            docPdf.text(`Romaneio Nº ${packingSlipNumber}`, pageWidth / 2, yPos, { align: 'center' });
+            docPdf.setTextColor(0, 0, 0); // Voltar para preto
+            yPos += 15;
+
+            // Informações do pedido em grid
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
+
+            // Linha 1: Pedido e Data de Emissão
+            docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
+            docPdf.text(`Data Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 6;
+
+            // Linha 2: Cliente e OS
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
+            docPdf.text(`OS: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 6;
+
+            // Linha 3: Projeto (se houver) e Data de Entrega
+            if (selectedOrder.projectName || selectedOrder.deliveryDate) {
+                if (selectedOrder.projectName) {
+                    docPdf.text(`Projeto: ${selectedOrder.projectName}`, 15, yPos);
+                }
+                if (selectedOrder.deliveryDate) {
+                    docPdf.setFont('helvetica', 'bold');
+                    docPdf.text(`Data Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+                    docPdf.setFont('helvetica', 'normal');
+                }
+                yPos += 6;
+            }
+
+            yPos += 8;
+
+            // Criar corpo da tabela com quantidades selecionadas
+            const tableBody = itemsToInclude.map(item => {
+                const selectedQty = Number(item.displayQuantity) || 0;
+                const itemTotalWeight = selectedQty * (Number(item.unitWeight) || 0);
+                return [
+                    item.itemNumber || '-',
+                    item.code || '-',
+                    item.description,
+                    selectedQty.toString(), // Usar quantidade selecionada
+                    (Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                    itemTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                ];
+            });
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Nº Item', 'Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
+                body: tableBody,
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255, halign: 'center' },
+                columnStyles: {
+                    0: { cellWidth: 18, halign: 'center' },
+                    1: { cellWidth: 18 },
+                    2: { cellWidth: 'auto' },
+                    3: { cellWidth: 18, halign: 'center' },
+                    4: { cellWidth: 28, halign: 'center' },
+                    5: { cellWidth: 28, halign: 'center' },
+                }
+            });
+
+            let finalY = (docPdf as any).lastAutoTable.finalY;
+            const footerStartY = pageHeight - 35;
+
+            if (finalY + 20 > footerStartY) {
+                docPdf.addPage();
+                finalY = 15;
+            }
+
+            docPdf.setFontSize(11).setFont('helvetica', 'bold');
+            docPdf.text(
+                `Peso Total dos Itens: ${totalWeightOfSelection.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg`, 
+                pageWidth - 15, finalY + 12, { align: 'right' }
+            );
+
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            docPdf.text('Recebido por:', 15, footerStartY);
+            docPdf.line(40, footerStartY, 120, footerStartY);
+            docPdf.text('Data:', 15, footerStartY + 8);
+            docPdf.line(28, footerStartY + 8, 85, footerStartY + 8);
+
+            docPdf.save(`Romaneio_${packingSlipNumber}_Pedido_${selectedOrder.quotationNumber}.pdf`);
+            
+            toast({
+                title: "Romaneio gerado com sucesso!",
+                description: `Romaneio Nº ${packingSlipNumber} foi criado e baixado.`,
+            });
+            
+            // Fechar o dialog após gerar
+            setIsPackingSlipDialogOpen(false);
+            
+        } catch (error) {
+            console.error("Error generating packing slip:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar romaneio",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
+
+    const handleExportSchedule = async () => {
+        if (!selectedOrder) return;
+
+        toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            let yPos = 15;
+
+            // Header com logo e informações da empresa
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+
+            // Informações da empresa ao lado da logo
+            let companyInfoX = 65;
+            let companyInfoY = yPos + 5;
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', companyInfoX, companyInfoY);
+            companyInfoY += 6;
+            
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - companyInfoX - 15);
+                docPdf.text(addressLines, companyInfoX, companyInfoY);
+                companyInfoY += (addressLines.length * 3);
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, companyInfoX, companyInfoY);
+                companyInfoY += 4;
+            }
+            if (companyData.email) {
+                docPdf.text(`Email: ${companyData.email}`, companyInfoX, companyInfoY);
+                companyInfoY += 4;
+            }
+            if (companyData.celular) {
+                docPdf.text(`Telefone: ${companyData.celular}`, companyInfoX, companyInfoY);
+            }
+
+            yPos = 45;
+
+            // Título do documento
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 15;
+
+            // Informações do pedido em duas colunas
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
+            
+            // Coluna esquerda
+            const leftColumnX = 15;
+            let leftColumnY = yPos;
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+            leftColumnY += 6;
+            docPdf.setFont('helvetica', 'normal');
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            if (selectedOrder.projectName) {
+                docPdf.text(`Projeto: ${selectedOrder.projectName}`, leftColumnX, leftColumnY);
+                leftColumnY += 5;
+            }
+            
+            // Coluna direita
+            const rightColumnX = pageWidth / 2 + 10;
+            let rightColumnY = yPos + 6; // Alinha com o início dos dados
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+            if (selectedOrder.deliveryDate) {
+                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+                rightColumnY += 5;
+            }
+            docPdf.text(`Status: ${selectedOrder.status}`, rightColumnX, rightColumnY);
+            
+            yPos = Math.max(leftColumnY, rightColumnY) + 10;
+
+            // Progresso geral do pedido
+            const orderProgress = calculateOrderProgress(selectedOrder);
+            
+            // Título do progresso geral
+            docPdf.setFontSize(10).setFont('helvetica', 'bold');
+            docPdf.text('PROGRESSO GERAL DO PEDIDO:', 15, yPos);
+            yPos += 8;
+            
+            // Barra de progresso geral
+            const progressBarWidth = 120;
+            const progressBarHeight = 8;
+            const progressBarX = 15;
+            
+            // Fundo da barra (cinza claro)
+            docPdf.setFillColor(230, 230, 230);
+            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'F');
+            
+            // Barra de progresso colorida
+            const progressWidth = (orderProgress / 100) * progressBarWidth;
+            if (orderProgress < 30) {
+                docPdf.setFillColor(239, 68, 68); // Vermelho
+            } else if (orderProgress < 70) {
+                docPdf.setFillColor(245, 158, 11); // Amarelo
+            } else {
+                docPdf.setFillColor(34, 197, 94); // Verde
+            }
+            docPdf.rect(progressBarX, yPos, progressWidth, progressBarHeight, 'F');
+            
+            // Borda da barra
+            docPdf.setDrawColor(0, 0, 0);
+            docPdf.setLineWidth(0.1);
+            docPdf.rect(progressBarX, yPos, progressBarWidth, progressBarHeight, 'S');
+            
+            // Texto da porcentagem
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            docPdf.setTextColor(0, 0, 0);
+            docPdf.text(`${orderProgress.toFixed(1)}%`, progressBarX + progressBarWidth + 5, yPos + 6);
+            
+            yPos += progressBarHeight + 15;
+
+            // Tabela do cronograma
+            const tableBody: any[][] = [];
+            selectedOrder.items.forEach(item => {
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    // Cabeçalho do item com código, descrição e quantidade na mesma linha
+                    const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
+                    tableBody.push([{ 
+                        content: itemHeader, 
+                        colSpan: 5, 
+                        styles: { 
+                            fontStyle: 'bold', 
+                            fillColor: '#f0f0f0',
+                            fontSize: 9
+                        } 
+                    }]);
+                    
+                    // Linha com barra de progresso do item
+                    const itemProgress = calculateItemProgress(item);
+                    tableBody.push([{ 
+                        content: `Progresso: ${itemProgress.toFixed(1)}%`, 
+                        colSpan: 5, 
+                        styles: { 
+                            fontSize: 8,
+                            textColor: '#666666',
+                            cellPadding: { top: 2, right: 3, bottom: 2, left: 3 }
+                        } 
+                    }]);
+                    
+                    // Etapas do item
+                    item.productionPlan.forEach(stage => {
+                        tableBody.push([
+                            `  • ${stage.stageName}`,
+                            stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : 'N/A',
+                            stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : 'N/A',
+                            `${stage.durationDays || 0} dia(s)`,
+                            stage.status,
+                        ]);
+                    });
+                    
+                    // Linha em branco para separar itens
+                    tableBody.push([{ content: '', colSpan: 5, styles: { minCellHeight: 3 } }]);
+                }
+            });
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Etapa', 'Início Previsto', 'Fim Previsto', 'Duração', 'Status']],
+                body: tableBody,
+                styles: { 
+                    fontSize: 8,
+                    cellPadding: 2
+                },
+                headStyles: { 
+                    fillColor: [37, 99, 235], 
+                    fontSize: 9, 
+                    textColor: 255,
+                    fontStyle: 'bold'
+                },
+                columnStyles: {
+                    0: { cellWidth: 60 }, // Etapa
+                    1: { cellWidth: 25, halign: 'center' }, // Início
+                    2: { cellWidth: 25, halign: 'center' }, // Fim
+                    3: { cellWidth: 20, halign: 'center' }, // Duração
+                    4: { cellWidth: 25, halign: 'center' }, // Status
+                },
+                didParseCell: (data) => {
+                    if (data.cell.raw && (data.cell.raw as any).colSpan) {
+                        data.cell.styles.halign = 'left';
+                    }
+                },
+                didDrawCell: (data) => {
+                    // Verifica se é uma linha de progresso do item
+                    if (data.cell.raw && typeof data.cell.raw === 'string' && data.cell.raw.startsWith('Progresso:')) {
+                        const progressText = data.cell.raw as string;
+                        const progressMatch = progressText.match(/(\d+\.?\d*)%/);
+                        
+                        if (progressMatch) {
+                            const progress = parseFloat(progressMatch[1]);
+                            
+                            // Posição e dimensões da barra (ajustada para melhor posicionamento)
+                            const barX = data.cell.x + 80; // Posição após o texto "Progresso: XX.X%"
+                            const barY = data.cell.y + 3;
+                            const barWidth = 70;
+                            const barHeight = 5;
+                            
+                            // Fundo da barra (cinza claro)
+                            docPdf.setFillColor(230, 230, 230);
+                            docPdf.rect(barX, barY, barWidth, barHeight, 'F');
+                            
+                            // Barra de progresso colorida baseada na porcentagem
+                            const fillWidth = (progress / 100) * barWidth;
+                            if (fillWidth > 0) { // Só desenha se houver progresso
+                                if (progress < 30) {
+                                    docPdf.setFillColor(239, 68, 68); // Vermelho para progresso baixo
+                                } else if (progress < 70) {
+                                    docPdf.setFillColor(245, 158, 11); // Amarelo para progresso médio
+                                } else {
+                                    docPdf.setFillColor(34, 197, 94); // Verde para progresso alto
+                                }
+                                docPdf.rect(barX, barY, fillWidth, barHeight, 'F');
+                            }
+                            
+                            // Borda da barra para definir melhor o contorno
+                            docPdf.setDrawColor(0, 0, 0);
+                            docPdf.setLineWidth(0.2);
+                            docPdf.rect(barX, barY, barWidth, barHeight, 'S');
+                        }
+                    }
+                },
+                margin: { left: 15, right: 15 }
+            });
+
+            // Rodapé com informações adicionais
+            const finalY = (docPdf as any).lastAutoTable.finalY;
+            const pageHeight = docPdf.internal.pageSize.height;
+            
+            if (finalY + 30 < pageHeight - 20) {
+                yPos = finalY + 15;
+                docPdf.setFontSize(8).setFont('helvetica', 'italic');
+                docPdf.text(
+                    `Documento gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    yPos,
+                    { align: 'center' }
+                );
+            }
+
+            docPdf.save(`Cronograma_Pedido_${selectedOrder.quotationNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
+
+        } catch (error) {
+            console.error("Error generating schedule PDF:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar cronograma",
+                description: "Não foi possível gerar o arquivo PDF.",
+            });
+        }
+    };
+
+    const handleOpenProgressModal = async (item: OrderItem) => {
+        setItemToTrack(item);
+        setIsProgressModalOpen(true);
+        setEditedPlan([]);
+        setIsFetchingPlan(true);
+
+        try {
+            // Apenas carregar template do produto
+            const productDoc = item.code ? 
+                await getDoc(doc(db, "companies", "mecald", "products", item.code)) : 
+                null;
+
+            let productTemplateMap = new Map<string, any>();
+            
+            if (productDoc && productDoc.exists()) {
+                const template = productDoc.data().productionPlanTemplate || [];
+                template.forEach((stage: any) => {
+                    productTemplateMap.set(stage.stageName, {
+                        durationDays: stage.durationDays || 0,
+                        workSchedule: stage.workSchedule || 'normal'
+                    });
+                });
+            }
+
+            let finalPlan: ProductionStage[];
+
+            if (item.productionPlan && item.productionPlan.length > 0) {
+                finalPlan = item.productionPlan.map(stage => {
+                    const templateData = productTemplateMap.get(stage.stageName) || {};
+                    
+                    return {
+                        stageName: stage.stageName || '',
+                        status: stage.status || 'Pendente',
+                        durationDays: stage.durationDays ?? templateData.durationDays ?? 0,
+                        workSchedule: stage.workSchedule ?? templateData.workSchedule ?? 'normal',
+                        useBusinessDays: stage.workSchedule === 'normal',
+                        startDate: stage.startDate ? safeToDate(stage.startDate) : null,
+                        completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
+                    };
+                });
+            } else {
+                finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, templateData]) => ({
+                    stageName,
+                    durationDays: templateData.durationDays,
+                    workSchedule: templateData.workSchedule,
+                    useBusinessDays: templateData.workSchedule === 'normal',
+                    status: "Pendente",
+                    startDate: null,
+                    completedDate: null,
+                }));
+            }
+
+            setEditedPlan(finalPlan);
+        } catch(error) {
+            console.error("Erro ao preparar plano de produção:", error);
+            setEditedPlan([]);
+        } finally {
+            setIsFetchingPlan(false);
+        }
+    };
+
+    // ==========================================
+    // CORREÇÃO DEFINITIVA DO SALVAMENTO NO FIRESTORE
+    // ==========================================
+
+    // 1. FUNÇÃO PARA VERIFICAR E CORRIGIR ESTRUTURA DOS DADOS
+    const validateAndCleanItemData = (item: any) => {
+        console.log('🧹 [validateAndCleanItemData] Limpando item:', item.id);
+        
+        // Remove campos undefined, null vazios e problemáticos
+        const cleanItem = {
+            id: item.id || `item_${Date.now()}`,
+            description: item.description || '',
+            quantity: Number(item.quantity) || 0,
+            unitWeight: Number(item.unitWeight) || 0,
+            code: item.code || '',
+            itemNumber: item.itemNumber || '',
+            // Garante que campos opcionais sejam removidos se undefined
+            ...(item.itemDeliveryDate && { itemDeliveryDate: item.itemDeliveryDate }),
+            ...(item.shippingDate && { shippingDate: item.shippingDate }),
+            ...(item.shippingList && { shippingList: item.shippingList }),
+            ...(item.invoiceNumber && { invoiceNumber: item.invoiceNumber }),
+        };
+        
+        // Processar productionPlan de forma mais cuidadosa
+        if (item.productionPlan && Array.isArray(item.productionPlan)) {
+            cleanItem.productionPlan = item.productionPlan
+                .filter(stage => stage && stage.stageName) // Remove etapas vazias
+                .map(stage => ({
+                    stageName: String(stage.stageName).trim(),
+                    status: stage.status || 'Pendente',
+                    durationDays: Number(stage.durationDays) || 0,
+                    useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                    workSchedule: stage.workSchedule || 'normal',
+                    startDate: stage.startDate || null,
+                    completedDate: stage.completedDate || null,
+                }));
+        } else {
+            cleanItem.productionPlan = [];
+        }
+        
+        console.log('🧹 [validateAndCleanItemData] Item limpo:', {
+            id: cleanItem.id,
+            planStages: cleanItem.productionPlan.length,
+            planSummary: cleanItem.productionPlan.map(s => ({
+                name: s.stageName,
+                status: s.status,
+                hasStart: !!s.startDate,
+                hasEnd: !!s.completedDate,
+                workSchedule: s.workSchedule
+            }))
+        });
+        
+        return cleanItem;
+    };
+
+
+
+    // 2. FUNÇÃO CORRIGIDA DE SALVAMENTO QUE PRESERVA TODOS OS DADOS
+    const handleSaveProgress = async () => {
+        if (!selectedOrder || !itemToTrack) {
+            console.error('❌ [handleSaveProgress] Dados obrigatórios ausentes');
+            return;
+        }
+
+        console.log('💾 [handleSaveProgress] =================================');
+        console.log('💾 [handleSaveProgress] INICIANDO SALVAMENTO COMPLETO');
+        console.log('💾 [handleSaveProgress] =================================');
+        console.log('💾 [handleSaveProgress] Order ID:', selectedOrder.id);
+        console.log('💾 [handleSaveProgress] Item ID:', itemToTrack.id);
+        console.log('💾 [handleSaveProgress] Plano editado:', editedPlan.map(s => ({
+            name: s.stageName,
+            status: s.status,
+            start: s.startDate ? s.startDate.toISOString() : null,
+            end: s.completedDate ? s.completedDate.toISOString() : null,
+            duration: s.durationDays,
+            businessDays: s.useBusinessDays,
+            assignedResource: s.assignedResource,
+            supervisor: s.supervisor
+        })));
+
+        try {
+            // 1. Buscar dados atuais do pedido COMPLETOS
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            const currentOrderSnap = await getDoc(orderRef);
+            
+            if (!currentOrderSnap.exists()) {
+                throw new Error("Pedido não encontrado no banco de dados.");
+            }
+            
+            const currentOrderData = currentOrderSnap.data();
+            console.log('💾 [handleSaveProgress] Dados atuais carregados, itens:', currentOrderData.items?.length || 0);
+
+            // 2. Converter plano editado para formato Firestore com validação
+            const convertedProductionPlan = editedPlan
+                .filter(stage => stage.stageName && stage.stageName.trim()) // Remove etapas vazias
+                .map((stage, index) => {
+                    console.log(`💾 [handleSaveProgress] Convertendo etapa ${index + 1}: ${stage.stageName}`);
+                    
+                    let startTimestamp = null;
+                    let endTimestamp = null;
+                    
+                    // Conversão de data de início
+                    if (stage.startDate) {
+                        if (stage.startDate instanceof Date && !isNaN(stage.startDate.getTime())) {
+                            startTimestamp = Timestamp.fromDate(stage.startDate);
+                            console.log(`💾 [handleSaveProgress] ✓ Data início convertida: ${stage.startDate.toISOString()}`);
+                        } else {
+                            console.warn(`💾 [handleSaveProgress] ⚠️ Data início inválida ignorada:`, stage.startDate);
+                        }
+                    }
+                    
+                    // Conversão de data de conclusão
+                    if (stage.completedDate) {
+                        if (stage.completedDate instanceof Date && !isNaN(stage.completedDate.getTime())) {
+                            endTimestamp = Timestamp.fromDate(stage.completedDate);
+                            console.log(`💾 [handleSaveProgress] ✓ Data fim convertida: ${stage.completedDate.toISOString()}`);
+                        } else {
+                            console.warn(`💾 [handleSaveProgress] ⚠️ Data fim inválida ignorada:`, stage.completedDate);
+                        }
+                    }
+                    
+                    const convertedStage = {
+                        stageName: String(stage.stageName).trim(),
+                        status: String(stage.status || 'Pendente'),
+                        durationDays: Number(stage.durationDays) || 0,
+                        useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                        startDate: startTimestamp,
+                        completedDate: endTimestamp,
+                        // NOVO: Adicionar campos de recurso e supervisor
+                        assignedResource: stage.assignedResource || null,
+                        supervisor: stage.supervisor || null,
+                    };
+                    
+                    console.log(`💾 [handleSaveProgress] ✓ Etapa ${index + 1} convertida:`, {
+                        name: convertedStage.stageName,
+                        status: convertedStage.status,
+                        duration: convertedStage.durationDays,
+                        businessDays: convertedStage.useBusinessDays,
+                        hasStart: !!convertedStage.startDate,
+                        hasEnd: !!convertedStage.completedDate,
+                        hasResource: !!convertedStage.assignedResource,
+                        hasSupervisor: !!convertedStage.supervisor
+                    });
+                    
+                    return convertedStage;
+                });
+
+            console.log('💾 [handleSaveProgress] Plano convertido completo:', convertedProductionPlan.length, 'etapas');
+
+            // 3. Atualizar APENAS o item específico preservando TODOS os outros dados
+            const updatedItems = currentOrderData.items.map((item: any) => {
+                if (item.id === itemToTrack.id) {
+                    console.log('💾 [handleSaveProgress] ✓ Atualizando item alvo:', item.id);
+                    
+                    // Limpar e validar dados do item
+                    const cleanedItem = validateAndCleanItemData(item);
+                    
+                    // Substituir APENAS o productionPlan
+                    cleanedItem.productionPlan = convertedProductionPlan;
+                    cleanedItem.lastProgressUpdate = Timestamp.now();
+                    
+                    console.log('💾 [handleSaveProgress] ✓ Item atualizado com novo plano');
+                    return cleanedItem;
+                } else {
+                    // Para outros itens, limpar mas manter dados existentes
+                    const cleanedItem = validateAndCleanItemData(item);
+                    
+                    // Preservar productionPlan existente com limpeza
+                    if (item.productionPlan && Array.isArray(item.productionPlan)) {
+                        cleanedItem.productionPlan = item.productionPlan.map(stage => ({
+                            stageName: String(stage.stageName || '').trim(),
+                            status: String(stage.status || 'Pendente'),
+                            durationDays: Number(stage.durationDays) || 0,
+                            useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                            startDate: stage.startDate || null,
+                            completedDate: stage.completedDate || null,
+                            // NOVO: Preservar campos de recurso e supervisor
+                            assignedResource: stage.assignedResource || null,
+                            supervisor: stage.supervisor || null,
+                        }));
+                    }
+                    
+                    return cleanedItem;
+                }
+            });
+
+            console.log('💾 [handleSaveProgress] Total de itens processados:', updatedItems.length);
+
+            // 4. PREPARAR DADOS PARA SALVAMENTO FINAL
+            const updateData = {
+                items: updatedItems,
+                lastUpdate: Timestamp.now(),
+                lastProgressUpdate: Timestamp.now(),
+                // Preserva outros campos do pedido
+                ...(currentOrderData.customer && { customer: currentOrderData.customer }),
+                ...(currentOrderData.quotationNumber && { quotationNumber: currentOrderData.quotationNumber }),
+                ...(currentOrderData.status && { status: currentOrderData.status }),
+                ...(currentOrderData.deliveryDate && { deliveryDate: currentOrderData.deliveryDate }),
+                ...(currentOrderData.driveLink && { driveLink: currentOrderData.driveLink }),
+                ...(currentOrderData.documents && { documents: currentOrderData.documents }),
+            };
+
+            console.log('💾 [handleSaveProgress] Dados finais preparados para salvamento');
+
+            // 5. SALVAR NO FIRESTORE COM MERGE
+            await updateDoc(orderRef, updateData);
+            console.log('💾 [handleSaveProgress] ✅ DADOS SALVOS NO FIRESTORE COM SUCESSO!');
+
+            // 6. VERIFICAÇÃO IMEDIATA DOS DADOS SALVOS
+            console.log('🔍 [handleSaveProgress] Verificando dados salvos...');
+            const verificationSnap = await getDoc(orderRef);
+            if (verificationSnap.exists()) {
+                const savedData = verificationSnap.data();
+                const savedItem = savedData.items.find((item: any) => item.id === itemToTrack.id);
+                
+                if (savedItem && savedItem.productionPlan) {
+                    console.log('✅ [handleSaveProgress] VERIFICAÇÃO: Dados salvos corretamente:', {
+                        itemId: savedItem.id,
+                        planStages: savedItem.productionPlan.length,
+                        stages: savedItem.productionPlan.map((s: any) => ({
+                            name: s.stageName,
+                            status: s.status,
+                            start: s.startDate ? (s.startDate.toDate ? s.startDate.toDate().toISOString() : 'Invalid') : null,
+                            end: s.completedDate ? (s.completedDate.toDate ? s.completedDate.toDate().toISOString() : 'Invalid') : null
+                        }))
+                    });
+                } else {
+                    console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Item não encontrado ou sem plano');
+                }
+            } else {
+                console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Documento não existe');
+            }
+
+            // 7. Verificar status geral
+            const allItemsCompleted = updatedItems.every((item: any) => {
+                if (item.productionPlan && item.productionPlan.length > 0) {
+                    return item.productionPlan.every((p: any) => p.status === 'Concluído');
+                }
+                return true;
+            });
+
+            if (allItemsCompleted && currentOrderData.status !== 'Concluído') {
+                await updateDoc(orderRef, { 
+                    status: "Concluído",
+                    completedAt: Timestamp.now(),
+                    lastUpdate: Timestamp.now()
+                });
+                
+                toast({ 
+                    title: "🎉 Pedido Concluído!", 
+                    description: "Todos os itens foram finalizados. Status atualizado automaticamente." 
+                });
+            } else {
+                toast({ 
+                    title: "✅ Progresso Salvo!", 
+                    description: "As etapas foram salvas e estarão disponíveis em todos os dispositivos." 
+                });
+            }
+
+            // 8. Fechar modal
+            setIsProgressModalOpen(false);
+            setItemToTrack(null);
+
+            // 9. RECARREGAR DADOS LOCAIS
+            console.log('🔄 [handleSaveProgress] Recarregando dados locais...');
+            
+            // Aguardar um pouco para garantir que o Firestore processou
+            await new Promise(resolve => setTimeout(resolve, 500));
+            
+            const allOrders = await fetchOrders();
+            const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
+            
+            if (updatedOrderInList) {
+                setSelectedOrder(updatedOrderInList);
+                form.reset({
+                    ...updatedOrderInList,
+                    status: updatedOrderInList.status as any,
+                });
+                console.log('✅ [handleSaveProgress] Estado local atualizado com sucesso');
+            } else {
+                console.warn('⚠️ [handleSaveProgress] Pedido não encontrado após recarregamento');
+            }
+
+            console.log('💾 [handleSaveProgress] =================================');
+            console.log('💾 [handleSaveProgress] SALVAMENTO CONCLUÍDO COM SUCESSO');
+            console.log('💾 [handleSaveProgress] =================================');
+
+        } catch (error) {
+            console.error("❌ [handleSaveProgress] ERRO CRÍTICO:", error);
+            console.error("❌ [handleSaveProgress] Stack:", error.stack);
+            
+            toast({ 
+                variant: "destructive", 
+                title: "Erro Crítico no Salvamento", 
+                description: `Falha ao salvar: ${error instanceof Error ? error.message : 'Erro desconhecido'}. Tente novamente.` 
+            });
+        }
+    };
+
+    // Funções de auto-preenchimento inteligente
+    const autoScheduleFromToday = () => {
+        const today = new Date();
+        const updatedPlan = editedPlan.map((stage, index) => {
+            if (index === 0) {
+                return {
+                    ...stage,
+                    startDate: today,
+                    status: stage.status === 'Pendente' ? 'Em Andamento' : stage.status
+                };
+            }
+            return stage;
+        });
+        setEditedPlan(updatedPlan);
+        toast({
+            title: "Agendamento automático aplicado",
+            description: "Primeira etapa agendada para hoje e marcada como 'Em Andamento'"
+        });
+    };
+
+    const markPreviousAsCompleted = () => {
+        const updatedPlan = editedPlan.map((stage, index) => {
+            const currentIndex = editedPlan.findIndex(s => s.status === 'Em Andamento');
+            if (index < currentIndex && stage.status !== 'Concluído') {
+                return {
+                    ...stage,
+                    status: 'Concluído',
+                    completedDate: stage.startDate || new Date()
+                };
+            }
+            return stage;
+        });
+        setEditedPlan(updatedPlan);
+        toast({
+            title: "Etapas anteriores marcadas como concluídas",
+            description: "Todas as etapas anteriores à atual foram finalizadas"
+        });
+    };
+
+    const applyStandardDurations = () => {
+        const standardDurations = {
+            'Preparação': 1,
+            'Corte': 2,
+            'Soldagem': 3,
+            'Usinagem': 2,
+            'Montagem': 2,
+            'Pintura': 1,
+            'Inspeção': 0.5,
+            'Embalagem': 0.5
+        };
+
+        const updatedPlan = editedPlan.map(stage => {
+            const standardDuration = standardDurations[stage.stageName] || 1;
+            return {
+                ...stage,
+                durationDays: standardDuration
+            };
+        });
+        setEditedPlan(updatedPlan);
+        toast({
+            title: "Durações padrão aplicadas",
+            description: "Durações padrão foram aplicadas a todas as etapas"
+        });
+    };
+
+    // Função para ícones de status
+    const getStatusIcon = (status: string) => {
+        switch(status) {
+            case 'Concluído': 
+                return <CheckCircle className="h-4 w-4 text-green-500" />;
+            case 'Em Andamento': 
+                return <PlayCircle className="h-4 w-4 text-blue-500" />;
+            default: 
+                return <Clock className="h-4 w-4 text-gray-400" />;
+        }
+    };
+    
+    const handleCopyProgress = (itemToCopy: OrderItem) => {
+        setProgressClipboard(itemToCopy);
+        toast({
+            title: "Progresso copiado!",
+            description: `Selecione 'Colar' no item de destino para aplicar as etapas de "${itemToCopy.description}".`,
+        });
+    };
+
+    const handleCancelCopy = () => {
+        setProgressClipboard(null);
+    };
+
+    const handlePasteProgress = async (targetItem: OrderItem) => {
+        if (!progressClipboard || !selectedOrder) {
+            toast({ variant: "destructive", title: "Erro", description: "Nenhum progresso na área de transferência." });
+            return;
+        }
+
+        try {
+            const sourceProductionPlan = progressClipboard.productionPlan || [];
+            
+            const updatedItems = selectedOrder.items.map(item => {
+                if (item.id === targetItem.id) {
+                    const newPlan = JSON.parse(JSON.stringify(sourceProductionPlan));
+                    return { ...item, productionPlan: newPlan };
+                }
+                return item;
+            });
+
+            const itemsForFirestore = updatedItems.map(item => {
+                const planForFirestore = (item.productionPlan || []).map(p => ({
+                    ...p,
+                    startDate: p.startDate ? Timestamp.fromDate(new Date(p.startDate)) : null,
+                    completedDate: p.completedDate ? Timestamp.fromDate(new Date(p.completedDate)) : null,
+                    status: p.status || 'Pendente',
+                    stageName: p.stageName || '',
+                    durationDays: p.durationDays || 0,
+                }));
+                
+                return {
+                    ...item,
+                    productionPlan: planForFirestore,
+                    itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
+                    shippingDate: item.shippingDate ? Timestamp.fromDate(new Date(item.shippingDate)) : null,
+                };
+            });
+
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            // Remove campos undefined antes de enviar para o Firestore
+            const cleanedItems = removeUndefinedFields(itemsForFirestore);
+            await updateDoc(orderRef, { items: cleanedItems });
+
+            toast({ title: "Progresso colado!", description: `Etapas aplicadas ao item "${targetItem.description}".` });
+            
+            const allOrders = await fetchOrders();
+            const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
+            if (updatedOrder) {
+                setSelectedOrder(updatedOrder);
+                form.reset({
+                    ...updatedOrder,
+                    status: updatedOrder.status as any,
+                });
+            }
+
+        } catch (error) {
+            console.error("Error pasting progress:", error);
+            toast({ variant: "destructive", title: "Erro ao colar", description: "Não foi possível colar o progresso." });
+        }
+    };
+
+    const handleRemoveStageFromPlan = (indexToRemove: number) => {
+        setEditedPlan(editedPlan.filter((_, index) => index !== indexToRemove));
+    };
+
+    const handleAddStageToPlan = () => {
+        const trimmedName = newStageNameForPlan.trim();
+        if (!trimmedName) {
+        toast({
+            variant: "destructive",
+            title: "Nome da etapa inválido",
+            description: "O nome da etapa não pode estar em branco.",
+        });
+        return;
+        }
+        const newStage: ProductionStage = {
+            stageName: trimmedName,
+            status: "Pendente",
+            startDate: null,
+            completedDate: null,
+            durationDays: 0,
+            useBusinessDays: true, // Default para dias úteis
+            assignedResource: undefined,
+            supervisor: undefined,
+        };
+        setEditedPlan([...editedPlan, newStage]);
+        setNewStageNameForPlan("");
+    };
+
+    // Componente para exibir QR Code melhorado
+    const QRCodeDisplay = ({ data, size = 150, label = "QR Code" }: { 
+      data: string; 
+      size?: number; 
+      label?: string; 
+    }) => {
+      const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
+      const [loading, setLoading] = useState(true);
+      const [error, setError] = useState<string>('');
+
+      useEffect(() => {
+        const generateQR = async () => {
+          try {
+            setLoading(true);
+            setError('');
+            
+            const url = await QRCode.toDataURL(data, {
+              width: size,
+              margin: 2,
+              color: {
+                dark: '#000000',
+                light: '#FFFFFF'
+              },
+              errorCorrectionLevel: 'M'
+            });
+            
+            setQrCodeUrl(url);
+          } catch (err) {
+            console.error('Erro ao gerar QR Code:', err);
+            setError('Erro ao gerar QR Code');
+          } finally {
+            setLoading(false);
+          }
+        };
+
+        if (data) {
+          generateQR();
+        }
+      }, [data, size]);
+
+      if (loading) {
+        return (
+          <div className="flex items-center justify-center" style={{ width: size, height: size }}>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+          </div>
+        );
+      }
+
+      if (error) {
+        return (
+          <div className="flex items-center justify-center bg-red-50 border border-red-200 rounded p-2" 
+               style={{ width: size, height: size }}>
+            <p className="text-red-600 text-xs text-center">{error}</p>
+          </div>
+        );
+      }
+
+      return (
+        <div className="text-center">
+          <img src={qrCodeUrl} alt={label} className="border rounded mx-auto" />
+          <p className="text-xs text-muted-foreground mt-1">{label}</p>
+        </div>
+      );
+    };
+
+    const handleGenerateTimesheet = async (item: OrderItem) => {
+        if (!selectedOrder) return;
+
+        toast({ title: "Gerando Folha de Apontamento...", description: "Por favor, aguarde." });
+
+        try {
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const docSnap = await getDoc(companyRef);
+            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+            
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            let yPos = 15;
+
+            // Header com logo e informações da empresa
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.error("Error adding logo to PDF:", e);
+                }
+            }
+
+            // Informações da empresa
+            let companyInfoX = 65;
+            let companyInfoY = yPos + 5;
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', companyInfoX, companyInfoY);
+            companyInfoY += 6;
+            
+            docPdf.setFontSize(8).setFont('helvetica', 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - companyInfoX - 15);
+                docPdf.text(addressLines, companyInfoX, companyInfoY);
+                companyInfoY += (addressLines.length * 3);
+            }
+
+            yPos = 45;
+
+            // Título - ajusta baseado no progresso do item
+            const itemProgress = calculateItemProgress(item);
+            docPdf.setFontSize(18).setFont('helvetica', 'bold');
+            if (itemProgress === 100) {
+                docPdf.text('CONTROLE DE EMBARQUE E ENTREGA', pageWidth / 2, yPos, { align: 'center' });
+            } else {
+                docPdf.text('FOLHA DE APONTAMENTO DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            }
+            yPos += 15;
+
+            // Informações do pedido
+            docPdf.setFontSize(11).setFont('helvetica', 'normal');
+            docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
+            docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 7;
+            
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, 15, yPos);
+            docPdf.text(`OS: ${selectedOrder.internalOS || 'N/A'}`, pageWidth - 15, yPos, { align: 'right' });
+            yPos += 15;
+
+            // Dados do item
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('DADOS DO ITEM:', 15, yPos);
+            yPos += 8;
+
+            docPdf.setFontSize(10).setFont('helvetica', 'normal');
+            docPdf.text(`Código: ${item.code || 'N/A'}`, 15, yPos);
+            yPos += 5;
+            docPdf.text(`Descrição: ${item.description}`, 15, yPos);
+            yPos += 5;
+            docPdf.text(`Quantidade: ${item.quantity}`, 15, yPos);
+            docPdf.text(`Peso Unit.: ${(Number(item.unitWeight) || 0).toLocaleString('pt-BR')} kg`, pageWidth / 2, yPos);
+            yPos += 5;
+            
+            // Informações de embarque se o item estiver concluído
+            if (itemProgress === 100) {
+                yPos += 10;
+                docPdf.setFontSize(12).setFont('helvetica', 'bold');
+                docPdf.text('INFORMAÇÕES DE EMBARQUE:', 15, yPos);
+                yPos += 8;
+                
+                docPdf.setFontSize(10).setFont('helvetica', 'normal');
+                docPdf.text(`Lista de Embarque: ${item.shippingList || 'Pendente'}`, 15, yPos);
+                yPos += 5;
+                docPdf.text(`Nota Fiscal: ${item.invoiceNumber || 'Pendente'}`, 15, yPos);
+                yPos += 5;
+                docPdf.text(`Data de Embarque: ${item.shippingDate ? format(item.shippingDate, 'dd/MM/yyyy') : 'Pendente'}`, 15, yPos);
+                
+                // Status de entrega
+                if (item.shippingDate && selectedOrder.deliveryDate) {
+                    yPos += 5;
+                    const isOnTime = item.shippingDate <= selectedOrder.deliveryDate;
+                    docPdf.setFont('helvetica', 'bold');
+                    docPdf.text(`Status de Entrega: ${isOnTime ? 'NO PRAZO' : 'ATRASADO'}`, 15, yPos);
+                    
+                    if (!isOnTime) {
+                        const daysLate = Math.ceil((item.shippingDate.getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24));
+                        yPos += 5;
+                        docPdf.setFont('helvetica', 'normal');
+                        docPdf.text(`Atraso: ${daysLate} dia(s)`, 15, yPos);
+                    }
+                }
+                yPos += 10;
+            } else {
+                yPos += 10;
+            }
+
+            // QR Code MELHORADO com dados mais completos incluindo informações de embarque
+            const qrData = JSON.stringify({
+                type: 'controle_embarque',
+                orderId: selectedOrder.id,
+                itemId: item.id,
+                orderNumber: selectedOrder.quotationNumber,
+                itemNumber: item.itemNumber || null, // Número do item no pedido de compra
+                itemCode: item.code || 'SEM_CODIGO',
+                itemDescription: item.description,
+                quantity: item.quantity,
+                customer: selectedOrder.customer.name,
+                internalOS: selectedOrder.internalOS || '',
+                deliveryDate: selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, 'yyyy-MM-dd') : null,
+                shippingDate: item.shippingDate ? format(item.shippingDate, 'yyyy-MM-dd') : null,
+                invoiceNumber: item.invoiceNumber || null,
+                shippingList: item.shippingList || null,
+                isOnTime: item.shippingDate && selectedOrder.deliveryDate ? 
+                    item.shippingDate <= selectedOrder.deliveryDate : null,
+                timestamp: new Date().toISOString(),
+                // URL para acesso direto
+                url: `${window.location.origin}/embarque/${selectedOrder.id}/${item.id}`
+            });
+
+            try {
+                const qrCodeDataUrl = await QRCode.toDataURL(qrData, {
+                    width: 120,
+                    margin: 2,
+                    color: { dark: '#000000', light: '#FFFFFF' },
+                    errorCorrectionLevel: 'M'
+                });
+                
+                // Posiciona o QR Code no canto superior direito da seção de dados
+                docPdf.addImage(qrCodeDataUrl, 'PNG', pageWidth - 45, yPos - 25, 30, 30);
+                
+                // Adiciona texto explicativo abaixo do QR Code
+                docPdf.setFontSize(7);
+                docPdf.text('QR Code para', pageWidth - 45, yPos + 8, { align: 'left' });
+                docPdf.text('rastreamento digital', pageWidth - 45, yPos + 12, { align: 'left' });
+                
+                // Log dos dados para debug
+                console.log('QR Code gerado com dados:', qrData);
+                
+            } catch (e) {
+                console.error("Erro ao gerar QR code:", e);
+                toast({
+                    variant: "destructive",
+                    title: "Aviso",
+                    description: "QR Code não pôde ser gerado, mas o documento foi criado normalmente.",
+                });
+            }
+
+            // Tabela de etapas de produção
+            if (item.productionPlan && item.productionPlan.length > 0) {
+                docPdf.setFontSize(12).setFont('helvetica', 'bold');
+                docPdf.text('ETAPAS DE PRODUÇÃO:', 15, yPos + 10);
+                yPos += 20;
+
+                const tableBody = item.productionPlan.map((stage: any) => [
+                    stage.stageName,
+                    stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : '',
+                    stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : '',
+                    stage.status,
+                    '', // Coluna para assinatura
+                ]);
+
+                autoTable(docPdf, {
+                    startY: yPos,
+                    head: [['Etapa', 'Início', 'Fim', 'Status', 'Assinatura Responsável']],
+                    body: tableBody,
+                    styles: { fontSize: 9, cellPadding: 3 },
+                    headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
+                    columnStyles: {
+                        0: { cellWidth: 60 },
+                        1: { cellWidth: 25, halign: 'center' },
+                        2: { cellWidth: 25, halign: 'center' },
+                        3: { cellWidth: 30, halign: 'center' },
+                        4: { cellWidth: 50 },
+                    }
+                });
+
+                yPos = (docPdf as any).lastAutoTable.finalY + 15;
+            }
+
+            // Seção de apontamentos
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('REGISTRO DE APONTAMENTOS:', 15, yPos);
+            yPos += 10;
+
+            // Tabela de apontamentos em branco
+            const appointmentRows = Array(8).fill(['', '', '', '', '', '']);
+            
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Data', 'Hora Início', 'Hora Fim', 'Funcionário', 'Etapa/Atividade', 'Observações']],
+                body: appointmentRows,
+                styles: { fontSize: 9, cellPadding: 4, minCellHeight: 8 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
+                columnStyles: {
+                    0: { cellWidth: 25, halign: 'center' },
+                    1: { cellWidth: 20, halign: 'center' },
+                    2: { cellWidth: 20, halign: 'center' },
+                    3: { cellWidth: 35 },
+                    4: { cellWidth: 35 },
+                    5: { cellWidth: 55 },
+                }
+            });
+
+            // Rodapé
+            const finalY = (docPdf as any).lastAutoTable.finalY;
+            const pageHeight = docPdf.internal.pageSize.height;
+            
+            if (finalY + 30 < pageHeight - 20) {
+                yPos = finalY + 15;
+                docPdf.setFontSize(8).setFont('helvetica', 'italic');
+                docPdf.text(
+                    `Documento gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    yPos,
+                    { align: 'center' }
+                );
+            }
+
+            // Salvar o PDF
+            const filePrefix = itemProgress === 100 ? 'Controle_Embarque' : 'Apontamento';
+            const filename = `${filePrefix}_${selectedOrder.quotationNumber}_${item.code || 'Item'}_${format(new Date(), 'yyyyMMdd')}.pdf`;
+            docPdf.save(filename);
+
+            const documentType = itemProgress === 100 ? 'Controle de Embarque' : 'Folha de Apontamento';
+            toast({
+                title: `${documentType} gerado com sucesso!`,
+                description: `Arquivo ${filename} foi baixado. QR Code incluído para rastreamento.`,
+            });
+
+        } catch (error) {
+            console.error("Error generating timesheet:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar folha",
+                description: "Não foi possível gerar a folha de apontamento.",
+            });
+        }
+    };
+
+    const handleGenerateMonthlyReport = async () => {
+        if (monthFilter === 'all') {
+            toast({
+                variant: "destructive",
+                title: "Selecione um mês",
+                description: "Por favor, selecione um mês específico para gerar o relatório.",
+            });
+            return;
+        }
+
+        if (!monthWeightStats || monthWeightStats.totalOrders === 0) {
+            toast({
+                variant: "destructive",
+                title: "Nenhum dado para exportar",
+                description: "Não há pedidos para o mês selecionado.",
+            });
+            return;
+        }
+
+        toast({ title: "Gerando Relatório Mensal...", description: "Por favor, aguarde." });
+
+        try {
+            // Buscar dados da empresa
+            let companyData: CompanyData = {};
+            try {
+                const companyRef = doc(db, "companies", "mecald", "settings", "company");
+                const docSnap = await getDoc(companyRef);
+                companyData = docSnap.exists() ? (docSnap.data() as CompanyData) : {};
+            } catch (error) {
+                console.warn("Não foi possível carregar dados da empresa:", error);
+            }
+
+            // Criar o PDF
+            const docPdf = new jsPDF();
+            const pageWidth = docPdf.internal.pageSize.width;
+            const pageHeight = docPdf.internal.pageSize.height;
+            let yPos = 15;
+
+            // Header com logo e dados da empresa
+            if (companyData.logo?.preview) {
+                try {
+                    docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+                } catch (e) {
+                    console.warn("Erro ao adicionar logo:", e);
+                }
+            }
+
+            let textX = 65;
+            let textY = yPos;
+            docPdf.setFontSize(18).setFont('helvetica', 'bold');
+            docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+            textY += 6;
+            
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            if (companyData.endereco) {
+                const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+                docPdf.text(addressLines, textX, textY);
+                textY += addressLines.length * 4;
+            }
+            if (companyData.cnpj) {
+                docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+                textY += 4;
+            }
+            if (companyData.email) {
+                docPdf.text(`Email: ${companyData.email}`, textX, textY);
+                textY += 4;
+            }
+            if (companyData.celular) {
+                docPdf.text(`Telefone: ${companyData.celular}`, textX, textY);
+            }
+
+            yPos = 55;
+
+            // Título do documento
+            const selectedMonth = availableMonths.find(m => m.value === monthFilter);
+            const monthName = selectedMonth ? selectedMonth.label : monthFilter;
+            
+            docPdf.setFontSize(16).setFont('helvetica', 'bold');
+            docPdf.text('RELATÓRIO MENSAL DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
+            yPos += 8;
+            
+            docPdf.setFontSize(14).setFont('helvetica', 'normal');
+            docPdf.setTextColor(37, 99, 235);
+            docPdf.text(monthName.toUpperCase(), pageWidth / 2, yPos, { align: 'center' });
+            docPdf.setTextColor(0, 0, 0);
+            yPos += 15;
+
+            const monthOrders = filteredOrders.filter(order => {
+                if (!order.deliveryDate) return false;
+                const orderMonth = format(order.deliveryDate, 'yyyy-MM');
+                return orderMonth === monthFilter;
+            });
+
+            // Box com resumo executivo
+            const boxX = 15;
+            const boxWidth = pageWidth - 30;
+            const boxHeight = 35;
+            
+            docPdf.setFillColor(240, 248, 255);
+            docPdf.rect(boxX, yPos, boxWidth, boxHeight, 'F');
+            docPdf.setDrawColor(37, 99, 235);
+            docPdf.setLineWidth(0.5);
+            docPdf.rect(boxX, yPos, boxWidth, boxHeight, 'S');
+            
+            yPos += 8;
+            docPdf.setFontSize(11).setFont('helvetica', 'bold');
+            docPdf.text('RESUMO EXECUTIVO', boxX + 5, yPos);
+            yPos += 8;
+            
+            docPdf.setFontSize(9).setFont('helvetica', 'normal');
+            
+            const col1X = boxX + 5;
+            const col2X = boxX + boxWidth / 2;
+            
+            docPdf.text(`Total de Pedidos: ${monthWeightStats.totalOrders}`, col1X, yPos);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, col2X, yPos);
+            yPos += 5;
+            
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text(`Peso Total: ${monthWeightStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col1X, yPos);
+            docPdf.setFont('helvetica', 'normal');
+            yPos += 5;
+            
+            docPdf.setTextColor(21, 128, 61);
+            docPdf.text(`✓ Concluído: ${monthWeightStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col1X, yPos);
+            docPdf.setTextColor(234, 88, 12);
+            docPdf.text(`⧗ Pendente: ${monthWeightStats.pendingWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col2X, yPos);
+            docPdf.setTextColor(0, 0, 0);
+            yPos += 5;
+            
+            docPdf.setFont('helvetica', 'bold');
+            docPdf.text(`Taxa de Conclusão: ${monthWeightStats.completedPercentage.toFixed(1)}%`, col1X, yPos);
+            docPdf.setFont('helvetica', 'normal');
+            
+            yPos += 20;
+
+            // Agrupamento por status
+            const ordersByStatus = {
+                'Concluído': monthOrders.filter(o => o.status === 'Concluído'),
+                'Em Produção': monthOrders.filter(o => o.status === 'Em Produção'),
+                'Aguardando Produção': monthOrders.filter(o => o.status === 'Aguardando Produção'),
+                'Pronto para Entrega': monthOrders.filter(o => o.status === 'Pronto para Entrega'),
+                'Atrasado': monthOrders.filter(o => o.status === 'Atrasado'),
+            } as const;
+
+            // Estatísticas por status
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('DISTRIBUIÇÃO POR STATUS', 15, yPos);
+            yPos += 10;
+
+            const totalWeight = monthWeightStats.totalWeight || 0;
+            const statusData = Object.entries(ordersByStatus)
+                .filter(([_, orders]) => orders.length > 0)
+                .map(([status, orders]) => {
+                    const weight = orders.reduce((acc, o) => acc + (o.totalWeight || 0), 0);
+                    const percentage = totalWeight > 0 ? ((weight / totalWeight) * 100).toFixed(1) : '0.0';
+                    return [
+                        status,
+                        orders.length.toString(),
+                        `${weight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
+                        `${percentage}%`
+                    ];
+                });
+
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Status', 'Qtd. Pedidos', 'Peso Total', '% do Total']],
+                body: statusData,
+                styles: { fontSize: 9, cellPadding: 3 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 10, fontStyle: 'bold' },
+                columnStyles: {
+                    0: { cellWidth: 60 },
+                    1: { cellWidth: 35, halign: 'center' },
+                    2: { cellWidth: 45, halign: 'right' },
+                    3: { cellWidth: 35, halign: 'center' },
+                },
+                margin: { left: 15, right: 15 }
+            });
+
+            yPos = (docPdf as any).lastAutoTable.finalY + 15;
+
+            if (yPos + 60 > pageHeight - 20) {
+                docPdf.addPage();
+                yPos = 20;
+            }
+
+            // Tabela detalhada dos pedidos
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('DETALHAMENTO DOS PEDIDOS', 15, yPos);
+            yPos += 10;
+
+            const tableBody = monthOrders.map(order => (
+                [
+                    order.quotationNumber || 'N/A',
+                    order.customer?.name || 'N/A',
+                    order.projectName || '-',
+                    order.deliveryDate ? format(order.deliveryDate, 'dd/MM/yy') : 'A definir',
+                    order.items.length.toString(),
+                    (order.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 }),
+                    order.status
+                ]
+            ));
+
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Pedido', 'Cliente', 'Projeto', 'Entrega', 'Itens', 'Peso (kg)', 'Status']],
+                body: tableBody,
+                styles: { fontSize: 7, cellPadding: 2 },
+                headStyles: { 
+                    fillColor: [37, 99, 235], 
+                    fontSize: 8, 
+                    fontStyle: 'bold',
+                    halign: 'center'
+                },
+                columnStyles: {
+                    0: { cellWidth: 22, halign: 'center' },
+                    1: { cellWidth: 40 },
+                    2: { cellWidth: 35 },
+                    3: { cellWidth: 20, halign: 'center' },
+                    4: { cellWidth: 15, halign: 'center' },
+                    5: { cellWidth: 25, halign: 'right' },
+                    6: { cellWidth: 28, halign: 'center' },
+                },
+                margin: { left: 15, right: 15 },
+                didParseCell: (data) => {
+                    if (data.column.index === 6 && data.section === 'body') {
+                        const status = data.cell.raw as string;
+                        if (status === 'Concluído') {
+                            data.cell.styles.fillColor = [220, 252, 231];
+                            data.cell.styles.textColor = [21, 128, 61];
+                            data.cell.styles.fontStyle = 'bold';
+                        } else if (status === 'Em Produção') {
+                            data.cell.styles.fillColor = [219, 234, 254];
+                            data.cell.styles.textColor = [37, 99, 235];
+                        } else if (status === 'Atrasado') {
+                            data.cell.styles.fillColor = [254, 226, 226];
+                            data.cell.styles.textColor = [185, 28, 28];
+                            data.cell.styles.fontStyle = 'bold';
+                        } else if (status === 'Pronto para Entrega') {
+                            data.cell.styles.fillColor = [187, 247, 208];
+                            data.cell.styles.textColor = [22, 101, 52];
+                        }
+                    }
+                }
+            });
+
+            const finalY = (docPdf as any).lastAutoTable.finalY + 10;
+
+            if (finalY + 60 > pageHeight - 20) {
+                docPdf.addPage();
+                yPos = 20;
+            } else {
+                yPos = finalY + 5;
+            }
+
+            // Análise por cliente
+            const ordersByCustomer = new Map<string, { orders: Order[]; totalWeight: number }>();
+            monthOrders.forEach(order => {
+                const customerName = order.customer?.name || 'Não informado';
+                if (!ordersByCustomer.has(customerName)) {
+                    ordersByCustomer.set(customerName, { orders: [], totalWeight: 0 });
+                }
+                const customerData = ordersByCustomer.get(customerName)!;
+                customerData.orders.push(order);
+                customerData.totalWeight += order.totalWeight || 0;
+            });
+
+            docPdf.setFontSize(12).setFont('helvetica', 'bold');
+            docPdf.text('ANÁLISE POR CLIENTE', 15, yPos);
+            yPos += 10;
+
+            const customerData = Array.from(ordersByCustomer.entries())
+                .sort((a, b) => b[1].totalWeight - a[1].totalWeight)
+                .map(([customer, data]) => {
+                    const percentage = totalWeight > 0 ? ((data.totalWeight / totalWeight) * 100).toFixed(1) : '0.0';
+                    return [
+                        customer,
+                        data.orders.length.toString(),
+                        `${data.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
+                        `${percentage}%`
+                    ];
+                });
+
+            autoTable(docPdf, {
+                startY: yPos,
+                head: [['Cliente', 'Qtd. Pedidos', 'Peso Total', '% do Total']],
+                body: customerData,
+                styles: { fontSize: 9, cellPadding: 3 },
+                headStyles: { fillColor: [37, 99, 235], fontSize: 10, fontStyle: 'bold' },
+                columnStyles: {
+                    0: { cellWidth: 80 },
+                    1: { cellWidth: 35, halign: 'center' },
+                    2: { cellWidth: 45, halign: 'right' },
+                    3: { cellWidth: 25, halign: 'center' },
+                },
+                margin: { left: 15, right: 15 }
+            });
+
+            const finalTableY = (docPdf as any).lastAutoTable.finalY + 10;
+            
+            if (finalTableY + 20 < pageHeight - 20) {
+                docPdf.setFontSize(8).setFont('helvetica', 'italic');
+                docPdf.setTextColor(100, 100, 100);
+                docPdf.text(
+                    `Relatório gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+                    pageWidth / 2,
+                    finalTableY,
+                    { align: 'center' }
+                );
+                
+                docPdf.text(
+                    `Total de ${monthWeightStats.totalOrders} pedido(s) | ${monthWeightStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`,
+                    pageWidth / 2,
+                    finalTableY + 5,
+                    { align: 'center' }
+                );
+            }
+
+            const [year, month] = monthFilter.split('-');
+            const monthNames = [
+                'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
+                'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
+            ];
+            const monthNameFile = monthNames[parseInt(month, 10) - 1] || month;
+            const timestamp = format(new Date(), 'yyyyMMdd_HHmm');
+            const filename = `Relatorio_Mensal_${monthNameFile}_${year}_${timestamp}.pdf`;
+            
+            docPdf.save(filename);
+            
+            toast({
+                title: "✅ Relatório Gerado com Sucesso!",
+                description: `O arquivo "${filename}" foi baixado com todas as estatísticas do mês.`,
+            });
+
+        } catch (error) {
+            console.error("Erro completo ao gerar relatório mensal:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao Gerar Relatório",
+                description: `Falha na geração: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+            });
+        }
+    };
+
+    // FUNÇÃO AUXILIAR MELHORADA para debug
+    const logProgressState = (context: string, plan: ProductionStage[]) => {
+        console.log(`📊 ${context}:`, plan.map(stage => ({
+            name: stage.stageName,
+            status: stage.status,
+            start: stage.startDate ? format(stage.startDate, 'dd/MM/yyyy') : 'null',
+            end: stage.completedDate ? format(stage.completedDate, 'dd/MM/yyyy') : 'null',
+            duration: stage.durationDays,
+            businessDays: stage.useBusinessDays
+        })));
+    };
+
+    // FUNÇÃO AUXILIAR para criação segura de datas
+    const createSafeDate = (dateString: string): Date | null => {
+        if (!dateString) return null;
+        
+        try {
+            // Para strings no formato YYYY-MM-DD, cria data local
+            if (dateString.includes('-')) {
+                const [year, month, day] = dateString.split('-').map(Number);
+                const date = new Date(year, month - 1, day); // month - 1 porque Date usa 0-11
+                
+                if (!isNaN(date.getTime())) {
+                    console.log('📅 [createSafeDate] Criada data local:', {
+                        input: dateString,
+                        output: date,
+                        formatted: format(date, 'dd/MM/yyyy')
+                    });
+                    return date;
+                }
+            }
+            
+            // Fallback para outros formatos
+            const date = new Date(dateString);
+            if (!isNaN(date.getTime())) {
+                console.log('📅 [createSafeDate] Criada data fallback:', { input: dateString, output: date });
+                return date;
+            }
+            
+            console.warn('📅 [createSafeDate] Data inválida:', dateString);
+            return null;
+        } catch (error) {
+            console.error('📅 [createSafeDate] Erro ao criar data:', { dateString, error });
+            return null;
+        }
+    };
+
+    // CORREÇÃO 1: CÁLCULO CORRETO DE DIAS DE ATRASO
+    // CORREÇÃO: Função analyzeItemDelivery com cálculo correto de dias de diferença
+    const analyzeItemDelivery = (item: OrderItem, orderDeliveryDate?: Date) => {
+      console.log('🔍 Analisando item:', {
+        id: item.id,
+        description: item.description,
+        expectedDate: item.itemDeliveryDate || orderDeliveryDate,
+        actualDate: item.shippingDate
+      });
+
+      const analysis = {
+        itemId: item.id,
+        itemNumber: item.itemNumber || 'N/A',
+        code: item.code || 'N/A',
+        description: item.description,
+        quantity: item.quantity,
+        
+        // Dados de embarque
+        hasShippingList: !!(item.shippingList && item.shippingList.trim() && item.shippingList !== 'Não informada'),
+        shippingList: item.shippingList && item.shippingList.trim() ? item.shippingList.trim() : 'Não informada',
+        hasInvoice: !!(item.invoiceNumber && item.invoiceNumber.trim() && item.invoiceNumber !== 'Não informada'),
+        invoiceNumber: item.invoiceNumber && item.invoiceNumber.trim() ? item.invoiceNumber.trim() : 'Não informada',
+        hasShippingDate: !!item.shippingDate,
+        shippingDate: item.shippingDate,
+        
+        // Datas para análise
+        expectedDate: item.itemDeliveryDate || orderDeliveryDate,
+        actualDate: item.shippingDate,
+        
+        // Status da entrega
+        deliveryStatus: 'pending',
+        daysDifference: 0,
+        isComplete: false,
+        
+        // Progresso do item
+        progress: calculateItemProgress(item),
+      };
+
+      analysis.isComplete = analysis.hasShippingList && analysis.hasInvoice && analysis.hasShippingDate;
+
+      // CORREÇÃO PRINCIPAL: Cálculo correto de dias de diferença
+      if (analysis.actualDate && analysis.expectedDate) {
+        // Normalizar datas para meia-noite para comparação correta
+        const expectedDateNormalized = new Date(analysis.expectedDate);
+        expectedDateNormalized.setHours(0, 0, 0, 0);
+        
+        const actualDateNormalized = new Date(analysis.actualDate);
+        actualDateNormalized.setHours(0, 0, 0, 0);
+        
+        // Calcular diferença em milissegundos e converter para dias
+        const diffTime = actualDateNormalized.getTime() - expectedDateNormalized.getTime();
+        const diffDays = diffTime / (1000 * 60 * 60 * 24); // Não usar Math.round aqui
+        
+        console.log('📅 Cálculo de diferença CORRIGIDO:', {
+          expectedNormalized: expectedDateNormalized.toISOString().split('T')[0],
+          actualNormalized: actualDateNormalized.toISOString().split('T')[0],
+          diffTime,
+          diffDays,
+          diffDaysRounded: Math.round(Math.abs(diffDays))
+        });
+        
+        // Armazenar sempre o valor absoluto para exibição
+        analysis.daysDifference = Math.round(Math.abs(diffDays));
+        
+        // Definir status baseado no sinal da diferença
+        if (diffDays < 0) {
+          analysis.deliveryStatus = 'early'; // Entregue antes do prazo (negativo)
+          console.log('✅ Status: ANTECIPADO -', analysis.daysDifference, 'dias');
+        } else if (diffDays === 0) {
+          analysis.deliveryStatus = 'ontime'; // Entregue no prazo exato
+          console.log('✅ Status: NO PRAZO EXATO');
+        } else {
+          analysis.deliveryStatus = 'late'; // Entregue com atraso (positivo)
+          console.log('❌ Status: ATRASADO +', analysis.daysDifference, 'dias');
+        }
+        
+      } else if (analysis.expectedDate && !analysis.actualDate) {
+        // Item vencido (sem entrega)
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const expectedDateOnly = new Date(analysis.expectedDate);
+        expectedDateOnly.setHours(0, 0, 0, 0);
+        
+        if (expectedDateOnly < today) {
+          analysis.deliveryStatus = 'overdue';
+          const diffTime = today.getTime() - expectedDateOnly.getTime();
+          analysis.daysDifference = Math.round(diffTime / (1000 * 60 * 60 * 24));
+          console.log('⚠️ Status: VENCIDO -', analysis.daysDifference, 'dias');
+        }
+      }
+
+      return analysis;
+    };
+
+    // FUNÇÃO PARA ANÁLISE DE ENTREGA DO PEDIDO (usando a nova análise de itens)
+    const analyzeOrderDelivery = (order: Order) => {
+        const itemAnalyses = order.items.map(item => analyzeItemDelivery(item, order.deliveryDate));
+        
+        const summary = {
+            totalItems: order.items.length,
+            completedItems: itemAnalyses.filter(item => item.isComplete).length,
+            onTimeItems: itemAnalyses.filter(item => item.deliveryStatus === 'ontime').length,
+            earlyItems: itemAnalyses.filter(item => item.deliveryStatus === 'early').length,
+            lateItems: itemAnalyses.filter(item => item.deliveryStatus === 'late').length,
+            pendingItems: itemAnalyses.filter(item => item.deliveryStatus === 'pending').length,
+            overdueItems: itemAnalyses.filter(item => item.deliveryStatus === 'overdue').length,
+            
+            // Taxas percentuais
+            onTimeRate: 0,
+            earlyRate: 0,
+            lateRate: 0,
+            completionRate: 0
+        };
+
+        // Calcular taxas percentuais
+        if (summary.totalItems > 0) {
+            summary.onTimeRate = (summary.onTimeItems / summary.totalItems) * 100;
+            summary.earlyRate = (summary.earlyItems / summary.totalItems) * 100;
+            summary.lateRate = (summary.lateItems / summary.totalItems) * 100;
+            summary.completionRate = (summary.completedItems / summary.totalItems) * 100;
+        }
+
+        return { summary, itemAnalyses };
+    };
+
+    // CORREÇÃO: Componente de visualização das mensagens de entrega no modal
+    const DeliveryStatusMessage = ({ item, orderDeliveryDate }: { item: OrderItem, orderDeliveryDate?: Date }) => {
+      if (!item.shippingDate) return null;
+      
+      // Usar a data de entrega específica do item ou a data geral do pedido
+      const expectedDate = item.itemDeliveryDate || orderDeliveryDate;
+      if (!expectedDate) return null;
+
+      // Normalizar datas para meia-noite
+      const shippingDate = new Date(item.shippingDate);
+      shippingDate.setHours(0, 0, 0, 0);
+      
+      const deliveryDate = new Date(expectedDate);
+      deliveryDate.setHours(0, 0, 0, 0);
+      
+      // Calcular diferença em dias (negativo = antecipado, positivo = atrasado)
+      const diffTime = shippingDate.getTime() - deliveryDate.getTime();
+      const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+      
+      console.log('🎨 Renderizando status de entrega:', {
+        shipping: format(shippingDate, 'dd/MM/yyyy'),
+        expected: format(deliveryDate, 'dd/MM/yyyy'),
+        diffDays,
+        status: diffDays < 0 ? 'early' : diffDays === 0 ? 'ontime' : 'late'
+      });
+
+      if (diffDays < 0) {
+        // Entregue antes do prazo (valor negativo)
+        const daysEarly = Math.abs(diffDays);
+        return (
+          <div className="flex items-center gap-2 p-2 bg-blue-100 border border-blue-300 rounded text-sm text-blue-800">
+            <TrendingUp className="h-4 w-4" />
+            <span className="font-medium">
+              Item entregue {daysEarly} dia{daysEarly !== 1 ? 's' : ''} antes do prazo
+            </span>
+          </div>
+        );
+      } else if (diffDays === 0) {
+        // Entregue no prazo exato
+        return (
+          <div className="flex items-center gap-2 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
+            <CheckCircle className="h-4 w-4" />
+            <span className="font-medium">Item entregue exatamente no prazo</span>
+          </div>
+        );
+      } else {
+        // Entregue com atraso (valor positivo)
+        return (
+          <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
+            <AlertTriangle className="h-4 w-4" />
+            <span className="font-medium">
+              Item entregue {diffDays} dia{diffDays !== 1 ? 's' : ''} após o prazo
+            </span>
+          </div>
+        );
+      }
+    };
+
+    // CORREÇÃO: Badge de status para o item
+    const DeliveryStatusBadge = ({ item, orderDeliveryDate }: { item: OrderItem, orderDeliveryDate?: Date }) => {
+      if (!item.shippingDate || !orderDeliveryDate) return null;
+
+      const analysis = analyzeItemDelivery(item, orderDeliveryDate);
+      
+      switch (analysis.deliveryStatus) {
+        case 'early':
+          return (
+            <Badge variant="default" className="bg-blue-500 hover:bg-blue-500/90 text-xs">
+              <TrendingUp className="mr-1 h-3 w-3" />
+              Antecipado ({analysis.daysDifference}d)
+            </Badge>
+          );
+        case 'ontime':
+          return (
+            <Badge variant="default" className="bg-green-600 hover:bg-green-600/90 text-xs">
+              <CheckCircle className="mr-1 h-3 w-3" />
+              No Prazo
+            </Badge>
+          );
+        case 'late':
+          return (
+            <Badge variant="destructive" className="text-xs">
+              <AlertTriangle className="mr-1 h-3 w-3" />
+              Atrasado ({analysis.daysDifference}d)
+            </Badge>
+          );
+        default:
+          return null;
+      }
+    };
+
+    // COMPONENTE DO BOTÃO LIMPO (sem debug)
+    const DeliveryReportButton = ({ order }: { order: Order }) => {
+        const analysis = analyzeOrderDelivery(order);
+        const hasDeliveryData = analysis.summary.completedItems > 0;
+        
+        return (
+            <div className="flex items-center gap-2">
+                <Button 
+                    onClick={() => handleGenerateDeliveryReport(order)} 
+                    variant="outline"
+                    className="flex items-center gap-2"
+                >
+                    <FileText className="h-4 w-4" />
+                    Relatório de Entrega
+                </Button>
+                {hasDeliveryData && (
+                    <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <CheckCircle className="h-3 w-3 text-green-600" />
+                        <span>{analysis.summary.completedItems} itens com dados</span>
+                    </div>
+                )}
+            </div>
+        );
+    };
+
+    // PREVIEW LIMPO (sem botões de debug) para o modal
+    const DeliveryPreviewCard = ({ selectedOrder }: { selectedOrder: Order }) => {
+        const analysis = analyzeOrderDelivery(selectedOrder);
+        const hasData = analysis.summary.completedItems > 0;
+        
+        if (!hasData) {
+            return (
+                <Card>
+                    <CardHeader>
+                        <CardTitle className="flex items-center gap-2">
+                            <TrendingUp className="h-5 w-5" />
+                            Performance de Entrega
+                        </CardTitle>
+                        <CardDescription>
+                            Análise dos dados de embarque e pontualidade das entregas
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="text-center py-6 text-muted-foreground">
+                            <Clock className="h-8 w-8 mx-auto mb-2" />
+                            <p className="text-sm">Nenhum dado de embarque disponível ainda</p>
+                        </div>
+                    </CardContent>
+                </Card>
+            );
+        }
+        
+        const overallRate = analysis.summary.totalItems > 0 ? 
+            ((analysis.summary.onTimeItems + analysis.summary.earlyItems) / analysis.summary.totalItems) * 100 : 0;
+        
+        return (
+            <Card>
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                        <TrendingUp className="h-5 w-5" />
+                        Performance de Entrega
+                    </CardTitle>
+                    <CardDescription>
+                        Análise dos dados de embarque e pontualidade das entregas
+                    </CardDescription>
+                </CardHeader>
+                <CardContent>
+                    <div className="space-y-4">
+                        {/* Índice de Performance */}
+                        <div className="flex items-center justify-between p-4 bg-secondary rounded-lg">
+                            <div>
+                                <p className="text-sm font-medium text-muted-foreground">Índice de Entrega no Prazo</p>
+                                <p className="text-2xl font-bold">{overallRate.toFixed(1)}%</p>
+                                <p className="text-xs text-muted-foreground">
+                                    {analysis.summary.onTimeItems + analysis.summary.earlyItems} de {analysis.summary.totalItems} itens
+                                </p>
+                            </div>
+                            <div className={`p-3 rounded-full ${
+                                overallRate >= 80 ? 'bg-green-100 text-green-600' :
+                                overallRate >= 60 ? 'bg-yellow-100 text-yellow-600' :
+                                'bg-red-100 text-red-600'
+                            }`}>
+                                {overallRate >= 80 ? <TrendingUp className="h-6 w-6" /> :
+                                 overallRate >= 60 ? <Clock className="h-6 w-6" /> :
+                                 <TrendingDown className="h-6 w-6" />}
+                            </div>
+                        </div>
+                        
+                        {/* Resumo por Status */}
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                            <div className="text-center p-3 bg-green-50 rounded-lg border border-green-200">
+                                <div className="flex items-center justify-center mb-1">
+                                    <CheckCircle className="h-4 w-4 text-green-600" />
+                                </div>
+                                <p className="font-semibold text-green-800">{analysis.summary.onTimeItems}</p>
+                                <p className="text-green-600">No Prazo</p>
+                            </div>
+                            
+                            <div className="text-center p-3 bg-blue-50 rounded-lg border border-blue-200">
+                                <div className="flex items-center justify-center mb-1">
+                                    <TrendingUp className="h-4 w-4 text-blue-600" />
+                                </div>
+                                <p className="font-semibold text-blue-800">{analysis.summary.earlyItems}</p>
+                                <p className="text-blue-600">Antecipadas</p>
+                            </div>
+                            
+                            <div className="text-center p-3 bg-red-50 rounded-lg border border-red-200">
+                                <div className="flex items-center justify-center mb-1">
+                                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                                </div>
+                                <p className="font-semibold text-red-800">{analysis.summary.lateItems}</p>
+                                <p className="text-red-600">Atrasadas</p>
+                            </div>
+                            
+                            <div className="text-center p-3 bg-gray-50 rounded-lg border border-gray-200">
+                                <div className="flex items-center justify-center mb-1">
+                                    <Clock className="h-4 w-4 text-gray-600" />
+                                </div>
+                                <p className="font-semibold text-gray-800">{analysis.summary.pendingItems}</p>
+                                <p className="text-foreground/70">Pendentes</p>
+                            </div>
+                        </div>
+                        
+                        {/* Itens com Problemas */}
+                        {(analysis.summary.lateItems > 0 || analysis.summary.overdueItems > 0) && (
+                            <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+                                <div className="flex items-center gap-2 mb-2">
+                                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                                    <p className="text-sm font-medium text-red-800">Itens com Atraso</p>
+                                </div>
+                                <div className="space-y-1">
+                                    {analysis.itemAnalyses
+                                        .filter(item => item.deliveryStatus === 'late' || item.deliveryStatus === 'overdue')
+                                        .slice(0, 3)
+                                        .map(item => (
+                                            <p key={item.itemId} className="text-xs text-red-700">
+                                                • {item.description.substring(0, 40)}... 
+                                                ({item.deliveryStatus === 'late' ? `${item.daysDifference}d atrasado` : `${item.daysDifference}d vencido`})
+                                            </p>
+                                        ))}
+                                    {analysis.itemAnalyses.filter(item => 
+                                        item.deliveryStatus === 'late' || item.deliveryStatus === 'overdue'
+                                    ).length > 3 && (
+                                        <p className="text-xs text-red-600">
+                                            +{analysis.itemAnalyses.filter(item => 
+                                                item.deliveryStatus === 'late' || item.deliveryStatus === 'overdue'
+                                            ).length - 3} outros itens com atraso
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </CardContent>
+            </Card>
+        );
+    };
+
+    // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
+    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent, resetPackingSlipQuantities, setIsPackingSlipDialogOpen }) => (
+        <SheetFooter className="flex-shrink-0 pt-4 border-t">
+            <div className="flex items-center justify-between w-full gap-4 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap">
+                    {selectedItems.size > 0 && (
+                        <Button 
+                            onClick={() => {
+                                resetPackingSlipQuantities();
+                                setIsPackingSlipDialogOpen(true);
+                            }} 
+                            variant="outline"
+                        >
+                            <ReceiptText className="mr-2 h-4 w-4" />
+                            Gerar Romaneio ({selectedItems.size} {selectedItems.size === 1 ? 'item' : 'itens'})
+                        </Button>
+                    )}
+                    <Button onClick={handleExportSchedule} variant="outline">
+                        <CalendarClock className="mr-2 h-4 w-4" />
+                        Exportar Cronograma
+                    </Button>
+                    
+                    {/* BOTÃO LIMPO SEM DEBUG */}
+                    <DeliveryReportButton order={selectedOrder} />
+                    
+                    {/* Botão Data Book */}
+                    {selectedOrder.status === 'Concluído' && !selectedOrder.dataBookSent && (
+                        <Button 
+                            onClick={onDataBookSent} 
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-md hover:shadow-lg transition-all duration-200"
+                        >
+                            <Send className="mr-2 h-4 w-4" />
+                            Marcar Data Book como Enviado
+                        </Button>
+                    )}
+                    
+                    {selectedOrder.dataBookSent && (
+                        <div className="flex items-center gap-2 px-4 py-2 bg-emerald-100 border-2 border-emerald-400 rounded-lg shadow-sm">
+                            <CheckCircle className="h-5 w-5 text-emerald-700" />
+                            <span className="text-sm font-bold text-emerald-800">
+                                Data Book enviado
+                            </span>
+                        </div>
+                    )}
+                </div>
+                
+                <div className="flex items-center gap-2">
+                    <Button variant="outline" onClick={() => setIsEditing(true)}>
+                        <Edit className="mr-2 h-4 w-4" />
+                        Editar
+                    </Button>
+                    <Button variant="destructive" onClick={() => handleDeleteClick(selectedOrder)}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Excluir
+                    </Button>
+                </div>
+            </div>
+        </SheetFooter>
+    );
+
+    // CORREÇÃO 2: LAYOUT DO RELATÓRIO PDF CORRIGIDO
+    const handleGenerateDeliveryReport = async (order: Order) => {
+      if (!order) {
+        toast({
+          variant: "destructive",
+          title: "Erro",
+          description: "Dados do pedido não encontrados.",
+        });
+        return;
+      }
+
+      toast({ title: "Gerando Relatório de Entrega...", description: "Por favor, aguarde." });
+
+      try {
+        // Analisar dados de entrega
+        const analysis = analyzeOrderDelivery(order);
+        
+        // Buscar dados da empresa
+        let companyData: CompanyData = {};
+        try {
+          const companyRef = doc(db, "companies", "mecald", "settings", "company");
+          const docSnap = await getDoc(companyRef);
+          companyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
+        } catch (error) {
+          console.warn("Não foi possível carregar dados da empresa:", error);
+        }
+        
+        // Criar o PDF
+        const docPdf = new jsPDF();
+        const pageWidth = docPdf.internal.pageSize.width;
+        const pageHeight = docPdf.internal.pageSize.height;
+        let yPos = 15;
+
+        // Header com logo e dados da empresa
+        if (companyData.logo?.preview) {
+          try {
+            docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+          } catch (e) {
+            console.warn("Erro ao adicionar logo:", e);
+          }
+        }
+
+        let textX = 65;
+        let textY = yPos;
+        docPdf.setFontSize(18).setFont('helvetica', 'bold');
+        docPdf.text(companyData.nomeFantasia || 'Sua Empresa', textX, textY, { align: 'left' });
+        textY += 6;
+        
+        docPdf.setFontSize(9).setFont('helvetica', 'normal');
+        if (companyData.endereco) {
+            const addressLines = docPdf.splitTextToSize(companyData.endereco, pageWidth - textX - 15);
+            docPdf.text(addressLines, textX, textY);
+            textY += (addressLines.length * 4);
+        }
+        if (companyData.cnpj) {
+            docPdf.text(`CNPJ: ${companyData.cnpj}`, textX, textY);
+            textY += 4;
+        }
+        if (companyData.email) {
+            docPdf.text(`Email: ${companyData.email}`, textX, textY);
+            textY += 4;
+        }
+        if (companyData.celular) {
+            docPdf.text(`Telefone: ${companyData.celular}`, textX, textY);
+        }
+
+        yPos = 55;
+
+        // Título do documento
+        docPdf.setFontSize(16).setFont('helvetica', 'bold');
+        docPdf.text('RELATÓRIO DE ENTREGA E PERFORMANCE', pageWidth / 2, yPos, { align: 'center' });
+        yPos += 15;
+
+        // Informações do pedido em duas colunas
+        docPdf.setFontSize(11).setFont('helvetica', 'normal');
+        
+        // Coluna esquerda
+        const leftColumnX = 15;
+        let leftColumnY = yPos;
+        docPdf.setFont('helvetica', 'bold');
+        docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+        leftColumnY += 6;
+        docPdf.setFont('helvetica', 'normal');
+        docPdf.text(`Pedido Nº: ${order.quotationNumber || 'N/A'}`, leftColumnX, leftColumnY);
+        leftColumnY += 5;
+        docPdf.text(`Cliente: ${order.customer?.name || 'N/A'}`, leftColumnX, leftColumnY);
+        leftColumnY += 5;
+        if (order.projectName) {
+            docPdf.text(`Projeto: ${order.projectName}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+        }
+        
+        // Coluna direita
+        const rightColumnX = pageWidth / 2 + 10;
+        let rightColumnY = yPos + 6;
+        docPdf.text(`OS Interna: ${order.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
+        rightColumnY += 5;
+        docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+        rightColumnY += 5;
+        if (order.deliveryDate) {
+            docPdf.text(`Data de Entrega Geral: ${format(order.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            rightColumnY += 5;
+        }
+        docPdf.text(`Status: ${order.status}`, rightColumnX, rightColumnY);
+        
+        yPos = Math.max(leftColumnY, rightColumnY) + 15;
+
+        // Índice de Performance Geral
+        const overallOnTimeRate = analysis.summary.totalItems > 0 ? 
+          ((analysis.summary.onTimeItems + analysis.summary.earlyItems) / analysis.summary.totalItems) * 100 : 0;
+        
+        docPdf.setTextColor(0, 0, 0);
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('ÍNDICE GERAL DE PONTUALIDADE:', 15, yPos);
+        
+        docPdf.setFontSize(20);
+        const color = overallOnTimeRate >= 80 ? [34, 197, 94] : overallOnTimeRate >= 60 ? [245, 158, 11] : [239, 68, 68];
+        docPdf.setTextColor(color[0], color[1], color[2]);
+        docPdf.text(`${overallOnTimeRate.toFixed(1)}%`, pageWidth - 15, yPos + 5, { align: 'right' });
+        
+        yPos += 25;
+
+        // Cards de performance em linha única para economizar espaço
+        docPdf.setTextColor(0, 0, 0);
+        docPdf.setFontSize(10).setFont('helvetica', 'bold');
+        docPdf.text('RESUMO:', 15, yPos);
+        yPos += 8;
+
+        docPdf.setFontSize(9).setFont('helvetica', 'normal');
+        const summaryText = `No Prazo: ${analysis.summary.onTimeItems} | Antecipadas: ${analysis.summary.earlyItems} | Atrasadas: ${analysis.summary.lateItems} | Pendentes: ${analysis.summary.pendingItems} | Total: ${analysis.summary.totalItems} itens`;
+        docPdf.text(summaryText, 15, yPos);
+        yPos += 15;
+
+        // Verificar se precisa de nova página antes da tabela
+        if (yPos + 60 > pageHeight - 20) {
+          docPdf.addPage();
+          yPos = 20;
+        }
+
+        // Tabela detalhada dos itens - LAYOUT CORRIGIDO
+        docPdf.setTextColor(0, 0, 0);
+        docPdf.setFontSize(12).setFont('helvetica', 'bold');
+        docPdf.text('DETALHAMENTO POR ITEM', 15, yPos);
+        yPos += 10;
+
+        const tableBody = analysis.itemAnalyses.map(item => {
+          let statusText = '';
+          let deliveryText = '';
+          
+          switch (item.deliveryStatus) {
+            case 'early':
+              statusText = `Antecip. ${item.daysDifference}d`;
+              deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
+              break;
+            case 'ontime':
+              statusText = 'No Prazo';
+              deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
+              break;
+            case 'late':
+              statusText = `Atraso ${item.daysDifference}d`;
+              deliveryText = item.actualDate ? format(item.actualDate, 'dd/MM/yy') : '';
+              break;
+            case 'overdue':
+              statusText = `Vencido ${item.daysDifference}d`;
+              deliveryText = 'Não entregue';
+              break;
+            default:
+              statusText = 'Pendente';
+              deliveryText = 'Não entregue';
+          }
+
+          // Mostrar dados reais de LE e NF
+          const leStatus = item.hasShippingList ? 
+            (item.shippingList.length > 8 ? item.shippingList.substring(0, 8) + '...' : item.shippingList) : 
+            'Pendente';
+          
+          const nfStatus = item.hasInvoice ? 
+            (item.invoiceNumber.length > 8 ? item.invoiceNumber.substring(0, 8) + '...' : item.invoiceNumber) : 
+            'Pendente';
+
+          return [
+            item.itemNumber || '-',
+            item.code || '-',
+            item.description.length > 25 ? item.description.substring(0, 25) + '...' : item.description,
+            item.expectedDate ? format(item.expectedDate, 'dd/MM/yy') : 'N/A',
+            deliveryText,
+            statusText,
+            leStatus,
+            nfStatus,
+          ];
+        });
+        
+        // TABELA COM LAYOUT OTIMIZADO
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [['Item', 'Código', 'Descrição', 'Prevista', 'Real', 'Status', 'LE', 'NF']],
+          body: tableBody,
+          styles: { 
+            fontSize: 6,  // Reduzido para 6
+            cellPadding: 1.5, // Reduzido padding
+            overflow: 'linebreak',
+            valign: 'middle'
+          },
+          headStyles: { 
+            fillColor: [37, 99, 235], 
+            fontSize: 7, // Cabeçalho um pouco maior
+            textColor: 255,
+            fontStyle: 'bold',
+            halign: 'center'
+          },
+          columnStyles: {
+            0: { cellWidth: 12, halign: 'center' }, // Item - reduzido
+            1: { cellWidth: 16, halign: 'center' }, // Código - reduzido
+            2: { cellWidth: 45, halign: 'left' },   // Descrição - mantido
+            3: { cellWidth: 16, halign: 'center' }, // Prevista - reduzido
+            4: { cellWidth: 16, halign: 'center' }, // Real - reduzido
+            5: { cellWidth: 20, halign: 'center' }, // Status - reduzido
+            6: { cellWidth: 16, halign: 'center' }, // LE - reduzido
+            7: { cellWidth: 16, halign: 'center' }, // NF - reduzido
+          },
+          margin: { left: 15, right: 15 },
+          didParseCell: (data) => {
+            // Colorir células baseado no status
+            if (data.column.index === 5 && data.section === 'body') {
+              const status = data.cell.raw as string;
+              if (status.includes('Antecip')) {
+                data.cell.styles.fillColor = [219, 234, 254];
+                data.cell.styles.textColor = [37, 99, 235];
+              } else if (status === 'No Prazo') {
+                data.cell.styles.fillColor = [220, 252, 231];
+                data.cell.styles.textColor = [21, 128, 61];
+              } else if (status.includes('Atraso') || status.includes('Vencido')) {
+                data.cell.styles.fillColor = [254, 226, 226];
+                data.cell.styles.textColor = [185, 28, 28];
+              }
+            }
+            
+            // Destacar LE e NF preenchidas
+            if ((data.column.index === 6 || data.column.index === 7) && data.section === 'body') {
+              const cellValue = data.cell.raw as string;
+              if (cellValue !== 'Pendente' && cellValue !== '-') {
+                data.cell.styles.fillColor = [220, 252, 231];
+                data.cell.styles.textColor = [21, 128, 61];
+                data.cell.styles.fontStyle = 'bold';
+              }
+            }
+          }
+        });
+
+        // Rodapé com resumo executivo
+        const finalY = (docPdf as any).lastAutoTable.finalY + 10;
+        
+        if (finalY + 25 < pageHeight - 20) {
+          docPdf.setFontSize(9).setFont('helvetica', 'bold');
+          docPdf.text('RESUMO EXECUTIVO:', 15, finalY);
+          let summaryY = finalY + 6;
+          
+          docPdf.setFontSize(8).setFont('helvetica', 'normal');
+          docPdf.text(`• Total: ${analysis.summary.totalItems} itens | Completos: ${analysis.summary.completedItems} | Taxa no prazo: ${(analysis.summary.onTimeRate + analysis.summary.earlyRate).toFixed(1)}%`, 15, summaryY);
+          summaryY += 4;
+          
+          const itemsWithLE = analysis.itemAnalyses.filter(item => item.hasShippingList).length;
+          const itemsWithNF = analysis.itemAnalyses.filter(item => item.hasInvoice).length;
+          docPdf.text(`• Lista de Embarque: ${itemsWithLE}/${analysis.summary.totalItems} | Nota Fiscal: ${itemsWithNF}/${analysis.summary.totalItems}`, 15, summaryY);
+          
+          summaryY += 8;
+          docPdf.setFontSize(7).setFont('helvetica', 'italic');
+          docPdf.text(
+            `Relatório gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
+            pageWidth / 2,
+            summaryY,
+            { align: 'center' }
+          );
+        }
+
+        // Salvar arquivo
+        const timestamp = format(new Date(), 'yyyyMMdd_HHmm');
+        const filename = `Relatorio_Entrega_${order.quotationNumber || 'Pedido'}_${timestamp}.pdf`;
+        
+        docPdf.save(filename);
+        
+        toast({
+          title: "✅ Relatório Gerado com Sucesso!",
+          description: `O arquivo "${filename}" foi baixado com cálculo correto de atraso.`,
+        });
+
+      } catch (error) {
+        console.error("Erro completo ao gerar relatório:", error);
+        toast({
+          variant: "destructive",
+          title: "Erro ao Gerar Relatório",
+          description: `Falha na geração: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+        });
+      }
+    };
+
+
+
+
+
+return (
+    <div className="w-full">
+            <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
+                <div className="flex items-center justify-between space-y-2">
+                    <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de Produção</h1>
+                    <div className="flex items-center gap-4">
+                        {/* Botões de visualização */}
+                        <div className="flex items-center rounded-lg border p-1">
+                            <Button
+                                size="sm"
+                                onClick={() => setViewMode('list')}
+                                className={`h-8 font-medium ${viewMode === 'list' 
+                                    ? 'bg-primary text-primary-foreground shadow-sm' 
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                }`}
+                            >
+                                <ListChecks className="mr-2 h-4 w-4" />
+                                Lista
+                            </Button>
+                            <Button
+                                size="sm"
+                                onClick={() => setViewMode('kanban')}
+                                className={`h-8 font-medium ${viewMode === 'kanban' 
+                                    ? 'bg-primary text-primary-foreground shadow-sm' 
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                }`}
+                            >
+                                <GanttChart className="mr-2 h-4 w-4" />
+                                Kanban
+                            </Button>
+                            <Button
+                                size="sm"
+                                onClick={() => setViewMode('calendar')}
+                                className={`h-8 font-medium ${viewMode === 'calendar' 
+                                    ? 'bg-primary text-primary-foreground shadow-sm' 
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                }`}
+                            >
+                                <CalendarDays className="mr-2 h-4 w-4" />
+                                Calendário
+                            </Button>
+                        </div>
+                        
+                        {/* Campo de busca */}
+                        <div className="relative">
+                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                            <Input
+                                placeholder="Buscar por nº, OS, projeto, cliente..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                className="pl-9 w-80"
+                            />
+                        </div>
+                    </div>
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+                    <StatCard
+                        title="Total de Pedidos"
+                        value={dashboardStats.totalOrders.toString()}
+                        icon={Package}
+                        description={`${dashboardStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg no total`}
+                    />
+                    <StatCard
+                        title="Pedidos Concluídos"
+                        value={dashboardStats.completedOrders.toString()}
+                        icon={CheckCircle}
+                        description={`${dashboardStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg concluídas`}
+                    />
+                    <StatCard
+                        title="Em Andamento"
+                        value={dashboardStats.inProgressOrders.toString()}
+                        icon={PlayCircle}
+                        description={`${dashboardStats.inProgressWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg em produção`}
+                    />
+                    <StatCard
+                        title="Pedidos Atrasados"
+                        value={dashboardStats.delayedOrders.toString()}
+                        icon={AlertTriangle}
+                        description="Pedidos com data de entrega vencida"
+                    />
+                </div>
+
+                 <Card className="p-4">
+                    <div className="flex flex-wrap items-center gap-4">
+                        <span className="text-sm font-medium">Filtrar por:</span>
+                        <Select value={statusFilter} onValueChange={setStatusFilter}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Status" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos os Status</SelectItem>
+                                {uniqueStatuses
+                                    .filter(status => status && status.trim() !== '')
+                                    .map(status => (
+                                        <SelectItem key={status} value={status}>{status}</SelectItem>
+                                    ))}
+                            </SelectContent>
+                        </Select>
+
+                        <Select value={customerFilter} onValueChange={setCustomerFilter}>
+                            <SelectTrigger className="w-[240px]">
+                                <SelectValue placeholder="Cliente" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos os Clientes</SelectItem>
+                                {customers
+                                    .filter(customer => customer.id && customer.id.trim() !== '')
+                                    .map(customer => (
+                                        <SelectItem key={customer.id} value={customer.id}>{customer.name}</SelectItem>
+                                    ))}
+                            </SelectContent>
+                        </Select>
+
+                        {/* NOVO FILTRO DE MÊS */}
+                        <Select value={monthFilter} onValueChange={setMonthFilter}>
+                            <SelectTrigger className="w-[240px]">
+                                <SelectValue placeholder="Mês de Entrega" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">Todos os Meses</SelectItem>
+                                {availableMonths.map(month => (
+                                    <SelectItem key={month.value} value={month.value}>
+                                        {month.label}
+                                    </SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
+
+                        {/* NOVO FILTRO PARA DATA BOOK */}
+                        <Select value={dataBookFilter} onValueChange={setDataBookFilter}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Data Book" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="all">
+                                    Todos ({orders.length})
+                                </SelectItem>
+                                <SelectItem value="pendente">
+                                    Data Book Pendente ({orders.filter(o => o.status === 'Concluído' && !o.dataBookSent).length})
+                                </SelectItem>
+                                <SelectItem value="enviado">
+                                    Data Book Enviado ({orders.filter(o => o.dataBookSent).length})
+                                </SelectItem>
+                            </SelectContent>
+                        </Select>
+
+                        <div className="flex items-center gap-2">
+                            <Input
+                                type="date"
+                                value={dateFilter ? format(dateFilter, "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                    console.log('🔥 FILTRO DATA ALTERADO:', e.target.value);
+                                    if (e.target.value) {
+                                        setDateFilter(new Date(e.target.value));
+                                    } else {
+                                        setDateFilter(undefined);
+                                    }
+                                }}
+                                className="w-[180px]"
+                                placeholder="Data de Entrega"
+                            />
+                            <Button 
+                                variant="outline" 
+                                size="sm"
+                                onClick={() => setDateFilter(undefined)}
+                                className="px-3"
+                            >
+                                <X className="h-4 w-4" />
+                            </Button>
+                        </div>
+                        
+                        {hasActiveFilters && (
+                            <Button variant="ghost" onClick={clearFilters}>
+                                <X className="mr-2 h-4 w-4" />
+                                Limpar Filtros
+                            </Button>
+                        )}
+
+                        {monthFilter !== 'all' && monthWeightStats && (
+                            <Button 
+                                onClick={handleGenerateMonthlyReport}
+                                className="ml-auto bg-green-600 hover:bg-green-700 text-white"
+                            >
+                                <FileText className="mr-2 h-4 w-4" />
+                                Exportar Relatório Mensal
+                            </Button>
+                        )}
+                    </div>
+                    
+                    {/* CARD DE ESTATÍSTICAS DO MÊS SELECIONADO */}
+                    {monthWeightStats && (
+                        <div className="mt-4 pt-4 border-t">
+                            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                                <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+                                    <div className="p-2 bg-blue-100 rounded-full">
+                                        <Package className="h-5 w-5 text-blue-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Total de Pedidos</p>
+                                        <p className="text-lg font-bold text-blue-700">{monthWeightStats.totalOrders}</p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 p-3 bg-purple-50 border border-purple-200 rounded-lg">
+                                    <div className="p-2 bg-purple-100 rounded-full">
+                                        <Weight className="h-5 w-5 text-purple-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Peso Total</p>
+                                        <p className="text-lg font-bold text-purple-700">
+                                            {monthWeightStats.totalWeight.toLocaleString('pt-BR', { 
+                                                minimumFractionDigits: 2, 
+                                                maximumFractionDigits: 2 
+                                            })} kg
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
+                                    <div className="p-2 bg-green-100 rounded-full">
+                                        <CheckCircle className="h-5 w-5 text-green-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Peso Concluído</p>
+                                        <p className="text-lg font-bold text-green-700">
+                                            {monthWeightStats.completedWeight.toLocaleString('pt-BR', { 
+                                                minimumFractionDigits: 2, 
+                                                maximumFractionDigits: 2 
+                                            })} kg
+                                        </p>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 p-3 bg-orange-50 border border-orange-200 rounded-lg">
+                                    <div className="p-2 bg-orange-100 rounded-full">
+                                        <Hourglass className="h-5 w-5 text-orange-600" />
+                                    </div>
+                                    <div>
+                                        <p className="text-xs text-muted-foreground">Peso Pendente</p>
+                                        <p className="text-lg font-bold text-orange-700">
+                                            {monthWeightStats.pendingWeight.toLocaleString('pt-BR', { 
+                                                minimumFractionDigits: 2, 
+                                                maximumFractionDigits: 2 
+                                            })} kg
+                                        </p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            {/* Barra de progresso do mês */}
+                            <div className="mt-4">
+                                <div className="flex items-center justify-between mb-2">
+                                    <span className="text-sm font-medium text-muted-foreground">
+                                        Progresso de Conclusão do Mês
+                                    </span>
+                                    <span className="text-sm font-bold text-primary">
+                                        {monthWeightStats.completedPercentage.toFixed(1)}%
+                                    </span>
+                                </div>
+                                <Progress value={monthWeightStats.completedPercentage} className="h-3" />
+                            </div>
+
+                            <div className="mt-4 flex justify-center">
+                                <Button 
+                                    onClick={handleGenerateMonthlyReport}
+                                    size="lg"
+                                    className="bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg transition-all duration-200"
+                                >
+                                    <FileText className="mr-2 h-5 w-5" />
+                                    Exportar Relatório Completo do Mês
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </Card>
+
+                {viewMode === 'list' ? (
+                    <Card>
+                        <CardHeader>
+                            <CardTitle className="text-foreground">Lista de Pedidos</CardTitle>
+                            <CardDescription className="text-foreground/80">Acompanhe todos os pedidos de produção aprovados.</CardDescription>
+                        </CardHeader>
+                        <CardContent>
+                            {isLoading ? (
+                                <div className="space-y-4">
+                                    <Skeleton className="h-10 w-full" />
+                                    <Skeleton className="h-10 w-full" />
+                                    <Skeleton className="h-10 w-full" />
+                                </div>
+                            ) : (
+                               <OrdersTable orders={filteredOrders} onOrderClick={handleViewOrder} />
+                            )}
+                        </CardContent>
+                    </Card>
+                ) : viewMode === 'kanban' ? (
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle className="text-foreground">Kanban de Pedidos por Mês de Entrega</CardTitle>
+                                    <CardDescription className="text-foreground/80">
+                                        Visualize os pedidos organizados por mês de entrega com peso total por coluna.
+                                        {filteredOrders.length > 0 && (
+                                            <span className="ml-2">
+                                                {filteredOrders.filter(o => o.deliveryDate || o.status === 'Concluído').length} de {filteredOrders.length} pedidos exibidos
+                                            </span>
+                                        )}
+                                    </CardDescription>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-green-600"></div>
+                                        <span>Concluído</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-blue-500"></div>
+                                        <span>Pronto</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-gray-600"></div>
+                                        <span>Em Produção</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-orange-500"></div>
+                                        <span>Atrasado</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {isLoading ? (
+                                <div className="flex space-x-4 p-4">
+                                    {Array.from({ length: 3 }).map((_, i) => (
+                                        <div key={i} className="flex-shrink-0 w-80 space-y-4">
+                                            <Skeleton className="h-24 w-full" />
+                                            <Skeleton className="h-32 w-full" />
+                                            <Skeleton className="h-32 w-full" />
+                                        </div>
+                                    ))}
+                                </div>
+                            ) : (
+                                <KanbanView />
+                            )}
+                        </CardContent>
+                    </Card>
+                ) : (
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle className="text-foreground">Calendário de Entregas</CardTitle>
+                                    <CardDescription className="text-foreground/80">
+                                        Visualize os pedidos organizados por data de entrega. 
+                                        {filteredOrders.length > 0 && (
+                                            <span className="ml-2">
+                                                {filteredOrders.filter(o => o.deliveryDate).length} de {filteredOrders.length} pedidos com data definida
+                                            </span>
+                                        )}
+                                    </CardDescription>
+                                </div>
+                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-green-600"></div>
+                                        <span>Concluído</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-blue-500"></div>
+                                        <span>Pronto</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-gray-600"></div>
+                                        <span>Em Produção</span>
+                                    </div>
+                                    <div className="flex items-center gap-1">
+                                        <div className="w-3 h-3 rounded bg-orange-500"></div>
+                                        <span>Atrasado</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent>
+                            {isLoading ? (
+                                <div className="space-y-4">
+                                    <Skeleton className="h-10 w-full" />
+                                    <Skeleton className="h-40 w-full" />
+                                </div>
+                            ) : filteredOrders.filter(o => o.deliveryDate).length === 0 ? (
+                                <div className="text-center py-12">
+                                    <CalendarDays className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                                    <h3 className="text-lg font-medium mb-2 text-foreground">Nenhum pedido com data de entrega</h3>
+                                    <p className="text-foreground/70">
+                                        Os pedidos aparecerão no calendário quando tiverem data de entrega definida.
+                                    </p>
+                                </div>
+                            ) : (
+                                <CalendarView />
+                            )}
+                        </CardContent>
+                    </Card>
+                )}
+            </div>
+
+            <Sheet open={isSheetOpen} onOpenChange={(open) => { 
+  setIsSheetOpen(open); 
+  if (!open) { 
+    setIsEditing(false); 
+    setSelectedItems(new Set()); 
+    setProgressClipboard(null);
+    
+    // Restaurar scrolls quando fechar o modal
+    if (viewMode === 'kanban') {
+      // Scroll horizontal
+      setTimeout(() => {
+        if (kanbanScrollRef.current) {
+          const savedPosition = scrollPositionRef.current || 
+            parseInt(sessionStorage.getItem('kanbanScrollPosition') || '0', 10);
+          
+          if (savedPosition > 0) {
+            kanbanScrollRef.current.scrollLeft = savedPosition;
+            console.log('🔄 Restaurando scroll horizontal ao fechar:', savedPosition);
+          }
+        }
+        
+        // NOVO: Restaurar scroll vertical das colunas
+        const columns = document.querySelectorAll('[data-column-scroll]');
+        columns.forEach((column) => {
+          const columnId = column.getAttribute('data-column-id');
+          if (columnId) {
+            const savedScroll = columnScrollPositions.current.get(columnId);
+            if (savedScroll !== undefined) {
+              column.scrollTop = savedScroll;
+              console.log(`🔄 Restaurando scroll da coluna ${columnId}:`, savedScroll);
+            }
+          }
+        });
+      }, 100);
     }
+  } 
+}}>
+  <SheetContent className="w-full sm:max-w-4xl flex flex-col h-full">
+    {selectedOrder && (
+      <>
+        {/* Header fixo */}
+        <SheetHeader className="flex-shrink-0 pb-4 border-b">
+          <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
+          <SheetDescription>
+            Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
+          </SheetDescription>
+        </SheetHeader>
+
+        {/* Conteúdo principal */}
+        {isEditing ? (
+          // MODO DE EDIÇÃO - COM SCROLL CORRIGIDO
+          <Form {...form}>
+            <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col flex-1 min-h-0">
+              {/* Área de conteúdo com scroll */}
+              <div className="flex-1 overflow-hidden py-4">
+                <ScrollArea className="h-full pr-4">
+                  <div className="space-y-6">
+                    {/* Informações Básicas do Pedido */}
+                    <Card className="p-4 bg-secondary/50">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                        <FormField control={form.control} name="customer" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Cliente</FormLabel>
+                            <Select
+                              onValueChange={(value) => {
+                                const selectedCustomer = customers.find(c => c.id === value);
+                                if (selectedCustomer) field.onChange(selectedCustomer);
+                              }}
+                              value={field.value?.id}
+                            >
+                              <FormControl>
+                                <SelectTrigger>
+                                  <SelectValue placeholder="Selecione um cliente" />
+                                </SelectTrigger>
+                              </FormControl>
+                              <SelectContent>
+                                {customers
+                                  .filter(c => c.id && c.id.trim() !== '')
+                                  .map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="projectName" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Projeto do Cliente</FormLabel>
+                            <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                      </div>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <FormField control={form.control} name="internalOS" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>OS Interna</FormLabel>
+                            <FormControl><Input placeholder="Ex: OS-2024-123" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                        <FormField
+                          control={form.control}
+                          name="status"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Status do Pedido</FormLabel>
+                              <Select onValueChange={field.onChange} defaultValue={field.value}>
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Selecione um status" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
+                                  <SelectItem value="Em Produção">Em Produção</SelectItem>
+                                  <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
+                                  <SelectItem value="Concluído">Concluído</SelectItem>
+                                  <SelectItem value="Cancelado">Cancelado</SelectItem>
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+                      </div>
+
+                      {/* Controle de Data Book */}
+                      {form.watch("status") === "Concluído" && (
+                        <Card className="mt-4">
+                          <CardHeader>
+                            <CardTitle>Controle de Data Book</CardTitle>
+                          </CardHeader>
+                          <CardContent>
+                            <FormField 
+                              control={form.control} 
+                              name="dataBookSent" 
+                              render={({ field }) => (
+                                <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                  <div className="space-y-0.5">
+                                    <FormLabel>Data Book Enviado</FormLabel>
+                                    <FormDescription>
+                                      Marque quando o Data Book tiver sido enviado ao cliente.
+                                    </FormDescription>
+                                  </div>
+                                  <FormControl>
+                                    <Checkbox checked={field.value} onCheckedChange={field.onChange} />
+                                  </FormControl>
+                                </FormItem>
+                              )}
+                            />
+                          </CardContent>
+                        </Card>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                        <FormField control={form.control} name="quotationNumber" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Nº Pedido (Compra)</FormLabel>
+                            <FormControl>
+                              <Input 
+                                placeholder="Nº do Pedido de Compra do Cliente" 
+                                {...field} 
+                                value={field.value ?? ''} 
+                                onChange={(e) => {
+                                  console.log('📝 [DEBUG] Número do pedido alterado:', e.target.value);
+                                  field.onChange(e.target.value);
+                                }}
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="deliveryDate" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Data de Entrega</FormLabel>
+                            <FormControl>
+                              <Input
+                                type="date"
+                                value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                  console.log('🔥 DATA ENTREGA ALTERADA:', e.target.value);
+                                  if (e.target.value) {
+                                    field.onChange(new Date(e.target.value));
+                                  } else {
+                                    field.onChange(null);
+                                  }
+                                }}
+                                className="w-full"
+                              />
+                            </FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                      </div>
+                      <div className="space-y-4 mt-6">
+                        <FormField control={form.control} name="driveLink" render={({ field }) => (
+                          <FormItem>
+                            <FormLabel>Link da Pasta (Google Drive)</FormLabel>
+                            <FormControl><Input type="url" placeholder="https://drive.google.com/..." {...field} value={field.value ?? ''} /></FormControl>
+                            <FormMessage />
+                          </FormItem>
+                        )}/>
+                      </div>
+                    </Card>
+
+                    {/* Checklist de Documentos */}
+                    <Card>
+                      <CardHeader><CardTitle>Checklist de Documentos</CardTitle></CardHeader>
+                      <CardContent className="space-y-4">
+                        <FormField control={form.control} name="documents.drawings" render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                              <FormLabel>Desenhos Técnicos</FormLabel>
+                              <FormDescription>Marque se os desenhos foram recebidos e estão na pasta.</FormDescription>
+                            </div>
+                            <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                          </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="documents.inspectionTestPlan" render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                              <FormLabel>Plano de Inspeção e Testes (PIT)</FormLabel>
+                              <FormDescription>Marque se o plano de inspeção foi recebido.</FormDescription>
+                            </div>
+                            <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                          </FormItem>
+                        )}/>
+                        <FormField control={form.control} name="documents.paintPlan" render={({ field }) => (
+                          <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                            <div className="space-y-0.5">
+                              <FormLabel>Plano de Pintura</FormLabel>
+                              <FormDescription>Marque se o plano de pintura foi recebido.</FormDescription>
+                            </div>
+                            <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                          </FormItem>
+                        )}/>
+                      </CardContent>
+                    </Card>
+
+                    {/* Itens do Pedido - MODO DE EDIÇÃO COM ADICIONAR/REMOVER */}
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center justify-between">
+                          <span>Itens do Pedido (Editável)</span>
+                          <div className="flex items-center gap-4">
+                            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                              <Package className="h-4 w-4" />
+                              <span>{fields.length} {fields.length === 1 ? 'item' : 'itens'}</span>
+                            </div>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => setIsAddingItem(true)}
+                              className="flex items-center gap-2"
+                            >
+                              <PlusCircle className="h-4 w-4" />
+                              Adicionar Item
+                            </Button>
+                          </div>
+                        </CardTitle>
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {fields.length === 0 ? (
+                          <div className="text-center py-8 text-muted-foreground">
+                            <Package className="h-8 w-8 mx-auto mb-2" />
+                            <p>Nenhum item no pedido</p>
+                            <p className="text-xs">Este pedido não possui itens cadastrados.</p>
+                            <div className="mt-4">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setIsAddingItem(true)}
+                                className="flex items-center gap-2"
+                              >
+                                <PlusCircle className="h-4 w-4" />
+                                Adicionar Primeiro Item
+                              </Button>
+                            </div>
+                          </div>
+                        ) : (
+                          fields.map((field, index) => {
+                            const itemProgress = calculateItemProgress(watchedItems[index] || {});
+                            return (
+                              <Card key={field.id} className="p-4 bg-secondary relative">
+                                {/* Botão de Exclusão no Canto Superior Direito */}
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="icon"
+                                  className="absolute top-2 right-2 h-8 w-8 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+                                  onClick={() => handleDeleteItem(index)}
+                                  title={`Remover item "${watchedItems[index]?.description || 'este item'}"`}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+
+                                <div className="space-y-4 pr-10"> {/* Adicionar padding-right para evitar sobreposição com botão */}
+                                  {/* Header do Item com Número */}
+                                  <div className="flex items-center gap-2 pb-2 border-b border-border/50">
+                                    <div className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+                                      {index + 1}
+                                    </div>
+                                    <h4 className="font-medium text-sm text-muted-foreground">
+                                      Item do Pedido {index + 1}
+                                      {itemProgress === 100 && (
+                                        <Badge variant="default" className="ml-2 bg-green-600 hover:bg-green-600/90">
+                                          <CheckCircle className="mr-1 h-3 w-3" />
+                                          Concluído
+                                        </Badge>
+                                      )}
+                                    </h4>
+                                  </div>
+
+                                  <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
+                                    <FormItem>
+                                      <FormLabel>Descrição do Item</FormLabel>
+                                      <FormControl>
+                                        <Textarea 
+                                          placeholder="Descrição completa do item" 
+                                          {...field} 
+                                          className="min-h-[80px]"
+                                        />
+                                      </FormControl>
+                                      <FormMessage />
+                                    </FormItem>
+                                  )}/>
+
+                                  <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                                    <FormField control={form.control} name={`items.${index}.itemNumber`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Nº Item PC</FormLabel>
+                                        <FormControl>
+                                          <Input placeholder="Ex: 001" {...field} value={field.value || ''} />
+                                        </FormControl>
+                                        <FormMessage />
+                                        <FormDescription className="text-xs">
+                                          Nº do item conforme Pedido de Compra do cliente
+                                        </FormDescription>
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Código</FormLabel>
+                                        <FormControl>
+                                          <Input placeholder="Cód. Produto" {...field} value={field.value || ''} />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField control={form.control} name={`items.${index}.quantity`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Quantidade</FormLabel>
+                                        <FormControl>
+                                          <Input 
+                                            type="number" 
+                                            placeholder="0" 
+                                            {...field} 
+                                            value={field.value ?? ''} 
+                                            min="0"
+                                            step="1"
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField control={form.control} name={`items.${index}.unitWeight`} render={({ field }) => (
+                                      <FormItem>
+                                        <FormLabel>Peso Unit. (kg)</FormLabel>
+                                        <FormControl>
+                                          <Input 
+                                            type="number" 
+                                            step="0.01" 
+                                            placeholder="0.00" 
+                                            {...field} 
+                                            value={field.value ?? ''} 
+                                            min="0"
+                                          />
+                                        </FormControl>
+                                        <FormMessage />
+                                      </FormItem>
+                                    )}/>
+
+                                    <FormField 
+                                      control={form.control} 
+                                      name={`items.${index}.itemDeliveryDate`} 
+                                      render={({ field }) => (
+                                        <FormItem>
+                                          <FormLabel>Entrega do Item</FormLabel>
+                                          <FormControl>
+                                            <Input
+                                              type="date"
+                                              value={
+                                                field.value 
+                                                  ? (field.value instanceof Date 
+                                                      ? format(field.value, "yyyy-MM-dd") 
+                                                      : format(new Date(field.value), "yyyy-MM-dd")
+                                                    )
+                                                  : ""
+                                              }
+                                              onChange={(e) => {
+                                                console.log('📅 [ITEM DELIVERY] Mudança detectada:', e.target.value);
+                                                if (e.target.value) {
+                                                  // Criar data de forma mais robusta
+                                                  const [year, month, day] = e.target.value.split('-').map(Number);
+                                                  const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+                                                  console.log('📅 [ITEM DELIVERY] Nova data criada:', newDate);
+                                                  field.onChange(newDate);
+                                                } else {
+                                                  console.log('📅 [ITEM DELIVERY] Data limpa');
+                                                  field.onChange(null);
+                                                }
+                                              }}
+                                              className="w-full"
+                                              placeholder="Selecione a data de entrega"
+                                            />
+                                          </FormControl>
+                                          <FormMessage />
+                                          <FormDescription className="text-xs text-muted-foreground">
+                                            Data específica de entrega deste item (opcional)
+                                          </FormDescription>
+                                        </FormItem>
+                                      )}
+                                    />
+                                  </div>
+
+                                  {/* Seção de Embarque para Itens Concluídos */}
+                                  {itemProgress === 100 && (
+                                    <>
+                                      <Separator className="my-3" />
+                                      <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                        <div className="flex items-center gap-2 mb-3">
+                                          <CheckCircle className="h-5 w-5 text-green-600" />
+                                          <h5 className="font-semibold text-green-800">Item Concluído - Preencha as Informações de Embarque</h5>
+                                        </div>
+                                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                                          <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel>Lista de Embarque (LE)</FormLabel>
+                                              <FormControl>
+                                                <Input placeholder="Nº da LE" {...field} value={field.value ?? ''} />
+                                              </FormControl>
+                                              <FormMessage />
+                                            </FormItem>
+                                          )}/>
+
+                                          <FormField control={form.control} name={`items.${index}.invoiceNumber`} render={({ field }) => (
+                                            <FormItem>
+                                              <FormLabel>Nota Fiscal (NF-e) *</FormLabel>
+                                              <FormControl>
+                                                <Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} />
+                                              </FormControl>
+                                              <FormMessage />
+                                            </FormItem>
+                                          )}/>
+
+                                          <FormField 
+                                            control={form.control} 
+                                            name={`items.${index}.shippingDate`} 
+                                            render={({ field }) => (
+                                              <FormItem>
+                                                <FormLabel>Data de Embarque *</FormLabel>
+                                                <FormControl>
+                                                  <Input
+                                                    type="date"
+                                                    value={
+                                                      field.value 
+                                                        ? (field.value instanceof Date 
+                                                            ? format(field.value, "yyyy-MM-dd") 
+                                                            : format(new Date(field.value), "yyyy-MM-dd")
+                                                          )
+                                                        : ""
+                                                    }
+                                                    onChange={(e) => {
+                                                      console.log('📅 [SHIPPING] Mudança detectada:', e.target.value);
+                                                      if (e.target.value) {
+                                                        const [year, month, day] = e.target.value.split('-').map(Number);
+                                                        const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
+                                                        console.log('📅 [SHIPPING] Nova data criada:', newDate);
+                                                        field.onChange(newDate);
+                                                      } else {
+                                                        console.log('📅 [SHIPPING] Data limpa');
+                                                        field.onChange(null);
+                                                      }
+                                                    }}
+                                                    className="w-full"
+                                                  />
+                                                </FormControl>
+                                                <FormMessage />
+                                              </FormItem>
+                                            )}
+                                          />
+                                        </div>
+
+                                        {/* Indicador de Atraso/Antecipação */}
+                                        {watchedItems[index]?.shippingDate && selectedOrder.deliveryDate && (
+                                          <div className="mt-3">
+                                            {new Date(watchedItems[index].shippingDate) <= selectedOrder.deliveryDate ? (
+                                              <div className="flex items-center gap-2 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
+                                                <CheckCircle className="h-4 w-4" />
+                                                <span className="font-medium">Item será entregue no prazo</span>
+                                              </div>
+                                            ) : (
+                                              <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
+                                                <AlertTriangle className="h-4 w-4" />
+                                                <span className="font-medium">
+                                                  Item será entregue {Math.ceil((new Date(watchedItems[index].shippingDate).getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
+                                                </span>
+                                              </div>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        <p className="text-xs text-muted-foreground mt-2">
+                                          * Campos obrigatórios para finalização do embarque
+                                        </p>
+                                      </div>
+                                    </>
+                                  )}
+                                </div>
+                              </Card>
+                            );
+                          })
+                        )}
+                      </CardContent>
+                    </Card>
+                  </div>
+                </ScrollArea>
+              </div>
+              
+              {/* Footer fixo com botões */}
+              <div className="flex-shrink-0 pt-4 border-t bg-background">
+                <div className="flex items-center justify-between gap-4 flex-wrap">
+                  <div className="text-sm text-muted-foreground">
+                    <span>Itens: {fields.length}</span>
+                    <span className="mx-2">•</span>
+                    <span>Peso Total: <span className="font-semibold">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span></span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" onClick={() => setIsEditing(false)}>
+                      Cancelar
+                    </Button>
+                    <Button type="submit" disabled={form.formState.isSubmitting || fields.length === 0}>
+                      {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </Form>
+        ) : (
+          // MODO DE VISUALIZAÇÃO - MANTÉM ESTRUTURA ORIGINAL
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex-1 overflow-hidden py-4">
+              <ScrollArea className="h-full pr-4">
+                <div className="space-y-6">
+                  {/* Informações Gerais */}
+                  <Card className="p-6 bg-secondary/50">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Cliente</Label>
+                        <p className="font-medium">{selectedOrder.customer?.name || 'N/A'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Projeto do Cliente</Label>
+                        <p className="font-medium">{selectedOrder.projectName || 'N/A'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">OS Interna</Label>
+                        <p className="font-medium">{selectedOrder.internalOS || 'N/A'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Status</Label>
+                        <div>
+                          {(() => {
+                            const statusProps = getStatusProps(selectedOrder.status);
+                            return (
+                              <Badge variant={statusProps.variant} className={statusProps.colorClass}>
+                                <statusProps.icon className="mr-2 h-4 w-4" />
+                                {statusProps.label}
+                              </Badge>
+                            );
+                          })()}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Data de Entrega</Label>
+                        <p className="font-medium">{selectedOrder.deliveryDate ? format(selectedOrder.deliveryDate, "dd/MM/yyyy") : 'A definir'}</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium text-muted-foreground">Peso Total</Label>
+                        <p className="font-medium">{(selectedOrder.totalWeight || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</p>
+                      </div>
+                    </div>
+                    {selectedOrder.driveLink && (
+                      <div className="mt-4 pt-4 border-t">
+                        <Label className="text-sm font-medium text-muted-foreground">Pasta no Google Drive</Label>
+                        <div className="mt-2">
+                          <Button variant="outline" size="sm" asChild>
+                            <a href={selectedOrder.driveLink} target="_blank" rel="noopener noreferrer">
+                              <FolderGit2 className="mr-2 h-4 w-4" />
+                              Acessar Pasta
+                            </a>
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* Documentos */}
+                  <Card>
+                    <CardHeader><CardTitle>Status dos Documentos</CardTitle></CardHeader>
+                    <CardContent>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <div className="flex items-center space-x-2">
+                          <div className={`p-2 rounded-full ${selectedOrder.documents?.drawings ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <FileText className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-medium">Desenhos Técnicos</p>
+                            <p className="text-sm text-muted-foreground">{selectedOrder.documents?.drawings ? 'Recebido' : 'Pendente'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className={`p-2 rounded-full ${selectedOrder.documents?.inspectionTestPlan ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <ClipboardCheck className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-medium">Plano de Inspeção</p>
+                            <p className="text-sm text-muted-foreground">{selectedOrder.documents?.inspectionTestPlan ? 'Recebido' : 'Pendente'}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center space-x-2">
+                          <div className={`p-2 rounded-full ${selectedOrder.documents?.paintPlan ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
+                            <Palette className="h-4 w-4" />
+                          </div>
+                          <div>
+                            <p className="font-medium">Plano de Pintura</p>
+                            <p className="text-sm text-muted-foreground">{selectedOrder.documents?.paintPlan ? 'Recebido' : 'Pendente'}</p>
+                          </div>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Preview limpo dos dados de entrega */}
+                  <DeliveryPreviewCard selectedOrder={selectedOrder} />
+
+                  {/* Lista de Itens */}
+                  <Card>
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle>Itens do Pedido</CardTitle>
+                      <div className="flex items-center gap-2">
+                        {progressClipboard && (
+                          <Button variant="outline" size="sm" onClick={handleCancelCopy}>
+                            <X className="mr-2 h-4 w-4" />
+                            Cancelar Cópia
+                          </Button>
+                        )}
+                        <div className="flex items-center space-x-2">
+                          <Checkbox
+                            checked={selectedItems.size === selectedOrder.items.length && selectedOrder.items.length > 0}
+                            onCheckedChange={handleSelectAll}
+                            aria-label="Selecionar todos os itens"
+                          />
+                          <span className="text-sm text-muted-foreground">Selecionar todos</span>
+                        </div>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      {selectedOrder.items.map((item, index) => {
+                        const itemProgress = calculateItemProgress(item);
+                        const totalItemWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                        return (
+                          <Card key={item.id} className={`p-4 ${selectedItems.has(item.id!) ? 'ring-2 ring-primary' : ''}`}>
+                            <div className="flex items-start justify-between mb-3">
+                              <div className="flex items-center space-x-3">
+                                <Checkbox
+                                  checked={selectedItems.has(item.id!)}
+                                  onCheckedChange={() => handleItemSelection(item.id!)}
+                                  aria-label={`Selecionar item ${item.description}`}
+                                />
+                                <div>
+                                  <h4 className="font-medium">{item.description}</h4>
+                                  {item.code && <p className="text-sm text-muted-foreground">Código: {item.code}</p>}
+                                </div>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {progressClipboard && (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button variant="outline" size="sm" onClick={() => handlePasteProgress(item)}>
+                                          <ClipboardPaste className="h-4 w-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Colar progresso de "{progressClipboard.description}"</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
+                                <TooltipProvider>
+                                  <Tooltip>
+                                    <TooltipTrigger asChild>
+                                      <Button variant="outline" size="sm" onClick={() => handleCopyProgress(item)}>
+                                        <Copy className="h-4 w-4" />
+                                      </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent>
+                                      <p>Copiar progresso deste item</p>
+                                    </TooltipContent>
+                                  </Tooltip>
+                                </TooltipProvider>
+
+                                <Button variant="outline" size="sm" onClick={() => handleOpenProgressModal(item)}>
+                                  <GanttChart className="mr-2 h-4 w-4" />
+                                  Progresso
+                                </Button>
+                                {itemProgress === 100 && (
+                                  <TooltipProvider>
+                                    <Tooltip>
+                                      <TooltipTrigger asChild>
+                                        <Button variant="outline" size="sm" onClick={() => handleGenerateTimesheet(item)}>
+                                          <QrCode className="h-4 w-4" />
+                                        </Button>
+                                      </TooltipTrigger>
+                                      <TooltipContent>
+                                        <p>Gerar Folha de Controle de Embarque com QR Code</p>
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                )}
+                              </div>
+                            </div>
+                            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">Nº Item PC:</span>
+                                <p className="font-medium">{item.itemNumber || 'N/A'}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Quantidade:</span>
+                                <p className="font-medium">{item.quantity}</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Peso Unit.:</span>
+                                <p className="font-medium">{(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Peso Total:</span>
+                                <p className="font-medium">{totalItemWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg</p>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">Entrega:</span>
+                                <p className="font-medium">{item.itemDeliveryDate ? format(item.itemDeliveryDate, "dd/MM/yyyy") : 'A definir'}</p>
+                              </div>
+                            </div>
+                            <div className="mt-3">
+                              <div className="flex items-center gap-2 mb-2">
+                                <span className="text-sm text-muted-foreground">Progresso:</span>
+                                <span className="text-sm font-medium">{Math.round(itemProgress)}%</span>
+                              </div>
+                              <Progress value={itemProgress} className="h-2" />
+                            </div>
+                            {itemProgress === 100 && (
+                              <>
+                                <Separator className="my-3" />
+                                <div className="bg-green-50 border border-green-200 rounded-lg p-4">
+                                  <div className="flex items-center gap-2 mb-3">
+                                    <CheckCircle className="h-5 w-5 text-green-600" />
+                                    <h5 className="font-semibold text-green-800">Item Concluído - Informações de Embarque</h5>
+                                  </div>
+                                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                                    <div>
+                                      <span className="text-muted-foreground">Lista de Embarque:</span>
+                                      <p className="font-medium">{item.shippingList || 'Pendente'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Nota Fiscal:</span>
+                                      <p className="font-medium">{item.invoiceNumber || 'Pendente'}</p>
+                                    </div>
+                                    <div>
+                                      <span className="text-muted-foreground">Data de Embarque:</span>
+                                      <div className="flex items-center gap-2">
+                                        <p className="font-medium">{item.shippingDate ? format(item.shippingDate, "dd/MM/yyyy") : 'Pendente'}</p>
+                                        {item.shippingDate && selectedOrder.deliveryDate && (
+                                          <>
+                                            {item.shippingDate <= selectedOrder.deliveryDate ? (
+                                              <Badge variant="default" className="bg-green-600 hover:bg-green-600/90 text-xs">
+                                                <CheckCircle className="mr-1 h-3 w-3" />
+                                                No Prazo
+                                              </Badge>
+                                            ) : (
+                                              <Badge variant="destructive" className="text-xs">
+                                                <AlertTriangle className="mr-1 h-3 w-3" />
+                                                Atrasado
+                                              </Badge>
+                                            )}
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  {item.shippingDate && selectedOrder.deliveryDate && item.shippingDate > selectedOrder.deliveryDate && (
+                                    <div className="mt-3 p-2 bg-red-50 border border-red-200 rounded text-xs text-red-700">
+                                      <div className="flex items-center gap-1">
+                                        <AlertTriangle className="h-3 w-3" />
+                                        <span className="font-medium">
+                                          Entregue {Math.ceil((item.shippingDate.getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
+                                        </span>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              </>
+                            )}
+                          </Card>
+                        );
+                      })}
+
+                        {/* Formulário para adicionar novo item */}
+                        {isAddingItem && (
+                          <Card className="p-4 bg-blue-50 border-blue-200">
+                            <div className="space-y-4">
+                              <div className="flex items-center gap-2 pb-2 border-b border-blue-300">
+                                <div className="bg-blue-600 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
+                                  +
+                                </div>
+                                <h4 className="font-medium text-sm text-blue-800">
+                                  Novo Item
+                                </h4>
+                              </div>
+
+                              <div className="space-y-4">
+                                <div>
+                                  <Label htmlFor="new-description" className="text-blue-800">Descrição do Item *</Label>
+                                  <Textarea
+                                    id="new-description"
+                                    placeholder="Descrição completa do item"
+                                    value={newItemForm.description}
+                                    onChange={(e) => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
+                                    className="min-h-[80px] border-blue-300 focus:border-blue-500"
+                                  />
+                                </div>
+
+                                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                                  <div>
+                                    <Label htmlFor="new-itemNumber" className="text-blue-800">Nº Item PC</Label>
+                                    <Input
+                                      id="new-itemNumber"
+                                      placeholder="Ex: 001"
+                                      value={newItemForm.itemNumber}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, itemNumber: e.target.value }))}
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <Label htmlFor="new-code" className="text-blue-800">Código</Label>
+                                    <Input
+                                      id="new-code"
+                                      placeholder="Cód. Produto"
+                                      value={newItemForm.code}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, code: e.target.value }))}
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <Label htmlFor="new-quantity" className="text-blue-800">Quantidade</Label>
+                                    <Input
+                                      id="new-quantity"
+                                      type="number"
+                                      placeholder="1"
+                                      value={newItemForm.quantity}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, quantity: Number(e.target.value) || 1 }))}
+                                      min="1"
+                                      step="1"
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+
+                                  <div>
+                                    <Label htmlFor="new-unitWeight" className="text-blue-800">Peso Unit. (kg)</Label>
+                                    <Input
+                                      id="new-unitWeight"
+                                      type="number"
+                                      step="0.01"
+                                      placeholder="0.00"
+                                      value={newItemForm.unitWeight}
+                                      onChange={(e) => setNewItemForm(prev => ({ ...prev, unitWeight: Number(e.target.value) || 0 }))}
+                                      min="0"
+                                      className="border-blue-300 focus:border-blue-500"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 pt-2">
+                                  <Button
+                                    type="button"
+                                    onClick={handleAddNewItem}
+                                    className="bg-blue-600 hover:bg-blue-700"
+                                  >
+                                    <PlusCircle className="mr-2 h-4 w-4" />
+                                    Adicionar Item
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={handleCancelAddItem}
+                                  >
+                                    Cancelar
+                                  </Button>
+                                </div>
+                              </div>
+                            </div>
+                          </Card>
+                        )}
+                      </CardContent>
+                    </Card>
+                </div>
+              </ScrollArea>
+            </div>
+            
+            {/* Footer de visualização limpo */}
+            <UpdatedSheetFooter 
+              selectedOrder={selectedOrder}
+              selectedItems={selectedItems}
+              handleGeneratePackingSlip={handleGeneratePackingSlip}
+              handleExportSchedule={handleExportSchedule}
+              setIsEditing={setIsEditing}
+              handleDeleteClick={handleDeleteClick}
+              onDataBookSent={handleDataBookSent}
+              resetPackingSlipQuantities={resetPackingSlipQuantities}
+              setIsPackingSlipDialogOpen={setIsPackingSlipDialogOpen}
+            />
+          </div>
+        )}
+      </>
+    )}
+  </SheetContent>
+    </Sheet>
+
+    <Dialog open={isProgressModalOpen} onOpenChange={setIsProgressModalOpen}>
+      <DialogContent className="sm:max-w-6xl lg:max-w-7xl w-[95vw] h-[95vh] flex flex-col overflow-hidden">
+        {/* Header fixo */}
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
+          <DialogDescription>
+            Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
+          </DialogDescription>
+          
+          {/* DEBUG - REMOVER DEPOIS */}
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3 mb-4">
+            <div className="flex items-center gap-2">
+              <CalendarIcon className="h-4 w-4 text-blue-600" />
+              <p className="text-sm text-blue-800">
+                <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
+              </p>
+            </div>
+          </div>
+        </DialogHeader>
+
+        {/* Barra de progresso no cabeçalho */}
+        <div className="px-6 py-4 border-b">
+          <div className="flex items-center justify-between mb-2">
+            <span className="text-sm font-medium">
+              Progresso: {editedPlan.filter(s => s.status === 'Concluído').length} de {editedPlan.length} etapas
+            </span>
+            <span className="text-sm text-muted-foreground">
+              {Math.round((editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100)}%
+            </span>
+          </div>
+          <Progress 
+            value={(editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100} 
+            className="h-2" 
+          />
+        </div>
+
+        {/* Ações em lote */}
+        <div className="px-6 py-3 border-b">
+          <div className="flex gap-2">
+            <Button 
+              variant="outline" 
+              onClick={() => autoScheduleFromToday()}
+              size="sm"
+            >
+              📅 Agendar a partir de hoje
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => markPreviousAsCompleted()}
+              size="sm"
+            >
+              ✅ Marcar anteriores como concluídas
+            </Button>
+            <Button 
+              variant="outline" 
+              onClick={() => applyStandardDurations()}
+              size="sm"
+            >
+              ⏱️ Aplicar durações padrão
+            </Button>
+          </div>
+        </div>
+
+        {/* Área de conteúdo com scroll */}
+        <div className="flex-1 overflow-auto">
+          <div className="min-w-[1200px] p-4">
+            {isFetchingPlan ? (
+              <div className="flex justify-center items-center h-48">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
+                  <p>Buscando plano de fabricação...</p>
+                </div>
+              </div>
+            ) : (editedPlan && editedPlan.length > 0) ? (
+              <div className="border rounded-lg">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background">
+                    <TableRow>
+                      <TableHead className="w-12">#</TableHead>
+                      <TableHead className="min-w-[200px]">Etapa</TableHead>
+                      <TableHead className="w-32">Status</TableHead>
+                      <TableHead className="w-32">Início</TableHead>
+                      <TableHead className="w-32">Fim</TableHead>
+                      <TableHead className="w-24">Duração</TableHead>
+                      <TableHead className="w-40">Horário</TableHead>
+                      <TableHead className="w-20">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {editedPlan.map((stage, index) => (
+                      <>
+                        <TableRow key={`${stage.stageName}-${index}`} className="group">
+                          <TableCell className="font-medium">{index + 1}</TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              {getStatusIcon(stage.status)}
+                              <span className="font-medium">{stage.stageName}</span>
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={stage.status} 
+                              onValueChange={(value) => handlePlanChange(index, 'status', value)}
+                            >
+                              <SelectTrigger className="h-8 w-full">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="Pendente">Pendente</SelectItem>
+                                <SelectItem value="Em Andamento">Em Andamento</SelectItem>
+                                <SelectItem value="Concluído">Concluído</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            {stage.status === 'Concluído' ? (
+                              <div className="text-green-700 font-medium">
+                                {stage.startDate ? format(stage.startDate, "dd/MM") : '-'}
+                              </div>
+                            ) : (
+                              <Input
+                                type="date"
+                                value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                  const newDate = e.target.value ? createSafeDate(e.target.value) : null;
+                                  handlePlanChange(index, 'startDate', newDate);
+                                }}
+                                className="h-8"
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            {stage.status === 'Concluído' ? (
+                              <div className="text-green-700 font-medium">
+                                {stage.completedDate ? format(stage.completedDate, "dd/MM") : '-'}
+                              </div>
+                            ) : (
+                              <Input
+                                type="date"
+                                value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
+                                onChange={(e) => {
+                                  const newDate = e.target.value ? createSafeDate(e.target.value) : null;
+                                  handlePlanChange(index, 'completedDate', newDate);
+                                }}
+                                className="h-8"
+                              />
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <Input
+                              type="number"
+                              step="0.125"
+                              min="0.125"
+                              value={stage.durationDays ?? ''}
+                              onChange={(e) => handlePlanChange(index, 'durationDays', e.target.value)}
+                              className="h-8 w-20"
+                            />
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={stage.workSchedule || "normal"} 
+                              onValueChange={(value) => {
+                                handlePlanChange(index, 'workSchedule', value);
+                                // Automaticamente ajusta useBusinessDays baseado na seleção
+                                const useBusinessDays = value === 'normal';
+                                handlePlanChange(index, 'useBusinessDays', useBusinessDays);
+                              }}
+                            >
+                              <SelectTrigger className="h-10 w-full">
+                                <SelectValue placeholder="Selecionar horário" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="normal">
+                                  <div className="flex items-center gap-3 py-1">
+                                    <CalendarDays className="h-4 w-4 text-blue-500" />
+                                    <div className="text-left">
+                                      <div className="font-medium">Normal</div>
+                                      <div className="text-xs text-muted-foreground">Dias úteis apenas</div>
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                                <SelectItem value="especial">
+                                  <div className="flex items-center gap-3 py-1">
+                                    <Clock className="h-4 w-4 text-orange-500" />
+                                    <div className="text-left">
+                                      <div className="font-medium">Especial</div>
+                                      <div className="text-xs text-muted-foreground">Incluí fins de semana</div>
+                                    </div>
+                                  </div>
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-1">
+                              <Button 
+                                variant="ghost" 
+                                className="h-8 w-8 p-0"
+                                onClick={() => setExpandedRow(expandedRow === index ? null : index)}
+                              >
+                                {expandedRow === index ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                              </Button>
+                              <DropdownMenu>
+                                <DropdownMenuTrigger asChild>
+                                  <Button variant="ghost" className="h-8 w-8 p-0">
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </Button>
+                                </DropdownMenuTrigger>
+                                <DropdownMenuContent align="end">
+                                  <DropdownMenuItem onClick={() => handleRemoveStageFromPlan(index)}>
+                                    <Trash2 className="mr-2 h-4 w-4" />
+                                    Remover
+                                  </DropdownMenuItem>
+                                </DropdownMenuContent>
+                              </DropdownMenu>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      </>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="text-center text-muted-foreground py-8">
+                <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
+                <p className="text-lg font-medium">Nenhuma etapa de fabricação definida</p>
+                <p className="text-sm">Você pode definir as etapas na tela de Produtos ou adicionar manualmente abaixo.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <div className="flex items-center justify-between w-full">
+            <div className="text-sm text-muted-foreground">
+              {editedPlan.length > 0 && (
+                <span>
+                  {editedPlan.length} etapa{editedPlan.length !== 1 ? 's' : ''} configurada{editedPlan.length !== 1 ? 's' : ''}
+                </span>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsProgressModalOpen(false)}>
+                Cancelar
+              </Button>
+              <Button 
+                onClick={handleSaveProgress}
+                disabled={editedPlan.length === 0}
+              >
+                <CalendarCheck className="mr-2 h-4 w-4" />
+                Salvar Progresso
+              </Button>
+            </div>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Esta ação não pode ser desfeita. Isso excluirá permanentemente o pedido Nº <span className="font-bold">{orderToDelete?.quotationNumber}</span> do sistema.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction onClick={handleConfirmDelete} className="bg-destructive hover:bg-destructive/90">
+            Sim, excluir pedido
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Alert Dialog para Exclusão de Itens */}
+    <AlertDialog open={isItemDeleteDialogOpen} onOpenChange={setIsItemDeleteDialogOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Remover Item do Pedido</AlertDialogTitle>
+          <AlertDialogDescription>
+            Você tem certeza que deseja remover este item do pedido?
+            {itemToDelete && (
+              <div className="mt-2 p-3 bg-muted rounded-lg">
+                <p className="font-medium text-foreground">
+                  Item {itemToDelete.index + 1}: {itemToDelete.item.description}
+                </p>
+                {itemToDelete.item.itemNumber && (
+                  <p className="text-sm text-muted-foreground">
+                    Nº Item PC: {itemToDelete.item.itemNumber}
+                  </p>
+                )}
+                {itemToDelete.item.code && (
+                  <p className="text-sm text-muted-foreground">
+                    Código: {itemToDelete.item.code}
+                  </p>
+                )}
+              </div>
+            )}
+            <p className="mt-2 text-sm">
+              <strong>Atenção:</strong> Esta ação não pode ser desfeita. O item será removido permanentemente do pedido.
+            </p>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancelar</AlertDialogCancel>
+          <AlertDialogAction 
+            onClick={handleConfirmDeleteItem} 
+            className="bg-destructive hover:bg-destructive/90"
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Sim, remover item
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    {/* Dialog para selecionar quantidades do romaneio */}
+    <Dialog open={isPackingSlipDialogOpen} onOpenChange={setIsPackingSlipDialogOpen}>
+        <DialogContent className="sm:max-w-3xl">
+            <DialogHeader>
+                <DialogTitle>Selecionar Quantidades para o Romaneio</DialogTitle>
+                <DialogDescription>
+                    Ajuste a quantidade de peças de cada item que será incluída no romaneio. O peso será calculado automaticamente.
+                </DialogDescription>
+            </DialogHeader>
+            
+            <div className="py-4">
+                <ScrollArea className="h-[400px] pr-4">
+                    <div className="space-y-4">
+                        {selectedOrder && selectedOrder.items
+                            .filter(item => selectedItems.has(item.id!))
+                            .map((item) => {
+                                const selectedQty = packingSlipQuantities.get(item.id!) || item.quantity;
+                                const itemWeight = (Number(selectedQty) || 0) * (Number(item.unitWeight) || 0);
+                                
+                                return (
+                                    <Card key={item.id} className="p-4">
+                                        <div className="space-y-3">
+                                            <div className="flex items-start justify-between">
+                                                <div className="flex-1">
+                                                    <h4 className="font-medium">{item.description}</h4>
+                                                    <p className="text-sm text-muted-foreground">
+                                                        Código: {item.code || 'N/A'} | Item PC: {item.itemNumber || 'N/A'}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
+                                            <div className="grid grid-cols-4 gap-4">
+                                                <div>
+                                                    <Label className="text-xs text-muted-foreground">Qtd. Total</Label>
+                                                    <p className="font-medium">{item.quantity}</p>
+                                                </div>
+                                                <div>
+                                                    <Label className="text-xs text-muted-foreground">Peso Unit.</Label>
+                                                    <p className="font-medium">
+                                                        {(Number(item.unitWeight) || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg
+                                                    </p>
+                                                </div>
+                                                <div>
+                                                    <Label htmlFor={`qty-${item.id}`} className="text-xs text-muted-foreground">
+                                                        Qtd. Romaneio *
+                                                    </Label>
+                                                    <Input
+                                                        id={`qty-${item.id}`}
+                                                        type="number"
+                                                        min="1"
+                                                        max={item.quantity}
+                                                        value={selectedQty}
+                                                        onChange={(e) => {
+                                                            const newQty = Math.min(
+                                                                Math.max(1, Number(e.target.value) || 1),
+                                                                item.quantity
+                                                            );
+                                                            setPackingSlipQuantities(prev => {
+                                                                const newMap = new Map(prev);
+                                                                newMap.set(item.id!, newQty);
+                                                                return newMap;
+                                                            });
+                                                        }}
+                                                        className="h-8"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <Label className="text-xs text-muted-foreground">Peso Total</Label>
+                                                    <p className="font-bold text-primary">
+                                                        {itemWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            
+                                            {selectedQty < item.quantity && (
+                                                <div className="flex items-center gap-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
+                                                    <AlertTriangle className="h-3 w-3" />
+                                                    <span>
+                                                        Romaneio parcial: {selectedQty} de {item.quantity} peças ({((selectedQty / item.quantity) * 100).toFixed(0)}%)
+                                                    </span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </Card>
+                                );
+                            })}
+                    </div>
+                </ScrollArea>
+            </div>
+            
+            <div className="border-t pt-4">
+                <div className="flex items-center justify-between mb-4">
+                    <span className="text-sm font-medium">Peso Total do Romaneio:</span>
+                    <span className="text-lg font-bold text-primary">
+                        {selectedOrder && Array.from(selectedItems).reduce((total, itemId) => {
+                            const item = selectedOrder.items.find(i => i.id === itemId);
+                            if (!item) return total;
+                            const qty = packingSlipQuantities.get(itemId) || item.quantity;
+                            return total + (qty * (Number(item.unitWeight) || 0));
+                        }, 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                    </span>
+                </div>
+            </div>
+            
+            <DialogFooter>
+                <Button variant="outline" onClick={() => setIsPackingSlipDialogOpen(false)}>
+                    Cancelar
+                </Button>
+                <Button onClick={handleGeneratePackingSlip}>
+                    <ReceiptText className="mr-2 h-4 w-4" />
+                    Gerar Romaneio
+                </Button>
+            </DialogFooter>
+        </DialogContent>
+    </Dialog>
+        </div>
+    );
 }
