@@ -307,9 +307,11 @@ export default function FinancePage() {
           };
         });
 
-        const orderTotalValue = items.reduce((sum: number, it: any) => sum + it.totalValue, 0);
         const orderBilledValue = items.reduce((sum: number, it: any) => sum + it.billedValue, 0);
-        const orderRemainingValue = orderTotalValue - orderBilledValue;
+        const manualTotalValue = Number(order.billingTotalValue) || 0;
+        const billingPct = manualTotalValue > 0
+          ? Math.min(100, (orderBilledValue / manualTotalValue) * 100)
+          : 0;
 
         return {
           id: order.id,
@@ -319,10 +321,11 @@ export default function FinancePage() {
           status: order.status || 'Indefinido',
           deliveryDate: order.deliveryDate?.toDate ? order.deliveryDate.toDate() : null,
           items,
-          totalValue: orderTotalValue,
+          totalValue: manualTotalValue,
           billedValue: orderBilledValue,
-          remainingValue: orderRemainingValue,
-          billingPct: orderTotalValue > 0 ? (orderBilledValue / orderTotalValue) * 100 : 0,
+          remainingValue: Math.max(0, manualTotalValue - orderBilledValue),
+          billingPct,
+          manualTotalValue,
         };
       });
     } catch (error) {
@@ -1210,12 +1213,17 @@ export default function FinancePage() {
     const [selectedOrderForBilling, setSelectedOrderForBilling] = useState<any>(null);
     const [newEntry, setNewEntry] = useState({ quantity: '', invoiceNumber: '', notes: '', unitPrice: '', totalOrderValue: '' });
     const [isSavingEntry, setIsSavingEntry] = useState(false);
+    const [editingEntry, setEditingEntry] = useState<{ orderId: string, itemId: string, entry: any } | null>(null);
+    const [editEntryModalOpen, setEditEntryModalOpen] = useState(false);
+    const [editEntryForm, setEditEntryForm] = useState({ quantity: '', unitPrice: '', invoiceNumber: '', notes: '' });
+    const [orderTotalValues, setOrderTotalValues] = useState<Record<string, string>>({});
+    const [editingOrderTotal, setEditingOrderTotal] = useState<string | null>(null);
 
     const summary = useMemo(() => {
-      const total = billingData.reduce((sum: number, o: any) => sum + (o.totalValue || 0), 0);
+      const total = billingData.reduce((sum: number, o: any) => sum + (o.manualTotalValue || 0), 0);
       const billed = billingData.reduce((sum: number, o: any) => sum + (o.billedValue || 0), 0);
-      const remaining = total - billed;
-      const pct = total > 0 ? (billed / total) * 100 : 0;
+      const remaining = Math.max(0, total - billed);
+      const pct = total > 0 ? Math.min(100, (billed / total) * 100) : 0;
       return { total, billed, remaining, pct };
     }, [billingData]);
 
@@ -1301,6 +1309,84 @@ export default function FinancePage() {
       }
     };
 
+    const handleDeleteBillingEntry = async () => {
+      if (!editingEntry) return;
+      try {
+        const orderRef = doc(db, "companies", "mecald", "orders", editingEntry.orderId);
+        const snap = await getDoc(orderRef);
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const items = Array.isArray(data.items) ? [...data.items] : Object.values(data.items || {});
+        const itemIdx = items.findIndex((it: any) => it.id === editingEntry.itemId);
+        if (itemIdx === -1) return;
+
+        const oldEntry = editingEntry.entry;
+        const updatedEntries = (items[itemIdx].billingEntries || []).filter((e: any) => e.id !== oldEntry.id);
+        const newBilledQty = Math.max(0, (Number(items[itemIdx].billedQuantity) || 0) - oldEntry.quantity);
+        items[itemIdx] = { ...items[itemIdx], billingEntries: updatedEntries, billedQuantity: newBilledQty, invoiced: false };
+
+        await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
+        toast({ title: "Lançamento excluído!" });
+        setEditEntryModalOpen(false);
+        setEditingEntry(null);
+        setIsBillingLoading(true);
+        const refreshed = await fetchOrdersForBilling();
+        setBillingData(refreshed);
+      } catch (e) {
+        toast({ variant: "destructive", title: "Erro ao excluir" });
+      } finally {
+        setIsBillingLoading(false);
+      }
+    };
+
+    const handleUpdateBillingEntry = async () => {
+      if (!editingEntry) return;
+      const qty = Number(editEntryForm.quantity);
+      const unitPrice = Number(editEntryForm.unitPrice);
+      if (!qty || !unitPrice) {
+        toast({ variant: "destructive", title: "Preencha quantidade e valor" });
+        return;
+      }
+
+      try {
+        const orderRef = doc(db, "companies", "mecald", "orders", editingEntry.orderId);
+        const snap = await getDoc(orderRef);
+        if (!snap.exists()) return;
+        const data = snap.data();
+        const items = Array.isArray(data.items) ? [...data.items] : Object.values(data.items || {});
+        const itemIdx = items.findIndex((it: any) => it.id === editingEntry.itemId);
+        if (itemIdx === -1) return;
+
+        const oldEntry = editingEntry.entry;
+        const updatedEntries = (items[itemIdx].billingEntries || []).map((e: any) =>
+          e.id === oldEntry.id
+            ? { ...e, quantity: qty, unitPrice, value: qty * unitPrice, invoiceNumber: editEntryForm.invoiceNumber, notes: editEntryForm.notes }
+            : e
+        );
+        const newBilledQty = updatedEntries.reduce((s: number, e: any) => s + e.quantity, 0);
+
+        items[itemIdx] = {
+          ...items[itemIdx],
+          billingEntries: updatedEntries,
+          billedQuantity: newBilledQty,
+          lastUnitPrice: unitPrice,
+          invoiced: newBilledQty >= (Number(items[itemIdx].quantity) || 0),
+        };
+
+        await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
+        toast({ title: "Lançamento atualizado!" });
+        setEditEntryModalOpen(false);
+        setEditingEntry(null);
+        setIsBillingLoading(true);
+        const refreshed = await fetchOrdersForBilling();
+        setBillingData(refreshed);
+      } catch (e) {
+        toast({ variant: "destructive", title: "Erro ao editar" });
+      } finally {
+        setIsBillingLoading(false);
+      }
+    };
+
     const exportBillingPdf = async () => {
       try {
         const docPdf = new jsPDF({ orientation: "portrait" });
@@ -1330,53 +1416,108 @@ export default function FinancePage() {
         yPos = (docPdf as any).lastAutoTable.finalY + 10;
 
         for (const order of billingData) {
-          docPdf.setFontSize(11).setFont("helvetica", "bold");
-          docPdf.text(`OS: ${order.internalOS} | ${order.customerName} | Status: ${order.status}`, 14, yPos);
-          yPos += 5;
-          docPdf.setFontSize(9).setFont("helvetica", "normal");
-          docPdf.text(
-            `Total: ${order.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} | ` +
-            `Faturado: ${order.billedValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} | ` +
-            `Pendente: ${order.remainingValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`,
-            14,
-            yPos
-          );
-          yPos += 5;
+          const base = order.manualTotalValue > 0 ? order.manualTotalValue : order.totalValue;
+          const remaining = Math.max(0, base - order.billedValue);
+          const pct = base > 0 ? Math.min(100, (order.billedValue / base) * 100) : 0;
 
-          const rows = order.items.map((it: any) => [
-            it.description.substring(0, 35),
-            it.quantity,
-            it.billedQuantity,
-            it.remainingQuantity,
-            it.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-            it.billedValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-            it.remainingValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-          ]);
+          docPdf.setFontSize(11).setFont("helvetica", "bold");
+          docPdf.text(`OS: ${order.internalOS} | ${order.customerName}`, 14, yPos);
+          yPos += 5;
 
           autoTable(docPdf, {
             startY: yPos,
-            head: [["Item", "Qtd", "Fat.", "Saldo", "Vl. Total", "Faturado", "Pendente"]],
+            head: [["Status", "Valor Total Pedido", "Faturado", "Falta Faturar", "% Faturado"]],
+            body: [[
+              order.status,
+              base > 0 ? base.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "Não informado",
+              order.billedValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+              remaining.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+              `${pct.toFixed(1)}%`,
+            ]],
+            styles: { fontSize: 8 },
+            headStyles: { fillColor: [37, 99, 235] },
+            columnStyles: {
+              0: { cellWidth: 30 },
+              1: { cellWidth: 35, halign: "right" },
+              2: { cellWidth: 35, halign: "right" },
+              3: { cellWidth: 35, halign: "right" },
+              4: { cellWidth: 20, halign: "center" },
+            },
+            margin: { left: 14, right: 14 },
+            theme: "grid",
+          });
+          yPos = (docPdf as any).lastAutoTable.finalY + 4;
+
+          const rows = order.items.map((it: any) => {
+            const itBase = it.totalValue > 0 ? it.totalValue : 0;
+            const itRemaining = Math.max(0, itBase - it.billedValue);
+            return [
+              it.description.substring(0, 38),
+              it.quantity,
+              it.billedQuantity,
+              it.remainingQuantity,
+              it.lastUnitPrice > 0
+                ? it.lastUnitPrice.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+                : "-",
+              it.billedValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+              itRemaining > 0
+                ? itRemaining.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+                : "R$ 0,00",
+            ];
+          });
+
+          autoTable(docPdf, {
+            startY: yPos,
+            head: [["Item", "Qtd", "Fat.", "Saldo", "Vlr Unit.", "Vlr Faturado", "Vlr Pendente"]],
             body: rows,
             styles: { fontSize: 7 },
             headStyles: { fillColor: [100, 116, 139] },
             columnStyles: {
               0: { cellWidth: 50 },
-              1: { cellWidth: 12, halign: "center" },
-              2: { cellWidth: 12, halign: "center" },
-              3: { cellWidth: 12, halign: "center" },
-              4: { cellWidth: 28, halign: "right" },
-              5: { cellWidth: 28, halign: "right" },
-              6: { cellWidth: 28, halign: "right" },
+              1: { cellWidth: 10, halign: "center" },
+              2: { cellWidth: 10, halign: "center" },
+              3: { cellWidth: 10, halign: "center" },
+              4: { cellWidth: 25, halign: "right" },
+              5: { cellWidth: 25, halign: "right" },
+              6: { cellWidth: 25, halign: "right" },
             },
             margin: { left: 14, right: 14 },
+            didParseCell: (data) => {
+              if (data.column.index === 6 && data.section === 'body') {
+                const val = data.cell.raw as string;
+                if (val !== 'R$ 0,00') {
+                  data.cell.styles.textColor = [234, 88, 12];
+                  data.cell.styles.fontStyle = 'bold';
+                }
+              }
+              if (data.column.index === 5 && data.section === 'body') {
+                data.cell.styles.textColor = [21, 128, 61];
+              }
+            }
           });
 
-          yPos = (docPdf as any).lastAutoTable.finalY + 8;
-          if (yPos > 260) {
-            docPdf.addPage();
-            yPos = 15;
-          }
+          yPos = (docPdf as any).lastAutoTable.finalY + 10;
+          if (yPos > 260) { docPdf.addPage(); yPos = 15; }
         }
+
+        const grandTotal = billingData.reduce((s: number, o: any) => s + (o.manualTotalValue > 0 ? o.manualTotalValue : o.totalValue), 0);
+        const grandBilled = billingData.reduce((s: number, o: any) => s + o.billedValue, 0);
+        const grandRemaining = Math.max(0, grandTotal - grandBilled);
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [["CONSOLIDADO GERAL", "", ""]],
+          body: [
+            ["Total dos Pedidos", "", grandTotal > 0 ? grandTotal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }) : "Valores não informados"],
+            ["Total Faturado", "", grandBilled.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
+            ["Total Pendente", "", grandRemaining.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
+            ["% Faturado", "", grandTotal > 0 ? `${((grandBilled / grandTotal) * 100).toFixed(1)}%` : "N/A"],
+          ],
+          styles: { fontSize: 9 },
+          headStyles: { fillColor: [37, 99, 235] },
+          columnStyles: { 0: { cellWidth: 60, fontStyle: 'bold' }, 1: { cellWidth: 60 }, 2: { cellWidth: 60, halign: 'right' } },
+          margin: { left: 14, right: 14 },
+        });
 
         docPdf.save(`Relatorio_Faturamento_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
         toast({ title: "PDF exportado com sucesso!" });
@@ -1432,36 +1573,121 @@ export default function FinancePage() {
           <div className="space-y-3">
             {billingData.map((order: any) => (
               <Card key={order.id} className="overflow-hidden">
-                <div
-                  className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
-                  onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
-                >
-                  <div className="flex items-center gap-4">
-                    <div>
-                      <div className="font-bold text-base">OS: {order.internalOS}</div>
-                      <div className="text-sm text-muted-foreground">{order.customerName}</div>
+                <div className="p-4 border-b">
+                  <div
+                    className="flex items-center justify-between cursor-pointer"
+                    onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div>
+                        <div className="font-bold text-base">OS: {order.internalOS}</div>
+                        <div className="text-sm text-muted-foreground">{order.customerName}</div>
+                      </div>
+                      <Badge variant="outline">{order.status}</Badge>
+                      {order.deliveryDate && (
+                        <span className="text-xs text-muted-foreground">
+                          Entrega: {format(order.deliveryDate, 'dd/MM/yyyy')}
+                        </span>
+                      )}
                     </div>
-                    <Badge variant="outline">{order.status}</Badge>
+                    <span className="text-muted-foreground text-lg">{expandedOrderId === order.id ? '▲' : '▼'}</span>
                   </div>
-                  <div className="flex items-center gap-6 text-sm">
-                    <div className="text-right">
-                      <div className="text-muted-foreground">Total</div>
-                      <div className="font-semibold">{order.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-muted-foreground">Faturado</div>
-                      <div className="font-semibold text-green-600">{order.billedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-                    </div>
-                    <div className="text-right">
-                      <div className="text-muted-foreground">Pendente</div>
-                      <div className="font-semibold text-orange-600">{order.remainingValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
-                    </div>
-                    <div className="w-20">
-                      <div className="text-xs text-muted-foreground mb-1">{order.billingPct.toFixed(0)}%</div>
-                      <Progress value={order.billingPct} className="h-2" />
-                    </div>
-                    <span className="text-muted-foreground">{expandedOrderId === order.id ? '▲' : '▼'}</span>
-                  </div>
+
+                  {(() => {
+                    const base = order.manualTotalValue > 0 ? order.manualTotalValue : 0;
+                    const pct = base > 0 ? Math.min(100, (order.billedValue / base) * 100) : 0;
+                    const remaining = base > 0 ? Math.max(0, base - order.billedValue) : 0;
+
+                    return (
+                      <div className="mt-3 flex items-center gap-4 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-muted-foreground">Valor do Pedido:</span>
+                          {editingOrderTotal === order.id ? (
+                            <Input
+                              type="number"
+                              step="0.01"
+                              className="h-7 w-36 text-sm"
+                              value={orderTotalValues[order.id] ?? ''}
+                              onChange={e => setOrderTotalValues(p => ({ ...p, [order.id]: e.target.value }))}
+                              autoFocus
+                              onBlur={async () => {
+                                setEditingOrderTotal(null);
+                                const val = Number(orderTotalValues[order.id]) || 0;
+                                try {
+                                  await updateDoc(doc(db, "companies", "mecald", "orders", order.id), {
+                                    billingTotalValue: val
+                                  });
+                                  setBillingData(prev => prev.map(o =>
+                                    o.id === order.id
+                                      ? {
+                                          ...o,
+                                          manualTotalValue: val,
+                                          totalValue: val,
+                                          remainingValue: Math.max(0, val - o.billedValue),
+                                          billingPct: val > 0 ? Math.min(100, (o.billedValue / val) * 100) : 0,
+                                        }
+                                      : o
+                                  ));
+                                } catch (e) {
+                                  console.error(e);
+                                }
+                              }}
+                            />
+                          ) : (
+                            <button
+                              className="flex items-center gap-1 text-sm font-semibold hover:text-primary transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setEditingOrderTotal(order.id);
+                                setOrderTotalValues(p => ({ ...p, [order.id]: String(order.manualTotalValue || '') }));
+                              }}
+                            >
+                              {order.manualTotalValue > 0
+                                ? order.manualTotalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                                : <span className="text-orange-500 italic text-xs">⚠ Informar valor total do pedido</span>
+                              }
+                              <Edit className="h-3 w-3 ml-1 text-muted-foreground" />
+                            </button>
+                          )}
+                        </div>
+
+                        <div className="h-4 w-px bg-border" />
+
+                        <div className="flex items-center gap-1">
+                          <CheckCircle className="h-4 w-4 text-green-600" />
+                          <span className="text-sm text-muted-foreground">Faturado:</span>
+                          <span className="text-sm font-bold text-green-600">
+                            {order.billedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                          </span>
+                        </div>
+
+                        {base > 0 ? (
+                          <div className="flex items-center gap-1">
+                            <AlertTriangle className="h-4 w-4 text-orange-500" />
+                            <span className="text-sm text-muted-foreground">Falta faturar:</span>
+                            <span className="text-sm font-bold text-orange-600">
+                              {remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </span>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-muted-foreground italic">
+                            Informe o valor total para calcular o pendente
+                          </span>
+                        )}
+
+                        <div className="flex items-center gap-2 ml-auto">
+                          {base > 0 ? (
+                            <>
+                              <span className="text-xs font-medium">{pct.toFixed(0)}%</span>
+                              <Progress value={pct} className="w-24 h-2" />
+                            </>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">— %</span>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {expandedOrderId === order.id && (
@@ -1511,12 +1737,28 @@ export default function FinancePage() {
                             <p className="text-xs text-muted-foreground font-medium">{item.description}</p>
                             <div className="space-y-1 mt-1">
                               {item.billingEntries.map((entry: any) => (
-                                <div key={entry.id} className="flex items-center gap-4 text-xs bg-background rounded p-2">
+                                <div key={entry.id} className="flex items-center gap-3 text-xs bg-background rounded p-2">
                                   <span>{format(entry.date, 'dd/MM/yyyy')}</span>
                                   <span>Qtd: <strong>{entry.quantity}</strong></span>
+                                  <span>Unit.: <strong>{(entry.unitPrice || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></span>
                                   {entry.invoiceNumber && <span>NF: <strong>{entry.invoiceNumber}</strong></span>}
                                   <span className="text-green-600 font-medium">{entry.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                   {entry.notes && <span className="text-muted-foreground">{entry.notes}</span>}
+                                  <button
+                                    className="ml-auto text-blue-500 hover:text-blue-700 flex items-center gap-1"
+                                    onClick={() => {
+                                      setEditingEntry({ orderId: order.id, itemId: item.id, entry });
+                                      setEditEntryForm({
+                                        quantity: String(entry.quantity),
+                                        unitPrice: String(entry.unitPrice || 0),
+                                        invoiceNumber: entry.invoiceNumber || '',
+                                        notes: entry.notes || '',
+                                      });
+                                      setEditEntryModalOpen(true);
+                                    }}
+                                  >
+                                    <Edit className="h-3 w-3" /> Editar
+                                  </button>
                                 </div>
                               ))}
                             </div>
@@ -1635,6 +1877,68 @@ export default function FinancePage() {
                     Confirmar
                   </>
                 )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+        <Dialog open={editEntryModalOpen} onOpenChange={setEditEntryModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Edit className="h-5 w-5" /> Editar Lançamento
+              </DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Valor Unitário (R$) *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={editEntryForm.unitPrice}
+                  onChange={e => setEditEntryForm(p => ({ ...p, unitPrice: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Quantidade *</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  value={editEntryForm.quantity}
+                  onChange={e => setEditEntryForm(p => ({ ...p, quantity: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Nº da Nota Fiscal</Label>
+                <Input
+                  value={editEntryForm.invoiceNumber}
+                  onChange={e => setEditEntryForm(p => ({ ...p, invoiceNumber: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Observações</Label>
+                <Input
+                  value={editEntryForm.notes}
+                  onChange={e => setEditEntryForm(p => ({ ...p, notes: e.target.value }))}
+                />
+              </div>
+              {editEntryForm.quantity && editEntryForm.unitPrice && (
+                <div className="p-3 bg-muted rounded-lg text-sm flex justify-between">
+                  <span className="text-muted-foreground">Valor calculado:</span>
+                  <span className="font-bold text-green-600">
+                    {(Number(editEntryForm.quantity) * Number(editEntryForm.unitPrice))
+                      .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="destructive" className="mr-auto" onClick={handleDeleteBillingEntry}>
+                <X className="h-4 w-4 mr-1" /> Excluir
+              </Button>
+              <Button variant="outline" onClick={() => setEditEntryModalOpen(false)}>Cancelar</Button>
+              <Button onClick={handleUpdateBillingEntry}>
+                <Save className="h-4 w-4 mr-2" /> Salvar
               </Button>
             </DialogFooter>
           </DialogContent>
