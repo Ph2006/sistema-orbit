@@ -266,11 +266,6 @@ export default function FinancePage() {
           const quoteTotalWithTax = Number(quoteItem?.totalWithTax) || 0;
           const unitPriceFromQuotation = quoteQty > 0 ? (quoteTotalWithTax / quoteQty) : 0;
           const orderQty = Number(item?.quantity) || 0;
-          const billedQty = Number(item?.billedQuantity) || 0;
-          const remainingQty = Math.max(0, orderQty - billedQty);
-          const totalValue = unitPriceFromQuotation * orderQty;
-          const billedValue = unitPriceFromQuotation * billedQty;
-          const remainingValue = unitPriceFromQuotation * remainingQty;
 
           const shippingDate =
             item?.shippingDate?.toDate ? item.shippingDate.toDate() :
@@ -280,10 +275,19 @@ export default function FinancePage() {
             id: entry.id || `entry-${Date.now()}`,
             date: entry.date?.toDate ? entry.date.toDate() : entry.date ? new Date(entry.date) : new Date(),
             quantity: Number(entry.quantity) || 0,
+            unitPrice: Number(entry.unitPrice) || 0,
+            value: Number(entry.value) || 0,
             invoiceNumber: entry.invoiceNumber || '',
-            value: unitPriceFromQuotation * (Number(entry.quantity) || 0),
             notes: entry.notes || '',
+            totalOrderValue: Number(entry.totalOrderValue) || 0,
           }));
+
+          const billedValue = billingEntries.reduce((sum: number, e: any) => sum + e.value, 0);
+          const billedQty = Number(item?.billedQuantity) || 0;
+          const remainingQty = Math.max(0, orderQty - billedQty);
+          const lastUnitPrice = Number(item?.lastUnitPrice) || unitPriceFromQuotation;
+          const totalValue = lastUnitPrice > 0 ? lastUnitPrice * orderQty : 0;
+          const remainingValue = Math.max(0, totalValue - billedValue);
 
           return {
             id: item?.id || `item-${i}`,
@@ -292,6 +296,7 @@ export default function FinancePage() {
             billedQuantity: billedQty,
             remainingQuantity: remainingQty,
             unitPriceFromQuotation,
+            lastUnitPrice,
             totalValue,
             billedValue,
             remainingValue,
@@ -1203,7 +1208,7 @@ export default function FinancePage() {
     const [billingModalOpen, setBillingModalOpen] = useState(false);
     const [selectedItemForBilling, setSelectedItemForBilling] = useState<any>(null);
     const [selectedOrderForBilling, setSelectedOrderForBilling] = useState<any>(null);
-    const [newEntry, setNewEntry] = useState({ quantity: '', invoiceNumber: '', notes: '' });
+    const [newEntry, setNewEntry] = useState({ quantity: '', invoiceNumber: '', notes: '', unitPrice: '', totalOrderValue: '' });
     const [isSavingEntry, setIsSavingEntry] = useState(false);
 
     const summary = useMemo(() => {
@@ -1217,15 +1222,26 @@ export default function FinancePage() {
     const handleOpenBillingModal = (order: any, item: any) => {
       setSelectedOrderForBilling(order);
       setSelectedItemForBilling(item);
-      setNewEntry({ quantity: '', invoiceNumber: '', notes: '' });
+      setNewEntry({
+        quantity: '',
+        invoiceNumber: '',
+        notes: '',
+        totalOrderValue: '',
+        unitPrice: item.lastUnitPrice ? String(item.lastUnitPrice) : '',
+      });
       setBillingModalOpen(true);
     };
 
     const handleSaveBillingEntry = async () => {
       if (!selectedOrderForBilling || !selectedItemForBilling) return;
       const qty = Number(newEntry.quantity);
+      const unitPrice = Number(newEntry.unitPrice);
       if (!qty || qty <= 0) {
         toast({ variant: "destructive", title: "Quantidade inválida", description: "Informe uma quantidade maior que zero." });
+        return;
+      }
+      if (!unitPrice || unitPrice <= 0) {
+        toast({ variant: "destructive", title: "Valor unitário inválido", description: "Informe o valor unitário do item." });
         return;
       }
       if (qty > selectedItemForBilling.remainingQuantity) {
@@ -1244,13 +1260,17 @@ export default function FinancePage() {
 
         const itemIndex = items.findIndex((it: any) => it.id === selectedItemForBilling.id);
         if (itemIndex === -1) throw new Error("Item não encontrado");
+        const entryValue = qty * unitPrice;
 
         const entry = {
           id: `entry-${Date.now()}`,
           date: Timestamp.now(),
           quantity: qty,
+          unitPrice: unitPrice,
+          value: entryValue,
           invoiceNumber: newEntry.invoiceNumber,
           notes: newEntry.notes,
+          totalOrderValue: Number(newEntry.totalOrderValue) || 0,
         };
 
         const existingEntries = items[itemIndex].billingEntries || [];
@@ -1260,12 +1280,13 @@ export default function FinancePage() {
           ...items[itemIndex],
           billingEntries: [...existingEntries, entry],
           billedQuantity: newBilledQty,
+          lastUnitPrice: unitPrice,
           invoiced: newBilledQty >= (Number(items[itemIndex].quantity) || 0),
         };
 
         await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
 
-        toast({ title: "Lançamento salvo!", description: `${qty} unidade(s) faturadas com sucesso.` });
+        toast({ title: "Lançamento salvo!", description: `${qty} unid. × ${unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} = ${entryValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` });
         setBillingModalOpen(false);
 
         setIsBillingLoading(true);
@@ -1526,13 +1547,26 @@ export default function FinancePage() {
                 {selectedItemForBilling && (
                   <>
                     <strong>{selectedItemForBilling.description}</strong><br />
-                    Saldo disponível: <strong>{selectedItemForBilling.remainingQuantity}</strong> unid. |{' '}
-                    Vlr unit.: <strong>{(selectedItemForBilling.unitPriceFromQuotation || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+                    Saldo disponível: <strong>{selectedItemForBilling.remainingQuantity}</strong> unid.
                   </>
                 )}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Valor Unitário (R$) *</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newEntry.unitPrice}
+                  onChange={e => setNewEntry(p => ({ ...p, unitPrice: e.target.value }))}
+                  placeholder="Ex: 1500.00"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Informe o valor unitário do item neste faturamento
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label>Quantidade Faturada *</Label>
                 <Input
@@ -1545,6 +1579,20 @@ export default function FinancePage() {
                 />
               </div>
               <div className="space-y-2">
+                <Label>Valor Total do Pedido (R$)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={newEntry.totalOrderValue}
+                  onChange={e => setNewEntry(p => ({ ...p, totalOrderValue: e.target.value }))}
+                  placeholder="Ex: 45000.00 (opcional)"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Referência do valor total do pedido para controle
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label>Nº da Nota Fiscal</Label>
                 <Input value={newEntry.invoiceNumber} onChange={e => setNewEntry(p => ({ ...p, invoiceNumber: e.target.value }))} placeholder="Ex: 001234" />
               </div>
@@ -1552,18 +1600,30 @@ export default function FinancePage() {
                 <Label>Observações</Label>
                 <Input value={newEntry.notes} onChange={e => setNewEntry(p => ({ ...p, notes: e.target.value }))} placeholder="Opcional" />
               </div>
-              {newEntry.quantity && Number(newEntry.quantity) > 0 && selectedItemForBilling && (
-                <div className="p-3 bg-muted rounded-lg text-sm">
-                  <span className="text-muted-foreground">Valor a faturar: </span>
-                  <span className="font-bold text-green-600">
-                    {(Number(newEntry.quantity) * selectedItemForBilling.unitPriceFromQuotation).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  </span>
+              {newEntry.quantity && newEntry.unitPrice &&
+                Number(newEntry.quantity) > 0 && Number(newEntry.unitPrice) > 0 && (
+                <div className="p-3 bg-muted rounded-lg space-y-1 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Qtd × Vlr Unit.:</span>
+                    <span className="font-bold text-green-600">
+                      {(Number(newEntry.quantity) * Number(newEntry.unitPrice))
+                        .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                    </span>
+                  </div>
+                  {newEntry.totalOrderValue && Number(newEntry.totalOrderValue) > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">% do pedido total:</span>
+                      <span className="font-medium">
+                        {((Number(newEntry.quantity) * Number(newEntry.unitPrice) / Number(newEntry.totalOrderValue)) * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
             <DialogFooter>
               <Button variant="outline" onClick={() => setBillingModalOpen(false)}>Cancelar</Button>
-              <Button onClick={handleSaveBillingEntry} disabled={!newEntry.quantity || isSavingEntry}>
+              <Button onClick={handleSaveBillingEntry} disabled={!newEntry.quantity || !newEntry.unitPrice || isSavingEntry}>
                 {isSavingEntry ? (
                   <>
                     <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
