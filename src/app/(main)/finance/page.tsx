@@ -280,6 +280,12 @@ export default function FinancePage() {
             invoiceNumber: entry.invoiceNumber || '',
             notes: entry.notes || '',
             totalOrderValue: Number(entry.totalOrderValue) || 0,
+            itemNumber: entry.itemNumber || '',
+            shippingDate: entry.shippingDate?.toDate
+              ? entry.shippingDate.toDate()
+              : entry.shippingDate
+                ? new Date(entry.shippingDate)
+                : null,
           }));
 
           const billedValue = billingEntries.reduce((sum: number, e: any) => sum + e.value, 0);
@@ -301,6 +307,7 @@ export default function FinancePage() {
             billedValue,
             remainingValue,
             invoiceNumber: item?.invoiceNumber || '',
+            itemNumber: item?.itemNumber || '',
             shippingDate,
             invoiced: Boolean(item?.invoiced),
             billingEntries,
@@ -1211,11 +1218,26 @@ export default function FinancePage() {
     const [billingModalOpen, setBillingModalOpen] = useState(false);
     const [selectedItemForBilling, setSelectedItemForBilling] = useState<any>(null);
     const [selectedOrderForBilling, setSelectedOrderForBilling] = useState<any>(null);
-    const [newEntry, setNewEntry] = useState({ quantity: '', invoiceNumber: '', notes: '', unitPrice: '', totalOrderValue: '' });
+    const [newEntry, setNewEntry] = useState({
+      quantity: '',
+      invoiceNumber: '',
+      notes: '',
+      unitPrice: '',
+      totalOrderValue: '',
+      itemNumber: '',
+      shippingDate: '',
+    });
     const [isSavingEntry, setIsSavingEntry] = useState(false);
     const [editingEntry, setEditingEntry] = useState<{ orderId: string, itemId: string, entry: any } | null>(null);
     const [editEntryModalOpen, setEditEntryModalOpen] = useState(false);
-    const [editEntryForm, setEditEntryForm] = useState({ quantity: '', unitPrice: '', invoiceNumber: '', notes: '' });
+    const [editEntryForm, setEditEntryForm] = useState({
+      quantity: '',
+      unitPrice: '',
+      invoiceNumber: '',
+      notes: '',
+      itemNumber: '',
+      shippingDate: '',
+    });
     const [orderTotalValues, setOrderTotalValues] = useState<Record<string, string>>({});
     const [editingOrderTotal, setEditingOrderTotal] = useState<string | null>(null);
 
@@ -1234,8 +1256,10 @@ export default function FinancePage() {
         quantity: '',
         invoiceNumber: '',
         notes: '',
-        totalOrderValue: '',
         unitPrice: item.lastUnitPrice ? String(item.lastUnitPrice) : '',
+        totalOrderValue: '',
+        itemNumber: item.itemNumber || '',
+        shippingDate: '',
       });
       setBillingModalOpen(true);
     };
@@ -1279,6 +1303,10 @@ export default function FinancePage() {
           invoiceNumber: newEntry.invoiceNumber,
           notes: newEntry.notes,
           totalOrderValue: Number(newEntry.totalOrderValue) || 0,
+          itemNumber: newEntry.itemNumber,
+          shippingDate: newEntry.shippingDate
+            ? Timestamp.fromDate(new Date(newEntry.shippingDate + 'T00:00:00'))
+            : null,
         };
 
         const existingEntries = items[itemIndex].billingEntries || [];
@@ -1289,6 +1317,7 @@ export default function FinancePage() {
           billingEntries: [...existingEntries, entry],
           billedQuantity: newBilledQty,
           lastUnitPrice: unitPrice,
+          itemNumber: newEntry.itemNumber || items[itemIndex].itemNumber || '',
           invoiced: newBilledQty >= (Number(items[itemIndex].quantity) || 0),
         };
 
@@ -1360,7 +1389,18 @@ export default function FinancePage() {
         const oldEntry = editingEntry.entry;
         const updatedEntries = (items[itemIdx].billingEntries || []).map((e: any) =>
           e.id === oldEntry.id
-            ? { ...e, quantity: qty, unitPrice, value: qty * unitPrice, invoiceNumber: editEntryForm.invoiceNumber, notes: editEntryForm.notes }
+            ? {
+                ...e,
+                quantity: qty,
+                unitPrice,
+                value: qty * unitPrice,
+                invoiceNumber: editEntryForm.invoiceNumber,
+                notes: editEntryForm.notes,
+                itemNumber: editEntryForm.itemNumber,
+                shippingDate: editEntryForm.shippingDate
+                  ? Timestamp.fromDate(new Date(editEntryForm.shippingDate + 'T00:00:00'))
+                  : e.shippingDate || null,
+              }
             : e
         );
         const newBilledQty = updatedEntries.reduce((s: number, e: any) => s + e.quantity, 0);
@@ -1702,6 +1742,8 @@ export default function FinancePage() {
                           <TableHead className="text-right">Vlr Unit.</TableHead>
                           <TableHead className="text-right">Vlr Faturado</TableHead>
                           <TableHead className="text-right">Vlr Pendente</TableHead>
+                          <TableHead>Nº Item</TableHead>
+                          <TableHead>NF / Embarque</TableHead>
                           <TableHead className="text-center">Ação</TableHead>
                         </TableRow>
                       </TableHeader>
@@ -1712,9 +1754,36 @@ export default function FinancePage() {
                             <TableCell className="text-right">{item.quantity}</TableCell>
                             <TableCell className="text-right text-green-600 font-medium">{item.billedQuantity}</TableCell>
                             <TableCell className="text-right text-orange-600 font-medium">{item.remainingQuantity}</TableCell>
-                            <TableCell className="text-right">{item.unitPriceFromQuotation.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                            <TableCell className="text-right">{item.lastUnitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                             <TableCell className="text-right text-green-600">{item.billedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                             <TableCell className="text-right text-orange-600">{item.remainingValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                            <TableCell className="text-sm">
+                              {item.itemNumber
+                                ? <Badge variant="outline" className="text-xs">{item.itemNumber}</Badge>
+                                : <span className="text-muted-foreground">-</span>
+                              }
+                            </TableCell>
+                            <TableCell className="text-xs">
+                              {item.billingEntries?.length > 0 ? (
+                                <div className="space-y-0.5">
+                                  {item.billingEntries.slice(-1).map((entry: any) => (
+                                    <div key={entry.id}>
+                                      {entry.invoiceNumber && (
+                                        <div className="text-green-600 font-medium">NF: {entry.invoiceNumber}</div>
+                                      )}
+                                      {entry.shippingDate && (
+                                        <div className="text-orange-600">{format(entry.shippingDate, 'dd/MM/yy')}</div>
+                                      )}
+                                    </div>
+                                  ))}
+                                  {item.billingEntries.length > 1 && (
+                                    <div className="text-muted-foreground">+{item.billingEntries.length - 1} lançamento(s)</div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground">-</span>
+                              )}
+                            </TableCell>
                             <TableCell className="text-center">
                               {item.remainingQuantity > 0 ? (
                                 <Button size="sm" variant="outline" onClick={() => handleOpenBillingModal(order, item)}>
@@ -1737,13 +1806,29 @@ export default function FinancePage() {
                             <p className="text-xs text-muted-foreground font-medium">{item.description}</p>
                             <div className="space-y-1 mt-1">
                               {item.billingEntries.map((entry: any) => (
-                                <div key={entry.id} className="flex items-center gap-3 text-xs bg-background rounded p-2">
-                                  <span>{format(entry.date, 'dd/MM/yyyy')}</span>
+                                <div key={entry.id} className="flex items-center gap-3 text-xs bg-background rounded p-2 flex-wrap">
+                                  <span className="text-muted-foreground">{format(entry.date, 'dd/MM/yyyy')}</span>
+                                  {entry.itemNumber && (
+                                    <span className="bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-medium">
+                                      Item: {entry.itemNumber}
+                                    </span>
+                                  )}
                                   <span>Qtd: <strong>{entry.quantity}</strong></span>
                                   <span>Unit.: <strong>{(entry.unitPrice || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong></span>
-                                  {entry.invoiceNumber && <span>NF: <strong>{entry.invoiceNumber}</strong></span>}
-                                  <span className="text-green-600 font-medium">{entry.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
-                                  {entry.notes && <span className="text-muted-foreground">{entry.notes}</span>}
+                                  {entry.invoiceNumber && (
+                                    <span className="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">
+                                      NF: {entry.invoiceNumber}
+                                    </span>
+                                  )}
+                                  {entry.shippingDate && (
+                                    <span className="bg-orange-100 text-orange-700 px-1.5 py-0.5 rounded font-medium">
+                                      Embarque: {format(entry.shippingDate, 'dd/MM/yyyy')}
+                                    </span>
+                                  )}
+                                  <span className="text-green-600 font-medium">
+                                    {entry.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                  </span>
+                                  {entry.notes && <span className="text-muted-foreground italic">{entry.notes}</span>}
                                   <button
                                     className="ml-auto text-blue-500 hover:text-blue-700 flex items-center gap-1"
                                     onClick={() => {
@@ -1753,6 +1838,13 @@ export default function FinancePage() {
                                         unitPrice: String(entry.unitPrice || 0),
                                         invoiceNumber: entry.invoiceNumber || '',
                                         notes: entry.notes || '',
+                                        itemNumber: entry.itemNumber || '',
+                                        shippingDate: entry.shippingDate
+                                          ? format(entry.shippingDate instanceof Date
+                                              ? entry.shippingDate
+                                              : entry.shippingDate?.toDate?.() || new Date(entry.shippingDate),
+                                            'yyyy-MM-dd')
+                                          : '',
                                       });
                                       setEditEntryModalOpen(true);
                                     }}
@@ -1821,6 +1913,17 @@ export default function FinancePage() {
                 />
               </div>
               <div className="space-y-2">
+                <Label>Número do Item</Label>
+                <Input
+                  value={newEntry.itemNumber}
+                  onChange={e => setNewEntry(p => ({ ...p, itemNumber: e.target.value }))}
+                  placeholder="Ex: 001, A-01, etc."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Referência do item no pedido de compra do cliente
+                </p>
+              </div>
+              <div className="space-y-2">
                 <Label>Valor Total do Pedido (R$)</Label>
                 <Input
                   type="number"
@@ -1837,6 +1940,14 @@ export default function FinancePage() {
               <div className="space-y-2">
                 <Label>Nº da Nota Fiscal</Label>
                 <Input value={newEntry.invoiceNumber} onChange={e => setNewEntry(p => ({ ...p, invoiceNumber: e.target.value }))} placeholder="Ex: 001234" />
+              </div>
+              <div className="space-y-2">
+                <Label>Data de Embarque</Label>
+                <Input
+                  type="date"
+                  value={newEntry.shippingDate}
+                  onChange={e => setNewEntry(p => ({ ...p, shippingDate: e.target.value }))}
+                />
               </div>
               <div className="space-y-2">
                 <Label>Observações</Label>
@@ -1913,6 +2024,22 @@ export default function FinancePage() {
                 <Input
                   value={editEntryForm.invoiceNumber}
                   onChange={e => setEditEntryForm(p => ({ ...p, invoiceNumber: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Número do Item</Label>
+                <Input
+                  value={editEntryForm.itemNumber}
+                  onChange={e => setEditEntryForm(p => ({ ...p, itemNumber: e.target.value }))}
+                  placeholder="Ex: 001"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Data de Embarque</Label>
+                <Input
+                  type="date"
+                  value={editEntryForm.shippingDate}
+                  onChange={e => setEditEntryForm(p => ({ ...p, shippingDate: e.target.value }))}
                 />
               </div>
               <div className="space-y-2">
