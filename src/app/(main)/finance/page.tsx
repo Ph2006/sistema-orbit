@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Download, Lock, Eye, EyeOff, TrendingUp, TrendingDown, DollarSign, FileText, Calculator, Target, AlertTriangle, CheckCircle, Package, Plus, Edit, Save, X } from "lucide-react";
-import { collection, getDocs, doc, updateDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -249,7 +249,11 @@ export default function FinancePage() {
 
       const ordersRaw = ordersSnap.docs.map(d => ({ id: d.id, ...d.data() }));
 
-      return ordersRaw.map((order: any) => {
+      const activeOrders = ordersRaw.filter((order: any) =>
+        !['Concluído', 'Cancelado'].includes(order.status)
+      );
+
+      return activeOrders.map((order: any) => {
         const quotation = quotationsData.find((q: any) =>
           q.quotationNumber === (order.quotationNumber || '') ||
           q.number?.toString?.() === (order.quotationNumber || '') ||
@@ -261,25 +265,46 @@ export default function FinancePage() {
           const quoteQty = Number(quoteItem?.quantity) || 0;
           const quoteTotalWithTax = Number(quoteItem?.totalWithTax) || 0;
           const unitPriceFromQuotation = quoteQty > 0 ? (quoteTotalWithTax / quoteQty) : 0;
-
           const orderQty = Number(item?.quantity) || 0;
-          const itemValue = unitPriceFromQuotation * orderQty;
+          const billedQty = Number(item?.billedQuantity) || 0;
+          const remainingQty = Math.max(0, orderQty - billedQty);
+          const totalValue = unitPriceFromQuotation * orderQty;
+          const billedValue = unitPriceFromQuotation * billedQty;
+          const remainingValue = unitPriceFromQuotation * remainingQty;
 
           const shippingDate =
             item?.shippingDate?.toDate ? item.shippingDate.toDate() :
-            item?.shippingDate ? new Date(item.shippingDate) :
-            null;
+            item?.shippingDate ? new Date(item.shippingDate) : null;
+
+          const billingEntries = (item?.billingEntries || []).map((entry: any) => ({
+            id: entry.id || `entry-${Date.now()}`,
+            date: entry.date?.toDate ? entry.date.toDate() : entry.date ? new Date(entry.date) : new Date(),
+            quantity: Number(entry.quantity) || 0,
+            invoiceNumber: entry.invoiceNumber || '',
+            value: unitPriceFromQuotation * (Number(entry.quantity) || 0),
+            notes: entry.notes || '',
+          }));
 
           return {
+            id: item?.id || `item-${i}`,
             description: item?.description || quoteItem?.description || '',
             quantity: orderQty,
+            billedQuantity: billedQty,
+            remainingQuantity: remainingQty,
             unitPriceFromQuotation,
-            value: itemValue,
+            totalValue,
+            billedValue,
+            remainingValue,
             invoiceNumber: item?.invoiceNumber || '',
             shippingDate,
             invoiced: Boolean(item?.invoiced),
+            billingEntries,
           };
         });
+
+        const orderTotalValue = items.reduce((sum: number, it: any) => sum + it.totalValue, 0);
+        const orderBilledValue = items.reduce((sum: number, it: any) => sum + it.billedValue, 0);
+        const orderRemainingValue = orderTotalValue - orderBilledValue;
 
         return {
           id: order.id,
@@ -289,37 +314,15 @@ export default function FinancePage() {
           status: order.status || 'Indefinido',
           deliveryDate: order.deliveryDate?.toDate ? order.deliveryDate.toDate() : null,
           items,
+          totalValue: orderTotalValue,
+          billedValue: orderBilledValue,
+          remainingValue: orderRemainingValue,
+          billingPct: orderTotalValue > 0 ? (orderBilledValue / orderTotalValue) * 100 : 0,
         };
       });
     } catch (error) {
       console.error("Erro ao buscar OS para faturamento:", error);
       return [];
-    }
-  };
-
-  const handleToggleInvoiced = async (orderId: string, itemIndex: number, value: boolean) => {
-    try {
-      const orderRef = doc(db, "companies", "mecald", "orders", orderId);
-      await updateDoc(orderRef, {
-        [`items.${itemIndex}.invoiced`]: value
-      } as any);
-
-      setBillingData(prev =>
-        prev.map(o => {
-          if (o.id !== orderId) return o;
-          const nextItems = [...(o.items || [])];
-          if (!nextItems[itemIndex]) return o;
-          nextItems[itemIndex] = { ...nextItems[itemIndex], invoiced: value };
-          return { ...o, items: nextItems };
-        })
-      );
-    } catch (error) {
-      console.error("Erro ao atualizar faturado:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro ao atualizar",
-        description: "Não foi possível salvar o status de faturamento do item.",
-      });
     }
   };
 
@@ -1196,40 +1199,86 @@ export default function FinancePage() {
   }
 
   const BillingTab = () => {
-    const [month, setMonth] = useState<string>(() => format(new Date(), "yyyy-MM"));
-
-    const ordersForMonth = useMemo(() => {
-      const [yStr, mStr] = month.split("-");
-      const y = Number(yStr);
-      const m = Number(mStr); // 1-12
-      if (!y || !m) return billingData;
-
-      const start = new Date(y, m - 1, 1, 0, 0, 0, 0);
-      const end = new Date(y, m, 1, 0, 0, 0, 0);
-
-      return billingData
-        .map(order => {
-          const items = (order.items || []).filter((it: any) => {
-            const d: Date | null =
-              it?.shippingDate instanceof Date ? it.shippingDate :
-              order.deliveryDate instanceof Date ? order.deliveryDate :
-              null;
-            if (!d) return true;
-            return d >= start && d < end;
-          });
-          return { ...order, items };
-        })
-        .filter(order => (order.items || []).length > 0);
-    }, [billingData, month]);
+    const [expandedOrderId, setExpandedOrderId] = useState<string | null>(null);
+    const [billingModalOpen, setBillingModalOpen] = useState(false);
+    const [selectedItemForBilling, setSelectedItemForBilling] = useState<any>(null);
+    const [selectedOrderForBilling, setSelectedOrderForBilling] = useState<any>(null);
+    const [newEntry, setNewEntry] = useState({ quantity: '', invoiceNumber: '', notes: '' });
+    const [isSavingEntry, setIsSavingEntry] = useState(false);
 
     const summary = useMemo(() => {
-      const allItems = ordersForMonth.flatMap((o: any) => (o.items || []).map((it: any) => ({ ...it, orderId: o.id })));
-      const total = allItems.reduce((sum: number, it: any) => sum + (Number(it.value) || 0), 0);
-      const invoiced = allItems.filter((it: any) => it.invoiced).reduce((sum: number, it: any) => sum + (Number(it.value) || 0), 0);
-      const remaining = total - invoiced;
-      const pct = total > 0 ? (invoiced / total) * 100 : 0;
-      return { total, invoiced, remaining, pct };
-    }, [ordersForMonth]);
+      const total = billingData.reduce((sum: number, o: any) => sum + (o.totalValue || 0), 0);
+      const billed = billingData.reduce((sum: number, o: any) => sum + (o.billedValue || 0), 0);
+      const remaining = total - billed;
+      const pct = total > 0 ? (billed / total) * 100 : 0;
+      return { total, billed, remaining, pct };
+    }, [billingData]);
+
+    const handleOpenBillingModal = (order: any, item: any) => {
+      setSelectedOrderForBilling(order);
+      setSelectedItemForBilling(item);
+      setNewEntry({ quantity: '', invoiceNumber: '', notes: '' });
+      setBillingModalOpen(true);
+    };
+
+    const handleSaveBillingEntry = async () => {
+      if (!selectedOrderForBilling || !selectedItemForBilling) return;
+      const qty = Number(newEntry.quantity);
+      if (!qty || qty <= 0) {
+        toast({ variant: "destructive", title: "Quantidade inválida", description: "Informe uma quantidade maior que zero." });
+        return;
+      }
+      if (qty > selectedItemForBilling.remainingQuantity) {
+        toast({ variant: "destructive", title: "Quantidade excede o saldo", description: `Saldo disponível: ${selectedItemForBilling.remainingQuantity}` });
+        return;
+      }
+
+      setIsSavingEntry(true);
+      try {
+        const orderRef = doc(db, "companies", "mecald", "orders", selectedOrderForBilling.id);
+        const orderSnap = await getDoc(orderRef);
+        if (!orderSnap.exists()) throw new Error("Pedido não encontrado");
+
+        const orderData = orderSnap.data();
+        const items = Array.isArray(orderData.items) ? [...orderData.items] : Object.values(orderData.items || {});
+
+        const itemIndex = items.findIndex((it: any) => it.id === selectedItemForBilling.id);
+        if (itemIndex === -1) throw new Error("Item não encontrado");
+
+        const entry = {
+          id: `entry-${Date.now()}`,
+          date: Timestamp.now(),
+          quantity: qty,
+          invoiceNumber: newEntry.invoiceNumber,
+          notes: newEntry.notes,
+        };
+
+        const existingEntries = items[itemIndex].billingEntries || [];
+        const newBilledQty = (Number(items[itemIndex].billedQuantity) || 0) + qty;
+
+        items[itemIndex] = {
+          ...items[itemIndex],
+          billingEntries: [...existingEntries, entry],
+          billedQuantity: newBilledQty,
+          invoiced: newBilledQty >= (Number(items[itemIndex].quantity) || 0),
+        };
+
+        await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
+
+        toast({ title: "Lançamento salvo!", description: `${qty} unidade(s) faturadas com sucesso.` });
+        setBillingModalOpen(false);
+
+        setIsBillingLoading(true);
+        const data = await fetchOrdersForBilling();
+        setBillingData(data);
+      } catch (error) {
+        console.error(error);
+        toast({ variant: "destructive", title: "Erro ao salvar", description: "Não foi possível registrar o lançamento." });
+      } finally {
+        setIsSavingEntry(false);
+        setIsBillingLoading(false);
+      }
+    };
 
     const exportBillingPdf = async () => {
       try {
@@ -1238,73 +1287,80 @@ export default function FinancePage() {
         let yPos = 15;
 
         docPdf.setFontSize(16).setFont("helvetica", "bold");
-        docPdf.text("RELATÓRIO DE FATURAMENTO DO MÊS", pageWidth / 2, yPos, { align: "center" });
+        docPdf.text("RELATÓRIO DE FATURAMENTO", pageWidth / 2, yPos, { align: "center" });
         yPos += 8;
-
         docPdf.setFontSize(10).setFont("helvetica", "normal");
-        docPdf.text(`Mês: ${month} | Gerado em: ${format(new Date(), "dd/MM/yyyy HH:mm")}`, pageWidth / 2, yPos, { align: "center" });
+        docPdf.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy HH:mm")} | Pedidos em aberto`, pageWidth / 2, yPos, { align: "center" });
         yPos += 10;
-
-        docPdf.setFontSize(12).setFont("helvetica", "bold");
-        docPdf.text("Resumo", 14, yPos);
-        yPos += 6;
 
         autoTable(docPdf, {
           startY: yPos,
-          head: [["Indicador", "Valor"]],
-          body: [
-            ["Total a faturar", summary.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
-            ["Faturado", summary.invoiced.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
-            ["Falta faturar", summary.remaining.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })],
-            ["% concluído", `${summary.pct.toFixed(1)}%`],
-          ],
-          columnStyles: { 0: { cellWidth: 70 }, 1: { cellWidth: 110, halign: "right" } },
-          styles: { fontSize: 10 },
+          head: [["Total dos Pedidos", "Faturado", "Falta Faturar", "% Concluído"]],
+          body: [[
+            summary.total.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+            summary.billed.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+            summary.remaining.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+            `${summary.pct.toFixed(1)}%`,
+          ]],
+          styles: { fontSize: 9 },
           headStyles: { fillColor: [37, 99, 235] },
           theme: "grid",
         });
-
         yPos = (docPdf as any).lastAutoTable.finalY + 10;
 
-        const rows = ordersForMonth.flatMap((o: any) =>
-          (o.items || []).map((it: any, idx: number) => [
-            o.internalOS,
-            o.customerName,
-            it.description || `Item ${idx + 1}`,
-            String(it.quantity ?? ""),
-            (Number(it.value) || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
-            it.invoiced ? "FATURADO" : "PENDENTE",
-            it.invoiceNumber || "",
-            it.shippingDate ? format(it.shippingDate, "dd/MM/yyyy") : "",
-          ])
-        );
+        for (const order of billingData) {
+          docPdf.setFontSize(11).setFont("helvetica", "bold");
+          docPdf.text(`OS: ${order.internalOS} | ${order.customerName} | Status: ${order.status}`, 14, yPos);
+          yPos += 5;
+          docPdf.setFontSize(9).setFont("helvetica", "normal");
+          docPdf.text(
+            `Total: ${order.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} | ` +
+            `Faturado: ${order.billedValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} | ` +
+            `Pendente: ${order.remainingValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}`,
+            14,
+            yPos
+          );
+          yPos += 5;
 
-        autoTable(docPdf, {
-          startY: yPos,
-          head: [["OS", "Cliente", "Item", "Qtd", "Valor", "Status", "NF", "Data Env."]],
-          body: rows,
-          styles: { fontSize: 8 },
-          headStyles: { fillColor: [37, 99, 235] },
-          columnStyles: {
-            0: { cellWidth: 18 },
-            1: { cellWidth: 35 },
-            2: { cellWidth: 55 },
-            3: { cellWidth: 10, halign: "center" },
-            4: { cellWidth: 22, halign: "right" },
-            5: { cellWidth: 18, halign: "center" },
-            6: { cellWidth: 14, halign: "center" },
-            7: { cellWidth: 18, halign: "center" },
-          },
-        });
+          const rows = order.items.map((it: any) => [
+            it.description.substring(0, 35),
+            it.quantity,
+            it.billedQuantity,
+            it.remainingQuantity,
+            it.totalValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+            it.billedValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+            it.remainingValue.toLocaleString("pt-BR", { style: "currency", currency: "BRL" }),
+          ]);
 
-        docPdf.save(`Relatorio_Faturamento_${month}_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
+          autoTable(docPdf, {
+            startY: yPos,
+            head: [["Item", "Qtd", "Fat.", "Saldo", "Vl. Total", "Faturado", "Pendente"]],
+            body: rows,
+            styles: { fontSize: 7 },
+            headStyles: { fillColor: [100, 116, 139] },
+            columnStyles: {
+              0: { cellWidth: 50 },
+              1: { cellWidth: 12, halign: "center" },
+              2: { cellWidth: 12, halign: "center" },
+              3: { cellWidth: 12, halign: "center" },
+              4: { cellWidth: 28, halign: "right" },
+              5: { cellWidth: 28, halign: "right" },
+              6: { cellWidth: 28, halign: "right" },
+            },
+            margin: { left: 14, right: 14 },
+          });
+
+          yPos = (docPdf as any).lastAutoTable.finalY + 8;
+          if (yPos > 260) {
+            docPdf.addPage();
+            yPos = 15;
+          }
+        }
+
+        docPdf.save(`Relatorio_Faturamento_${format(new Date(), "yyyyMMdd_HHmm")}.pdf`);
+        toast({ title: "PDF exportado com sucesso!" });
       } catch (error) {
-        console.error("Erro ao exportar PDF de faturamento:", error);
-        toast({
-          variant: "destructive",
-          title: "Erro ao exportar PDF",
-          description: "Não foi possível gerar o relatório de faturamento.",
-        });
+        toast({ variant: "destructive", title: "Erro ao exportar PDF" });
       }
     };
 
@@ -1312,137 +1368,217 @@ export default function FinancePage() {
       <div className="space-y-4">
         <Card>
           <CardHeader>
-            <CardTitle>Filtro do Mês</CardTitle>
-            <CardDescription>Selecione o mês para consolidar faturado x pendente</CardDescription>
+            <CardTitle>Faturamento — Pedidos em Aberto</CardTitle>
+            <CardDescription>Pedidos ativos com controle de faturamento por item</CardDescription>
           </CardHeader>
           <CardContent className="flex items-center gap-4">
-            <Input
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
-              className="w-[200px]"
-            />
-            <Button variant="outline" onClick={exportBillingPdf} disabled={isBillingLoading || !ordersForMonth.length}>
-              <Download className="w-4 h-4 mr-2" />
-              Exportar PDF
+            <Button variant="outline" onClick={exportBillingPdf} disabled={isBillingLoading || !billingData.length}>
+              <Download className="w-4 h-4 mr-2" /> Exportar PDF
             </Button>
-            <Button variant="outline" onClick={async () => {
-              setIsBillingLoading(true);
-              try {
-                const data = await fetchOrdersForBilling();
-                setBillingData(data);
-              } finally {
-                setIsBillingLoading(false);
-              }
-            }}>
+            <Button
+              variant="outline"
+              onClick={async () => {
+                setIsBillingLoading(true);
+                try {
+                  const data = await fetchOrdersForBilling();
+                  setBillingData(data);
+                } finally {
+                  setIsBillingLoading(false);
+                }
+              }}
+            >
               🔄 Recarregar
             </Button>
           </CardContent>
         </Card>
 
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          <StatCard
-            title="Total a faturar"
-            value={summary.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            icon={DollarSign}
-            description="Soma dos itens do mês"
-          />
-          <StatCard
-            title="Faturado"
-            value={summary.invoiced.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            icon={CheckCircle}
-            description="Itens marcados como faturados"
-          />
-          <StatCard
-            title="Falta faturar"
-            value={summary.remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-            icon={AlertTriangle}
-            description="Diferença"
-          />
-          <StatCard
-            title="% concluído"
-            value={`${summary.pct.toFixed(1)}%`}
-            icon={Target}
-            description="Faturado / Total"
-          />
+          <StatCard title="Total dos Pedidos" value={summary.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} icon={DollarSign} description="Valor total em aberto" />
+          <StatCard title="Faturado" value={summary.billed.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} icon={CheckCircle} description="Total já faturado" />
+          <StatCard title="Falta Faturar" value={summary.remaining.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} icon={AlertTriangle} description="Saldo pendente" />
+          <StatCard title="% Concluído" value={`${summary.pct.toFixed(1)}%`} icon={Target} description="Faturado / Total" />
         </div>
 
         {isBillingLoading ? (
           <Card>
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-                <Skeleton className="h-8 w-full" />
-              </div>
+            <CardContent className="p-6 space-y-3">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
             </CardContent>
           </Card>
-        ) : ordersForMonth.length ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Pedidos do mês</CardTitle>
-              <CardDescription>Marque manualmente os itens faturados</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-6">
-                {ordersForMonth.map((order: any) => (
-                  <div key={order.id} className="border rounded-lg p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div>
-                        <div className="font-bold">OS: {order.internalOS}</div>
-                        <div className="text-sm text-muted-foreground">{order.customerName}</div>
-                      </div>
-                      <Badge variant="outline">{order.status}</Badge>
+        ) : billingData.length ? (
+          <div className="space-y-3">
+            {billingData.map((order: any) => (
+              <Card key={order.id} className="overflow-hidden">
+                <div
+                  className="flex items-center justify-between p-4 cursor-pointer hover:bg-muted/50 transition-colors"
+                  onClick={() => setExpandedOrderId(expandedOrderId === order.id ? null : order.id)}
+                >
+                  <div className="flex items-center gap-4">
+                    <div>
+                      <div className="font-bold text-base">OS: {order.internalOS}</div>
+                      <div className="text-sm text-muted-foreground">{order.customerName}</div>
                     </div>
+                    <Badge variant="outline">{order.status}</Badge>
+                  </div>
+                  <div className="flex items-center gap-6 text-sm">
+                    <div className="text-right">
+                      <div className="text-muted-foreground">Total</div>
+                      <div className="font-semibold">{order.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-muted-foreground">Faturado</div>
+                      <div className="font-semibold text-green-600">{order.billedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                    </div>
+                    <div className="text-right">
+                      <div className="text-muted-foreground">Pendente</div>
+                      <div className="font-semibold text-orange-600">{order.remainingValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</div>
+                    </div>
+                    <div className="w-20">
+                      <div className="text-xs text-muted-foreground mb-1">{order.billingPct.toFixed(0)}%</div>
+                      <Progress value={order.billingPct} className="h-2" />
+                    </div>
+                    <span className="text-muted-foreground">{expandedOrderId === order.id ? '▲' : '▼'}</span>
+                  </div>
+                </div>
 
+                {expandedOrderId === order.id && (
+                  <div className="border-t">
                     <Table>
                       <TableHeader>
                         <TableRow>
                           <TableHead>Item</TableHead>
-                          <TableHead className="text-right">Qtd</TableHead>
-                          <TableHead className="text-right">Vlr Unit. (Orç.)</TableHead>
-                          <TableHead className="text-right">Valor</TableHead>
-                          <TableHead>NF</TableHead>
-                          <TableHead>Data Env.</TableHead>
-                          <TableHead className="text-center">Faturado</TableHead>
+                          <TableHead className="text-right">Qtd Total</TableHead>
+                          <TableHead className="text-right">Faturado</TableHead>
+                          <TableHead className="text-right">Saldo</TableHead>
+                          <TableHead className="text-right">Vlr Unit.</TableHead>
+                          <TableHead className="text-right">Vlr Faturado</TableHead>
+                          <TableHead className="text-right">Vlr Pendente</TableHead>
+                          <TableHead className="text-center">Ação</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {(order.items || []).map((it: any, idx: number) => (
-                          <TableRow key={idx}>
-                            <TableCell>{it.description || `Item ${idx + 1}`}</TableCell>
-                            <TableCell className="text-right">{it.quantity ?? ""}</TableCell>
-                            <TableCell className="text-right">
-                              {(Number(it.unitPriceFromQuotation) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                            </TableCell>
-                            <TableCell className="text-right font-medium">
-                              {(Number(it.value) || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                            </TableCell>
-                            <TableCell>{it.invoiceNumber || "-"}</TableCell>
-                            <TableCell>{it.shippingDate ? format(it.shippingDate, 'dd/MM/yyyy') : "-"}</TableCell>
+                        {order.items.map((item: any) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="max-w-[200px] truncate">{item.description}</TableCell>
+                            <TableCell className="text-right">{item.quantity}</TableCell>
+                            <TableCell className="text-right text-green-600 font-medium">{item.billedQuantity}</TableCell>
+                            <TableCell className="text-right text-orange-600 font-medium">{item.remainingQuantity}</TableCell>
+                            <TableCell className="text-right">{item.unitPriceFromQuotation.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                            <TableCell className="text-right text-green-600">{item.billedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
+                            <TableCell className="text-right text-orange-600">{item.remainingValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
                             <TableCell className="text-center">
-                              <input
-                                type="checkbox"
-                                checked={Boolean(it.invoiced)}
-                                onChange={(e) => handleToggleInvoiced(order.id, idx, e.target.checked)}
-                              />
+                              {item.remainingQuantity > 0 ? (
+                                <Button size="sm" variant="outline" onClick={() => handleOpenBillingModal(order, item)}>
+                                  <Plus className="h-3 w-3 mr-1" /> Lançar
+                                </Button>
+                              ) : (
+                                <Badge className="bg-green-600 text-white text-xs">100%</Badge>
+                              )}
                             </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
                     </Table>
+
+                    {order.items.some((it: any) => it.billingEntries?.length > 0) && (
+                      <div className="p-4 bg-muted/30 border-t">
+                        <p className="text-sm font-medium mb-2">Histórico de lançamentos:</p>
+                        {order.items.filter((it: any) => it.billingEntries?.length > 0).map((item: any) => (
+                          <div key={item.id} className="mb-2">
+                            <p className="text-xs text-muted-foreground font-medium">{item.description}</p>
+                            <div className="space-y-1 mt-1">
+                              {item.billingEntries.map((entry: any) => (
+                                <div key={entry.id} className="flex items-center gap-4 text-xs bg-background rounded p-2">
+                                  <span>{format(entry.date, 'dd/MM/yyyy')}</span>
+                                  <span>Qtd: <strong>{entry.quantity}</strong></span>
+                                  {entry.invoiceNumber && <span>NF: <strong>{entry.invoiceNumber}</strong></span>}
+                                  <span className="text-green-600 font-medium">{entry.value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                  {entry.notes && <span className="text-muted-foreground">{entry.notes}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
+                )}
+              </Card>
+            ))}
+          </div>
         ) : (
           <Card>
             <CardContent className="p-6 text-center text-muted-foreground">
-              Nenhum pedido encontrado para o mês selecionado.
+              Nenhum pedido em aberto encontrado.
             </CardContent>
           </Card>
         )}
+
+        <Dialog open={billingModalOpen} onOpenChange={setBillingModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <DollarSign className="h-5 w-5" /> Lançar Faturamento
+              </DialogTitle>
+              <DialogDescription>
+                {selectedItemForBilling && (
+                  <>
+                    <strong>{selectedItemForBilling.description}</strong><br />
+                    Saldo disponível: <strong>{selectedItemForBilling.remainingQuantity}</strong> unid. |{' '}
+                    Vlr unit.: <strong>{(selectedItemForBilling.unitPriceFromQuotation || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</strong>
+                  </>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label>Quantidade Faturada *</Label>
+                <Input
+                  type="number"
+                  min="1"
+                  max={selectedItemForBilling?.remainingQuantity}
+                  value={newEntry.quantity}
+                  onChange={e => setNewEntry(p => ({ ...p, quantity: e.target.value }))}
+                  placeholder={`Máx: ${selectedItemForBilling?.remainingQuantity}`}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Nº da Nota Fiscal</Label>
+                <Input value={newEntry.invoiceNumber} onChange={e => setNewEntry(p => ({ ...p, invoiceNumber: e.target.value }))} placeholder="Ex: 001234" />
+              </div>
+              <div className="space-y-2">
+                <Label>Observações</Label>
+                <Input value={newEntry.notes} onChange={e => setNewEntry(p => ({ ...p, notes: e.target.value }))} placeholder="Opcional" />
+              </div>
+              {newEntry.quantity && Number(newEntry.quantity) > 0 && selectedItemForBilling && (
+                <div className="p-3 bg-muted rounded-lg text-sm">
+                  <span className="text-muted-foreground">Valor a faturar: </span>
+                  <span className="font-bold text-green-600">
+                    {(Number(newEntry.quantity) * selectedItemForBilling.unitPriceFromQuotation).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+              )}
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setBillingModalOpen(false)}>Cancelar</Button>
+              <Button onClick={handleSaveBillingEntry} disabled={!newEntry.quantity || isSavingEntry}>
+                {isSavingEntry ? (
+                  <>
+                    <div className="w-4 h-4 mr-2 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Salvando...
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4 mr-2" />
+                    Confirmar
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     );
   };
