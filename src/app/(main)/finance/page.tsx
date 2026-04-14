@@ -1290,7 +1290,11 @@ export default function FinancePage() {
         const orderData = orderSnap.data();
         const items = Array.isArray(orderData.items) ? [...orderData.items] : Object.values(orderData.items || {});
 
-        const itemIndex = items.findIndex((it: any) => it.id === selectedItemForBilling.id);
+        const itemIndex = items.findIndex((it: any, i: number) =>
+          it.id === selectedItemForBilling.id ||
+          `item-${i}` === selectedItemForBilling.id ||
+          it.description === selectedItemForBilling.description
+        );
         if (itemIndex === -1) throw new Error("Item não encontrado");
         const entryValue = qty * unitPrice;
 
@@ -1320,6 +1324,9 @@ export default function FinancePage() {
           itemNumber: newEntry.itemNumber || items[itemIndex].itemNumber || '',
           invoiced: newBilledQty >= (Number(items[itemIndex].quantity) || 0),
         };
+        if (!items[itemIndex].id) {
+          items[itemIndex].id = selectedItemForBilling.id;
+        }
 
         await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
 
@@ -1346,13 +1353,20 @@ export default function FinancePage() {
         if (!snap.exists()) return;
         const data = snap.data();
         const items = Array.isArray(data.items) ? [...data.items] : Object.values(data.items || {});
-        const itemIdx = items.findIndex((it: any) => it.id === editingEntry.itemId);
+        const itemIdx = items.findIndex((it: any, i: number) =>
+          it.id === editingEntry.itemId ||
+          `item-${i}` === editingEntry.itemId ||
+          it.description === editingEntry.entry?.description
+        );
         if (itemIdx === -1) return;
 
         const oldEntry = editingEntry.entry;
         const updatedEntries = (items[itemIdx].billingEntries || []).filter((e: any) => e.id !== oldEntry.id);
         const newBilledQty = Math.max(0, (Number(items[itemIdx].billedQuantity) || 0) - oldEntry.quantity);
         items[itemIdx] = { ...items[itemIdx], billingEntries: updatedEntries, billedQuantity: newBilledQty, invoiced: false };
+        if (!items[itemIdx].id) {
+          items[itemIdx].id = editingEntry.itemId;
+        }
 
         await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
         toast({ title: "Lançamento excluído!" });
@@ -1383,7 +1397,11 @@ export default function FinancePage() {
         if (!snap.exists()) return;
         const data = snap.data();
         const items = Array.isArray(data.items) ? [...data.items] : Object.values(data.items || {});
-        const itemIdx = items.findIndex((it: any) => it.id === editingEntry.itemId);
+        const itemIdx = items.findIndex((it: any, i: number) =>
+          it.id === editingEntry.itemId ||
+          `item-${i}` === editingEntry.itemId ||
+          it.description === editingEntry.entry?.description
+        );
         if (itemIdx === -1) return;
 
         const oldEntry = editingEntry.entry;
@@ -1412,6 +1430,9 @@ export default function FinancePage() {
           lastUnitPrice: unitPrice,
           invoiced: newBilledQty >= (Number(items[itemIdx].quantity) || 0),
         };
+        if (!items[itemIdx].id) {
+          items[itemIdx].id = editingEntry.itemId;
+        }
 
         await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
         toast({ title: "Lançamento atualizado!" });
