@@ -1249,6 +1249,28 @@ export default function FinancePage() {
       return { total, billed, remaining, pct };
     }, [billingData]);
 
+    const normalizeItems = (rawItems: any): any[] => {
+      if (Array.isArray(rawItems)) return [...rawItems];
+      return Object.values(rawItems || {});
+    };
+
+    const findItemIndex = (
+      items: any[],
+      target: { id?: string; description?: string; quantity?: number }
+    ) => {
+      const targetDescription = (target.description || '').trim().toLowerCase();
+      const targetQuantity = Number(target.quantity) || 0;
+      return items.findIndex((it: any, i: number) => {
+        const itemDescription = (it?.description || '').trim().toLowerCase();
+        const itemQuantity = Number(it?.quantity) || 0;
+        return (
+          (target.id && (it?.id === target.id || `item-${i}` === target.id)) ||
+          (targetDescription && itemDescription === targetDescription && targetQuantity > 0 && itemQuantity === targetQuantity) ||
+          (targetDescription && itemDescription === targetDescription)
+        );
+      });
+    };
+
     const handleOpenBillingModal = (order: any, item: any) => {
       setSelectedOrderForBilling(order);
       setSelectedItemForBilling(item);
@@ -1288,13 +1310,12 @@ export default function FinancePage() {
         if (!orderSnap.exists()) throw new Error("Pedido não encontrado");
 
         const orderData = orderSnap.data();
-        const items = Array.isArray(orderData.items) ? [...orderData.items] : Object.values(orderData.items || {});
-
-        const itemIndex = items.findIndex((it: any, i: number) =>
-          it.id === selectedItemForBilling.id ||
-          `item-${i}` === selectedItemForBilling.id ||
-          it.description === selectedItemForBilling.description
-        );
+        const items = normalizeItems(orderData.items);
+        const itemIndex = findItemIndex(items, {
+          id: selectedItemForBilling.id,
+          description: selectedItemForBilling.description,
+          quantity: selectedItemForBilling.quantity,
+        });
         if (itemIndex === -1) throw new Error("Item não encontrado");
         const entryValue = qty * unitPrice;
 
@@ -1314,18 +1335,19 @@ export default function FinancePage() {
         };
 
         const existingEntries = items[itemIndex].billingEntries || [];
-        const newBilledQty = (Number(items[itemIndex].billedQuantity) || 0) + qty;
+        const updatedEntries = [...existingEntries, entry];
+        const newBilledQty = updatedEntries.reduce((sum: number, e: any) => sum + (Number(e.quantity) || 0), 0);
 
         items[itemIndex] = {
           ...items[itemIndex],
-          billingEntries: [...existingEntries, entry],
+          billingEntries: updatedEntries,
           billedQuantity: newBilledQty,
           lastUnitPrice: unitPrice,
           itemNumber: newEntry.itemNumber || items[itemIndex].itemNumber || '',
           invoiced: newBilledQty >= (Number(items[itemIndex].quantity) || 0),
         };
         if (!items[itemIndex].id) {
-          items[itemIndex].id = selectedItemForBilling.id;
+          items[itemIndex].id = selectedItemForBilling.id || `item-${itemIndex}`;
         }
 
         await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
@@ -1352,20 +1374,29 @@ export default function FinancePage() {
         const snap = await getDoc(orderRef);
         if (!snap.exists()) return;
         const data = snap.data();
-        const items = Array.isArray(data.items) ? [...data.items] : Object.values(data.items || {});
-        const itemIdx = items.findIndex((it: any, i: number) =>
-          it.id === editingEntry.itemId ||
-          `item-${i}` === editingEntry.itemId ||
-          it.description === editingEntry.entry?.description
-        );
-        if (itemIdx === -1) return;
-
+        const items = normalizeItems(data.items);
         const oldEntry = editingEntry.entry;
+        let itemIdx = items.findIndex((it: any) =>
+          (it.billingEntries || []).some((e: any) => e.id === oldEntry.id)
+        );
+        if (itemIdx === -1) {
+          itemIdx = findItemIndex(items, {
+            id: editingEntry.itemId,
+            description: oldEntry?.description,
+            quantity: oldEntry?.quantity,
+          });
+        }
+        if (itemIdx === -1) return;
         const updatedEntries = (items[itemIdx].billingEntries || []).filter((e: any) => e.id !== oldEntry.id);
-        const newBilledQty = Math.max(0, (Number(items[itemIdx].billedQuantity) || 0) - oldEntry.quantity);
-        items[itemIdx] = { ...items[itemIdx], billingEntries: updatedEntries, billedQuantity: newBilledQty, invoiced: false };
+        const newBilledQty = updatedEntries.reduce((sum: number, e: any) => sum + (Number(e.quantity) || 0), 0);
+        items[itemIdx] = {
+          ...items[itemIdx],
+          billingEntries: updatedEntries,
+          billedQuantity: newBilledQty,
+          invoiced: newBilledQty >= (Number(items[itemIdx].quantity) || 0),
+        };
         if (!items[itemIdx].id) {
-          items[itemIdx].id = editingEntry.itemId;
+          items[itemIdx].id = editingEntry.itemId || `item-${itemIdx}`;
         }
 
         await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
@@ -1396,15 +1427,19 @@ export default function FinancePage() {
         const snap = await getDoc(orderRef);
         if (!snap.exists()) return;
         const data = snap.data();
-        const items = Array.isArray(data.items) ? [...data.items] : Object.values(data.items || {});
-        const itemIdx = items.findIndex((it: any, i: number) =>
-          it.id === editingEntry.itemId ||
-          `item-${i}` === editingEntry.itemId ||
-          it.description === editingEntry.entry?.description
-        );
-        if (itemIdx === -1) return;
-
+        const items = normalizeItems(data.items);
         const oldEntry = editingEntry.entry;
+        let itemIdx = items.findIndex((it: any) =>
+          (it.billingEntries || []).some((e: any) => e.id === oldEntry.id)
+        );
+        if (itemIdx === -1) {
+          itemIdx = findItemIndex(items, {
+            id: editingEntry.itemId,
+            description: oldEntry?.description,
+            quantity: oldEntry?.quantity,
+          });
+        }
+        if (itemIdx === -1) return;
         const updatedEntries = (items[itemIdx].billingEntries || []).map((e: any) =>
           e.id === oldEntry.id
             ? {
@@ -1431,7 +1466,7 @@ export default function FinancePage() {
           invoiced: newBilledQty >= (Number(items[itemIdx].quantity) || 0),
         };
         if (!items[itemIdx].id) {
-          items[itemIdx].id = editingEntry.itemId;
+          items[itemIdx].id = editingEntry.itemId || `item-${itemIdx}`;
         }
 
         await updateDoc(orderRef, { items, lastUpdate: Timestamp.now() });
