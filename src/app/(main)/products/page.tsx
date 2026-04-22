@@ -11,6 +11,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import * as XLSX from "xlsx";
     import jsPDF from 'jspdf';
 
 import { Button } from "@/components/ui/button";
@@ -1362,6 +1363,50 @@ export default function ProductsPage() {
     setCalculatorQuantity(1);
   };
 
+  // Função para exportar catálogo em Excel
+  const exportCatalogToExcel = () => {
+    if (filteredProducts.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Nenhum produto para exportar",
+        description: searchQuery
+          ? `Nenhum produto encontrado para "${searchQuery}".`
+          : "O catálogo está vazio.",
+      });
+      return;
+    }
+
+    const data = filteredProducts.map((product) => ({
+      Código: product.code,
+      Descrição: product.description,
+      "Preço Unitário (R$)": product.unitPrice,
+      "Peso Unitário (kg)": product.unitWeight || 0,
+      "Lead Time (dias)": calculateLeadTime(product),
+    }));
+
+    const ws = XLSX.utils.json_to_sheet(data);
+
+    // Ajustar largura das colunas
+    ws["!cols"] = [
+      { wch: 20 }, // Código
+      { wch: 50 }, // Descrição
+      { wch: 18 }, // Preço
+      { wch: 18 }, // Peso
+      { wch: 16 }, // Lead Time
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Catálogo de Produtos");
+
+    const fileName = `catalogo-produtos-mecald-${format(new Date(), "yyyyMMdd-HHmm")}.xlsx`;
+    XLSX.writeFile(wb, fileName);
+
+    toast({
+      title: "Catálogo exportado!",
+      description: `${filteredProducts.length} produtos exportados para Excel.`,
+    });
+  };
+
   // Função para exportar relatório em PDF melhorado
   const handleExportReport = () => {
     if (calculatorItems.length === 0) {
@@ -1680,6 +1725,10 @@ export default function ProductsPage() {
                                         className="pl-9 w-64"
                                     />
                                 </div>
+                                <Button onClick={exportCatalogToExcel} variant="outline" size="sm">
+                                    <Download className="mr-2 h-4 w-4" />
+                                    Exportar Excel
+                                </Button>
                             </div>
                         </div>
                     </CardHeader>
