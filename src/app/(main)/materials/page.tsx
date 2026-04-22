@@ -560,6 +560,12 @@ export default function MaterialsPage() {
             setSearchOS("");
         }
     }, [isRequisitionFormOpen]);
+
+    useEffect(() => {
+        if (!isCuttingPlanFormOpen) {
+            setSearchOS("");
+        }
+    }, [isCuttingPlanFormOpen]);
     
     // Corrected useEffect for customer linking
     useEffect(() => {
@@ -2245,7 +2251,42 @@ return (
                                     <Card>
                                         <CardHeader><CardTitle>Informações Gerais</CardTitle></CardHeader>
                                         <CardContent className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                                            <FormField control={cuttingPlanForm.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>OS Vinculada (Opcional)</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione uma OS"/></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>OS: {o.internalOS}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
+                                            <FormField control={cuttingPlanForm.control} name="orderId" render={({ field }) => ( 
+                                                <FormItem>
+                                                    <FormLabel>OS Vinculada (Opcional)</FormLabel>
+                                                    <div className="space-y-2">
+                                                        <div className="relative">
+                                                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                                            <Input
+                                                                placeholder="Buscar OS..."
+                                                                value={searchOS}
+                                                                onChange={(e) => setSearchOS(e.target.value)}
+                                                                className="pl-9"
+                                                            />
+                                                        </div>
+                                                        <Select onValueChange={field.onChange} value={field.value}>
+                                                            <FormControl>
+                                                                <SelectTrigger>
+                                                                    <SelectValue placeholder="Selecione uma OS"/>
+                                                                </SelectTrigger>
+                                                            </FormControl>
+                                                            <SelectContent className="max-h-60">
+                                                                {filteredOrders.map(o => (
+                                                                    <SelectItem key={o.id} value={o.id}>
+                                                                        <div className="flex flex-col">
+                                                                            <span>OS: {o.internalOS}</span>
+                                                                            <span className="text-xs text-muted-foreground">
+                                                                                {o.customerName} • Status: {o.status}
+                                                                            </span>
+                                                                        </div>
+                                                                    </SelectItem>
+                                                                ))}
+                                                            </SelectContent>
+                                                        </Select>
+                                                    </div>
+                                                    <FormMessage />
+                                                </FormItem> 
+                                            )} />
                                             <FormItem><FormLabel>Cliente Vinculado</FormLabel><Input value={cuttingPlanForm.watch('customer.name') || 'Selecione uma OS'} disabled /></FormItem>
                                         </CardContent>
                                     </Card>
