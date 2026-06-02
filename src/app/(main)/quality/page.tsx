@@ -548,6 +548,58 @@ const ultrasoundReportSchema = z.object({
   scanRate: z.coerce.number().optional(),
   gainSweep: z.string().optional(),
   minResolution: z.coerce.number().optional(),
+  // === CABEÇALHO / PROCEDIMENTO ===
+  procedureCode: z.string().optional(),
+  procedureRevision: z.string().optional(),
+  serviceOrder: z.string().optional(),
+  purchaseOrder: z.string().optional(),
+  drawingNumber: z.string().optional(),
+  drawingRevision: z.string().optional(),
+  wpsApplicable: z.string().optional(),
+  weldJointId: z.string().optional(),
+  // === IDENTIFICAÇÃO DA PEÇA ===
+  material: z.string().optional(),
+  thickness: z.string().optional(),
+  weldingProcess: z.string().optional(),
+  jointType: z.string().optional(),
+  awsCategory: z.string().optional(),
+  inspectedLength: z.coerce.number().optional(),
+  partNumber: z.string().optional(),
+  // === NORMA ===
+  executionStandardFull: z.string().optional(),
+  evaluationMethod: z.string().optional(),
+  acceptanceTable: z.string().optional(),
+  // === EQUIPAMENTO ===
+  equipmentModel: z.string().optional(),
+  equipmentManufacturer: z.string().optional(),
+  equipmentCalibrationCert: z.string().optional(),
+  equipmentCalibrationValidity: z.date().optional().nullable(),
+  equipmentFrequencyRange: z.string().optional(),
+  // === CABEÇOTE ===
+  probeAngle: z.coerce.number().optional(),
+  probeCrystalSize: z.string().optional(),
+  probeManufacturer: z.string().optional(),
+  // === BLOCO DE CALIBRAÇÃO ===
+  calibrationBlockType: z.string().optional(),
+  calibrationBlockId: z.string().optional(),
+  calibrationBlockCert: z.string().optional(),
+  calibrationBlockValidity: z.date().optional().nullable(),
+  // === PARÂMETROS DE CALIBRAÇÃO ===
+  rangeScale: z.coerce.number().optional(),
+  zeroOffset: z.string().optional(),
+  soundVelocity: z.coerce.number().optional(),
+  referenceGain: z.coerce.number().optional(),
+  evaluationGain: z.string().optional(),
+  dacApplicable: z.boolean().optional(),
+  tcgApplicable: z.boolean().optional(),
+  transferFactor: z.string().optional(),
+  surfaceCorrection: z.string().optional(),
+  attenuationApplied: z.string().optional(),
+  // === AVALIAÇÃO AWS ===
+  awsIndicationClass: z.string().optional(),
+  awsResult: z.enum(["Aceita", "Rejeitada"]).optional(),
+  // === CONCLUSÃO EXPANDIDA ===
+  conclusionText: z.string().optional(),
   results: z.array(ultrasoundResultSchema).optional(),
   finalResult: z.enum(["Conforme", "Não Conforme"]),
   rejectionCriteria: z.string().optional(),
@@ -891,9 +943,52 @@ export default function QualityPage() {
         minResolution: undefined,
         rejectionCriteria: "",
         finalNotes: "",
+        procedureCode: "",
+        procedureRevision: "",
+        serviceOrder: "",
+        purchaseOrder: "",
+        drawingNumber: "",
+        drawingRevision: "",
+        wpsApplicable: "",
+        weldJointId: "",
+        material: "",
+        thickness: "",
+        weldingProcess: "",
+        jointType: "",
+        awsCategory: "",
+        inspectedLength: undefined,
+        partNumber: "",
+        executionStandardFull: "AWS D1.1:2020",
+        evaluationMethod: "Capítulo 6 – Ultrasonic Testing",
+        acceptanceTable: "Tabela 6.2",
+        equipmentModel: "",
+        equipmentManufacturer: "",
+        equipmentCalibrationCert: "",
+        equipmentCalibrationValidity: null,
+        equipmentFrequencyRange: "",
+        probeAngle: undefined,
+        probeCrystalSize: "",
+        probeManufacturer: "",
+        calibrationBlockType: "V1",
+        calibrationBlockId: "",
+        calibrationBlockCert: "",
+        calibrationBlockValidity: null,
+        rangeScale: undefined,
+        zeroOffset: "",
+        soundVelocity: undefined,
+        referenceGain: undefined,
+        evaluationGain: "+6 dB",
+        dacApplicable: true,
+        tcgApplicable: false,
+        transferFactor: "",
+        surfaceCorrection: "",
+        attenuationApplied: "0 dB",
+        awsIndicationClass: "",
+        awsResult: undefined,
+        conclusionText: "",
     },
   });
-  const { fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult } = useFieldArray({
+  const { fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult, update: updateUltrasoundResult } = useFieldArray({
       control: ultrasoundReportForm.control,
       name: "results"
   });
@@ -2167,6 +2262,8 @@ export default function QualityPage() {
       const dataToSave = {
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
+        equipmentCalibrationValidity: values.equipmentCalibrationValidity ? Timestamp.fromDate(values.equipmentCalibrationValidity) : null,
+        calibrationBlockValidity: values.calibrationBlockValidity ? Timestamp.fromDate(values.calibrationBlockValidity) : null,
         results: values.results || [],
         photos: values.photos || [],
         qualificationLevel: values.qualificationLevel || null,
@@ -2506,6 +2603,49 @@ export default function QualityPage() {
         minResolution: undefined,
         rejectionCriteria: "",
         finalNotes: "",
+        procedureCode: "",
+        procedureRevision: "",
+        serviceOrder: "",
+        purchaseOrder: "",
+        drawingNumber: "",
+        drawingRevision: "",
+        wpsApplicable: "",
+        weldJointId: "",
+        material: "",
+        thickness: "",
+        weldingProcess: "",
+        jointType: "",
+        awsCategory: "",
+        inspectedLength: undefined,
+        partNumber: "",
+        executionStandardFull: "AWS D1.1:2020",
+        evaluationMethod: "Capítulo 6 – Ultrasonic Testing",
+        acceptanceTable: "Tabela 6.2",
+        equipmentModel: "",
+        equipmentManufacturer: "",
+        equipmentCalibrationCert: "",
+        equipmentCalibrationValidity: null,
+        equipmentFrequencyRange: "",
+        probeAngle: undefined,
+        probeCrystalSize: "",
+        probeManufacturer: "",
+        calibrationBlockType: "V1",
+        calibrationBlockId: "",
+        calibrationBlockCert: "",
+        calibrationBlockValidity: null,
+        rangeScale: undefined,
+        zeroOffset: "",
+        soundVelocity: undefined,
+        referenceGain: undefined,
+        evaluationGain: "+6 dB",
+        dacApplicable: true,
+        tcgApplicable: false,
+        transferFactor: "",
+        surfaceCorrection: "",
+        attenuationApplied: "0 dB",
+        awsIndicationClass: "",
+        awsResult: undefined,
+        conclusionText: "",
     };
 
     if (report) {
@@ -2513,6 +2653,8 @@ export default function QualityPage() {
             ...defaultValues,
             ...report,
             inspectionDate: new Date(report.inspectionDate),
+            equipmentCalibrationValidity: report.equipmentCalibrationValidity ? convertFirestoreDate(report.equipmentCalibrationValidity) : null,
+            calibrationBlockValidity: report.calibrationBlockValidity ? convertFirestoreDate(report.calibrationBlockValidity) : null,
         });
     } else {
         ultrasoundReportForm.reset(defaultValues);
@@ -4202,7 +4344,7 @@ export default function QualityPage() {
                                  <LiquidPenetrantForm form={liquidPenetrantForm} orders={orders} teamMembers={teamMembers} selectedInspection={selectedInspection} />
                             )}
                             {dialogType === 'ultrasound' && (
-                                <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} fieldArrayProps={{ fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult }} selectedInspection={selectedInspection} />
+                                <UltrasoundReportForm form={ultrasoundReportForm} orders={orders} teamMembers={teamMembers} calibrations={calibrations} toast={toast} fieldArrayProps={{ fields: ultrasoundResultFields, append: appendUltrasoundResult, remove: removeUltrasoundResult, update: updateUltrasoundResult }} selectedInspection={selectedInspection} />
                             )}
                              {dialogType === 'lessonsLearned' && (
                                 <LessonsLearnedForm form={lessonsLearnedForm} orders={orders} teamMembers={teamMembers} selectedInspection={selectedInspection} />
@@ -5623,68 +5765,450 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
 
     return (
         <div className="space-y-4">
+
+            <Card>
+                <CardHeader><CardTitle className="text-base">0. Procedimento e Identificação do Documento</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="procedureCode" render={({ field }) => (
+                        <FormItem><FormLabel>Procedimento de Ensaio</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: PR-END-UT-001" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="procedureRevision" render={({ field }) => (
+                        <FormItem><FormLabel>Revisão do Procedimento</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Rev.02" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="serviceOrder" render={({ field }) => (
+                        <FormItem><FormLabel>Ordem de Serviço</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Nº da OS" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="purchaseOrder" render={({ field }) => (
+                        <FormItem><FormLabel>Pedido de Compra</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Nº do PC" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="drawingNumber" render={({ field }) => (
+                        <FormItem><FormLabel>Número do Desenho</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: DWG-101030" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="drawingRevision" render={({ field }) => (
+                        <FormItem><FormLabel>Revisão do Desenho</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Rev.A" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="wpsApplicable" render={({ field }) => (
+                        <FormItem><FormLabel>WPS Aplicável</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: WPS-001" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="weldJointId" render={({ field }) => (
+                        <FormItem><FormLabel>Identificação da Junta Soldada</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: J01, J02" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                </CardContent>
+            </Card>
+
             <Card>
                 <CardHeader><CardTitle className="text-base">1. Dados do Relatório</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={form.control} name="inspectionDate" render={({ field }) => ( <FormItem><FormLabel>Data da emissão</FormLabel><Popover><PopoverTrigger asChild><FormControl><Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>{field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}<CalendarIcon className="ml-auto h-4 w-4 opacity-50" /></Button></FormControl></PopoverTrigger><PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent></Popover><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="orderId" render={({ field }) => ( <FormItem><FormLabel>Nº do pedido / OS</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger></FormControl><SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="inspectedBy" render={({ field }) => ( <FormItem><FormLabel>Inspetor responsável</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger></FormControl><SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="qualificationLevel" render={({ field }) => ( <FormItem><FormLabel>Nível de qualificação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Nível II - SNQC" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="inspectionDate" render={({ field }) => (
+                        <FormItem><FormLabel>Data da emissão</FormLabel>
+                            <Popover><PopoverTrigger asChild><FormControl>
+                                <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                                    {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                </Button>
+                            </FormControl></PopoverTrigger>
+                            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent>
+                            </Popover><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="orderId" render={({ field }) => (
+                        <FormItem><FormLabel>Nº do pedido / OS</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione um pedido" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>{orders.map(o => <SelectItem key={o.id} value={o.id}>Nº {o.number} - {o.customerName}</SelectItem>)}</SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="inspectedBy" render={({ field }) => (
+                        <FormItem><FormLabel>Inspetor responsável</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione um membro" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>{teamMembers.map(m => <SelectItem key={m.id} value={m.name}>{m.name}</SelectItem>)}</SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="qualificationLevel" render={({ field }) => (
+                        <FormItem><FormLabel>Nível de qualificação (SNQC/SNCC)</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Nível II - SNQC" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
                 </CardContent>
             </Card>
 
             <Card>
                 <CardHeader><CardTitle className="text-base">2. Identificação do Componente</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                     <FormField control={form.control} name="itemId" render={({ field }) => ( <FormItem><FormLabel>Código do item / desenho</FormLabel><Select onValueChange={field.onChange} value={field.value || ""}><FormControl><SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item" /></SelectTrigger></FormControl><SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="baseMaterial" render={({ field }) => ( <FormItem><FormLabel>Material base</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="heatTreatment" render={({ field }) => ( <FormItem><FormLabel>Tratamento Térmico</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Normalizado" /></FormControl><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="weldTypeAndThickness" render={({ field }) => ( <FormItem><FormLabel>Tipo e Espessura da Solda</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Topo, 12.7mm" /></FormControl><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="examinedAreaDescription" render={({ field }) => ( <FormItem><FormLabel>Área Examinada</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Descreva a área ou anexe um desenho marcado" /></FormControl><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="quantityInspected" render={({ field }) => ( <FormItem><FormLabel>Quantidade de Peças</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                     <FormField control={form.control} name="testLocation" render={({ field }) => ( <FormItem><FormLabel>Local do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Oficina" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="itemId" render={({ field }) => (
+                        <FormItem><FormLabel>Código do item / desenho</FormLabel>
+                            <Select onValueChange={field.onChange} value={field.value || ""}><FormControl>
+                                <SelectTrigger disabled={!watchedOrderId}><SelectValue placeholder="Selecione um item" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>{availableItems.map(i => <SelectItem key={i.id} value={i.id}>{i.code ? `[${i.code}] ` : ''}{i.description}</SelectItem>)}</SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="partNumber" render={({ field }) => (
+                        <FormItem><FormLabel>Número da Peça</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 101030-101172-17" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="material" render={({ field }) => (
+                        <FormItem><FormLabel>Material</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="thickness" render={({ field }) => (
+                        <FormItem><FormLabel>Espessura</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 12 mm" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="weldingProcess" render={({ field }) => (
+                        <FormItem><FormLabel>Processo de Soldagem</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: FCAW, SMAW" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="jointType" render={({ field }) => (
+                        <FormItem><FormLabel>Tipo de Junta</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Chanfro V" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="awsCategory" render={({ field }) => (
+                        <FormItem><FormLabel>Categoria AWS</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="CJP">CJP – Complete Joint Penetration</SelectItem>
+                                <SelectItem value="PJP">PJP – Partial Joint Penetration</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="inspectedLength" render={({ field }) => (
+                        <FormItem><FormLabel>Comprimento Inspecionado (mm)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 3850" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="heatTreatment" render={({ field }) => (
+                        <FormItem><FormLabel>Tratamento Térmico</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Normalizado" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="examinedAreaDescription" render={({ field }) => (
+                        <FormItem className="md:col-span-2"><FormLabel>Área Examinada</FormLabel>
+                            <FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Descreva a área ou relacione as juntas" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="quantityInspected" render={({ field }) => (
+                        <FormItem><FormLabel>Quantidade de Peças</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="testLocation" render={({ field }) => (
+                        <FormItem><FormLabel>Local do Ensaio</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Oficina" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
                 </CardContent>
             </Card>
-            
+
             <Card>
                 <CardHeader><CardTitle className="text-base">3. Normas e Critérios Aplicados</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={form.control} name="executionStandard" render={({ field }) => ( <FormItem><FormLabel>Norma de Execução</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME V Art. 4" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="acceptanceCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Aceitação</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASME VIII Div. 1" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="examinationType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Exame</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o tipo"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Detecção de Descontinuidades">Detecção de Descontinuidades</SelectItem><SelectItem value="Medição de Espessura">Medição de Espessura</SelectItem><SelectItem value="Ultrassom Convencional">Ultrassom Convencional</SelectItem><SelectItem value="TOFD">TOFD</SelectItem><SelectItem value="Phased Array">Phased Array</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="testExtent" render={({ field }) => ( <FormItem><FormLabel>Extensão do Ensaio</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 100%, junta J-01" /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="executionStandardFull" render={({ field }) => (
+                        <FormItem><FormLabel>Norma de Execução</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: AWS D1.1:2020" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="evaluationMethod" render={({ field }) => (
+                        <FormItem><FormLabel>Método de Avaliação</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Capítulo 6 – Ultrasonic Testing" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="acceptanceTable" render={({ field }) => (
+                        <FormItem><FormLabel>Critério de Aceitação (Tabela)</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione a tabela" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="Tabela 6.2">Tabela 6.2 – Cargas Estáticas</SelectItem>
+                                <SelectItem value="Tabela 6.3">Tabela 6.3 – Cargas Cíclicas</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="examinationType" render={({ field }) => (
+                        <FormItem><FormLabel>Tipo de Exame</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="Detecção de Descontinuidades">Detecção de Descontinuidades</SelectItem>
+                                <SelectItem value="Medição de Espessura">Medição de Espessura</SelectItem>
+                                <SelectItem value="Ultrassom Convencional">Ultrassom Convencional</SelectItem>
+                                <SelectItem value="TOFD">TOFD</SelectItem>
+                                <SelectItem value="Phased Array">Phased Array</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="testExtent" render={({ field }) => (
+                        <FormItem><FormLabel>Extensão do Ensaio</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 100%" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
                 </CardContent>
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">4. Equipamentos e Acessórios</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base">4. Equipamento de Ultrassom</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={form.control} name="equipment" render={({ field }) => ( <FormItem><FormLabel>Equipamento (Marca/Modelo)</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="equipmentSerial" render={({ field }) => ( <FormItem><FormLabel>Nº de Série</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="equipmentCalibration" render={({ field }) => ( <FormItem><FormLabel>Calibração do Equipamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Certificado + Validade" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="headType" render={({ field }) => ( <FormItem><FormLabel>Tipo de Cabeçote</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Angular" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="frequency" render={({ field }) => ( <FormItem><FormLabel>Frequência (MHz)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="incidentAngle" render={({ field }) => ( <FormItem><FormLabel>Ângulo de Incidência (°)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="0, 45, 60, etc." /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="couplant" render={({ field }) => ( <FormItem><FormLabel>Acoplante</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Gel, óleo, etc." /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="referenceBlock" render={({ field }) => ( <FormItem><FormLabel>Bloco Padrão de Referência</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="V1, V2, IIW, etc." /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="equipment" render={({ field }) => (
+                        <FormItem><FormLabel>Marca / Nome</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Mitech MFD350" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="equipmentModel" render={({ field }) => (
+                        <FormItem><FormLabel>Modelo</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: MFD350B" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="equipmentSerial" render={({ field }) => (
+                        <FormItem><FormLabel>Nº de Série</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="equipmentManufacturer" render={({ field }) => (
+                        <FormItem><FormLabel>Fabricante</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Mitech" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="equipmentCalibration" render={({ field }) => (
+                        <FormItem><FormLabel>Certificado de Calibração</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Nº do certificado" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="equipmentCalibrationValidity" render={({ field }) => (
+                        <FormItem><FormLabel>Validade da Calibração</FormLabel>
+                            <Popover><PopoverTrigger asChild><FormControl>
+                                <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                                    {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                </Button>
+                            </FormControl></PopoverTrigger>
+                            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent>
+                            </Popover><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="equipmentFrequencyRange" render={({ field }) => (
+                        <FormItem><FormLabel>Faixa de Frequência</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 1 – 10 MHz" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
                 </CardContent>
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">5. Parâmetros do Ensaio</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base">5. Cabeçote (Transdutor)</CardTitle></CardHeader>
                 <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FormField control={form.control} name="pulseMode" render={({ field }) => ( <FormItem><FormLabel>Modo de Pulso</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Pulso-Eco, etc." /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="range" render={({ field }) => ( <FormItem><FormLabel>Alcance (mm) / Escala</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="gain" render={({ field }) => ( <FormItem><FormLabel>Ganho (dB)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="distanceCorrection" render={({ field }) => ( <FormItem><FormLabel>Correção de Distância</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="scanRate" render={({ field }) => ( <FormItem><FormLabel>Taxa de Varredura (mm/s)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="gainSweep" render={({ field }) => ( <FormItem><FormLabel>Ganho/Varredura</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 20 DB" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="minResolution" render={({ field }) => ( <FormItem><FormLabel>Resolução Mínima (mm)</FormLabel><FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem> )} />
+                    <FormField control={form.control} name="headType" render={({ field }) => (
+                        <FormItem><FormLabel>Tipo</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="Angular">Angular</SelectItem>
+                                <SelectItem value="Normal">Normal (0°)</SelectItem>
+                                <SelectItem value="Duplo cristal">Duplo cristal</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="frequency" render={({ field }) => (
+                        <FormItem><FormLabel>Frequência (MHz)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 2" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="incidentAngle" render={({ field }) => (
+                        <FormItem><FormLabel>Ângulo Nominal (°)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 70" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="probeCrystalSize" render={({ field }) => (
+                        <FormItem><FormLabel>Dimensão do Cristal</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 8 x 9 mm" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="probeManufacturer" render={({ field }) => (
+                        <FormItem><FormLabel>Fabricante do Cabeçote</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Mitech" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="couplant" render={({ field }) => (
+                        <FormItem><FormLabel>Acoplante</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Gel, óleo, etc." /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
                 </CardContent>
             </Card>
-            
+
             <Card>
-                <CardHeader><CardTitle className="text-base">6. Resultados Detalhados</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base">6. Bloco de Calibração</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="calibrationBlockType" render={({ field }) => (
+                        <FormItem><FormLabel>Tipo de Bloco</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="V1">V1</SelectItem>
+                                <SelectItem value="V2">V2</SelectItem>
+                                <SelectItem value="IIW">IIW</SelectItem>
+                                <SelectItem value="Outro">Outro</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="calibrationBlockId" render={({ field }) => (
+                        <FormItem><FormLabel>Nº de Identificação</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 2025-001" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="calibrationBlockCert" render={({ field }) => (
+                        <FormItem><FormLabel>Certificado</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Nº do certificado" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="calibrationBlockValidity" render={({ field }) => (
+                        <FormItem><FormLabel>Validade</FormLabel>
+                            <Popover><PopoverTrigger asChild><FormControl>
+                                <Button variant={"outline"} className={cn("pl-3 text-left font-normal", !field.value && "text-muted-foreground")}>
+                                    {field.value ? format(field.value, "dd/MM/yyyy") : <span>Escolha a data</span>}
+                                    <CalendarIcon className="ml-auto h-4 w-4 opacity-50" />
+                                </Button>
+                            </FormControl></PopoverTrigger>
+                            <PopoverContent className="w-auto p-0"><Calendar mode="single" selected={field.value} onSelect={field.onChange} /></PopoverContent>
+                            </Popover><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="referenceBlock" render={({ field }) => (
+                        <FormItem><FormLabel>Bloco Padrão de Referência</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="V1, V2, IIW, etc." /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader><CardTitle className="text-base">7. Parâmetros de Calibração do Ensaio</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="rangeScale" render={({ field }) => (
+                        <FormItem><FormLabel>Alcance / Escala (mm)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 200" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="zeroOffset" render={({ field }) => (
+                        <FormItem><FormLabel>Zero (offset)</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 0.0" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="soundVelocity" render={({ field }) => (
+                        <FormItem><FormLabel>Velocidade do Som (m/s)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 3250" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="referenceGain" render={({ field }) => (
+                        <FormItem><FormLabel>Ganho de Referência (dB)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 32" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="gain" render={({ field }) => (
+                        <FormItem><FormLabel>Ganho de Varredura (dB)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} placeholder="Ex: 20" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="evaluationGain" render={({ field }) => (
+                        <FormItem><FormLabel>Ganho de Avaliação</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: +6 dB" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="distanceCorrection" render={({ field }) => (
+                        <FormItem><FormLabel>Correção de Distância (DAC/TCG)</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="transferFactor" render={({ field }) => (
+                        <FormItem><FormLabel>Fator de Transferência</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 0 dB" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="surfaceCorrection" render={({ field }) => (
+                        <FormItem><FormLabel>Correção Superficial</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 2 dB" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="attenuationApplied" render={({ field }) => (
+                        <FormItem><FormLabel>Atenuação Aplicada</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 0 dB" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="pulseMode" render={({ field }) => (
+                        <FormItem><FormLabel>Modo de Pulso</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Pulso-Eco, etc." /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="scanRate" render={({ field }) => (
+                        <FormItem><FormLabel>Taxa de Varredura (mm/s)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="gainSweep" render={({ field }) => (
+                        <FormItem><FormLabel>Ganho/Varredura</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 20 DB" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="minResolution" render={({ field }) => (
+                        <FormItem><FormLabel>Resolução Mínima (mm)</FormLabel>
+                            <FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <div className="flex flex-col gap-3 md:col-span-2">
+                        <FormField control={form.control} name="dacApplicable" render={({ field }) => (
+                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                <div><FormLabel>DAC Aplicável</FormLabel></div>
+                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                            </FormItem>
+                        )} />
+                        <FormField control={form.control} name="tcgApplicable" render={({ field }) => (
+                            <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
+                                <div><FormLabel>TCG Aplicável</FormLabel></div>
+                                <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
+                            </FormItem>
+                        )} />
+                    </div>
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader><CardTitle className="text-base">8. Registro das Indicações</CardTitle></CardHeader>
                 <CardContent>
                     {fieldArrayProps.fields.length > 0 && (
                         <Table><TableHeader><TableRow><TableHead>Junta</TableHead><TableHead>Resultado</TableHead><TableHead></TableHead></TableRow></TableHeader>
@@ -5700,7 +6224,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                         </TableBody></Table>
                     )}
                     <div className="mt-4 p-4 border rounded-md space-y-4">
-                        <h4 className="font-medium">{editResultIndex !== null ? 'Editar Resultado' : 'Adicionar Novo Resultado'}</h4>
+                        <h4 className="font-medium">{editResultIndex !== null ? 'Editar Indicação' : 'Adicionar Nova Indicação'}</h4>
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                             <div><Label>Código da Junta/Área</Label><Input value={newResult.jointCode || ''} onChange={(e) => setNewResult({...newResult, jointCode: e.target.value})} /></div>
                             <div><Label>Resultado</Label><Select value={newResult.evaluationResult} onValueChange={(val) => setNewResult({...newResult, evaluationResult: val as any})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select></div>
@@ -5714,27 +6238,94 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                             <div><Label>Extensão (mm)</Label><Input type="number" value={newResult.extension || ''} onChange={(e) => setNewResult({...newResult, extension: parseFloat(e.target.value)})} /></div>
                             <div><Label>Amplitude (% / dB)</Label><Input value={newResult.amplitude || ''} onChange={(e) => setNewResult({...newResult, amplitude: e.target.value})} /></div>
                         </div>
-                        <div className="flex justify-end gap-2"><Button variant="outline" size="sm" onClick={() => { setNewResult({ jointCode: '', evaluationResult: 'Conforme' }); setEditResultIndex(null); }}>Cancelar</Button><Button size="sm" onClick={editResultIndex !== null ? handleUpdateResult : handleAddResult}>{editResultIndex !== null ? 'Atualizar Resultado' : 'Adicionar Resultado'}</Button></div>
+                        <div className="flex justify-end gap-2">
+                            <Button variant="outline" size="sm" onClick={() => { setNewResult({ jointCode: '', evaluationResult: 'Conforme' }); setEditResultIndex(null); }}>Cancelar</Button>
+                            <Button size="sm" onClick={editResultIndex !== null ? handleUpdateResult : handleAddResult}>{editResultIndex !== null ? 'Atualizar' : 'Adicionar Indicação'}</Button>
+                        </div>
                     </div>
-                </CardContent>
-            </Card>
-            
-            <Card>
-                <CardHeader><CardTitle className="text-base">7. Conclusão</CardTitle></CardHeader>
-                <CardContent>
-                    <FormField control={form.control} name="finalResult" render={({ field }) => ( <FormItem><FormLabel>Resultado Final</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione o resultado"/></SelectTrigger></FormControl><SelectContent><SelectItem value="Conforme">Conforme</SelectItem><SelectItem value="Não Conforme">Não Conforme</SelectItem></SelectContent></Select><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="rejectionCriteria" render={({ field }) => ( <FormItem><FormLabel>Critério de Rejeição</FormLabel><FormControl><Input {...field} value={field.value ?? ''} placeholder="Especifique o critério de rejeição" /></FormControl><FormMessage /></FormItem> )} />
-                    <FormField control={form.control} name="finalNotes" render={({ field }) => ( <FormItem><FormLabel>Observações Finais</FormLabel><FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Quaisquer notas adicionais sobre o ensaio" /></FormControl><FormMessage /></FormItem> )} />
                 </CardContent>
             </Card>
 
             <Card>
-                <CardHeader><CardTitle className="text-base">8. Anexos Fotográficos</CardTitle></CardHeader>
+                <CardHeader><CardTitle className="text-base">9. Avaliação conforme AWS D1.1</CardTitle></CardHeader>
+                <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <FormField control={form.control} name="awsIndicationClass" render={({ field }) => (
+                        <FormItem><FormLabel>Classe da Indicação</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione o nível" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="Nível A">Nível A</SelectItem>
+                                <SelectItem value="Nível B">Nível B</SelectItem>
+                                <SelectItem value="Nível C">Nível C</SelectItem>
+                                <SelectItem value="Nível D">Nível D</SelectItem>
+                                <SelectItem value="Sem indicação">Sem indicação rejeitável</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="awsResult" render={({ field }) => (
+                        <FormItem><FormLabel>Avaliação Final AWS</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Aceita / Rejeitada" /></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="Aceita">Aceita</SelectItem>
+                                <SelectItem value="Rejeitada">Rejeitada</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="rejectionCriteria" render={({ field }) => (
+                        <FormItem className="md:col-span-2"><FormLabel>Critério de Rejeição Aplicado</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Tabela 6.2, AWS D1.1:2020" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader><CardTitle className="text-base">10. Conclusão</CardTitle></CardHeader>
+                <CardContent className="space-y-4">
+                    <FormField control={form.control} name="finalResult" render={({ field }) => (
+                        <FormItem><FormLabel>Resultado Final</FormLabel>
+                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                                <SelectTrigger><SelectValue placeholder="Selecione"/></SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                                <SelectItem value="Conforme">Conforme</SelectItem>
+                                <SelectItem value="Não Conforme">Não Conforme</SelectItem>
+                            </SelectContent>
+                            </Select><FormMessage />
+                        </FormItem>
+                    )} />
+                    <FormField control={form.control} name="conclusionText" render={({ field }) => (
+                        <FormItem><FormLabel>Texto de Conclusão</FormLabel>
+                            <FormControl><Textarea {...field} value={field.value ?? ''} className="min-h-[120px]"
+                                placeholder="Ex: O ensaio foi executado conforme AWS D1.1:2020, Cláusula 6. Foram avaliadas todas as indicações detectadas utilizando método de avaliação por amplitude relativa ao nível de referência. Nenhuma indicação excedeu os limites de rejeição estabelecidos pela norma. Resultado: CONFORME."
+                            /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                    <FormField control={form.control} name="finalNotes" render={({ field }) => (
+                        <FormItem><FormLabel>Observações Adicionais</FormLabel>
+                            <FormControl><Textarea {...field} value={field.value ?? ''} placeholder="Quaisquer notas adicionais sobre o ensaio" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
+                </CardContent>
+            </Card>
+
+            <Card>
+                <CardHeader>
+                    <CardTitle className="text-base">11. Anexos Fotográficos</CardTitle>
+                    <CardDescription>
+                        Inclua: foto da calibração, tela do equipamento (DAC/Ganho/Alcance), cabeçote, bloco V1 e junta inspecionada.
+                    </CardDescription>
+                </CardHeader>
                 <CardContent>
                      <FormItem>
                         <FormLabel>Registro Fotográfico</FormLabel>
                         <FormControl><Input type="file" multiple accept="image/*" onChange={handlePhotoUpload} /></FormControl>
-                        <FormDescription>Selecione uma ou mais imagens para anexar ao relatório. Imagens grandes podem demorar para salvar.</FormDescription>
+                        <FormDescription>Selecione uma ou mais imagens. Imagens grandes podem demorar para salvar.</FormDescription>
                         {watchedPhotos && watchedPhotos.length > 0 && (
                             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
                                 {watchedPhotos.map((photo, index) => (
