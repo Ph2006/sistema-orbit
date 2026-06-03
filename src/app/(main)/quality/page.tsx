@@ -1352,11 +1352,31 @@ export default function QualityPage() {
           } else {
             inspectionDate = new Date();
           }
+
+          let equipmentCalibrationValidity = null;
+          if (data.equipmentCalibrationValidity) {
+            if (typeof data.equipmentCalibrationValidity.toDate === 'function') {
+              equipmentCalibrationValidity = data.equipmentCalibrationValidity.toDate();
+            } else if (data.equipmentCalibrationValidity instanceof Date) {
+              equipmentCalibrationValidity = data.equipmentCalibrationValidity;
+            }
+          }
+
+          let calibrationBlockValidity = null;
+          if (data.calibrationBlockValidity) {
+            if (typeof data.calibrationBlockValidity.toDate === 'function') {
+              calibrationBlockValidity = data.calibrationBlockValidity.toDate();
+            } else if (data.calibrationBlockValidity instanceof Date) {
+              calibrationBlockValidity = data.calibrationBlockValidity;
+            }
+          }
           
           return {
               id: doc.id,
               ...data,
               inspectionDate,
+              equipmentCalibrationValidity,
+              calibrationBlockValidity,
               orderNumber: order?.number || "N/A",
               itemName: item?.description || "Item não encontrado",
           } as UltrasoundReport;
@@ -2262,10 +2282,12 @@ export default function QualityPage() {
       const dataToSave = {
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
-        equipmentCalibrationValidity: values.equipmentCalibrationValidity ? Timestamp.fromDate(values.equipmentCalibrationValidity) : null,
-        calibrationBlockValidity: values.calibrationBlockValidity ? Timestamp.fromDate(values.calibrationBlockValidity) : null,
-        results: values.results || [],
-        photos: values.photos || [],
+        equipmentCalibrationValidity: values.equipmentCalibrationValidity
+          ? Timestamp.fromDate(values.equipmentCalibrationValidity)
+          : null,
+        calibrationBlockValidity: values.calibrationBlockValidity
+          ? Timestamp.fromDate(values.calibrationBlockValidity)
+          : null,
         qualificationLevel: values.qualificationLevel || null,
         baseMaterial: values.baseMaterial || null,
         heatTreatment: values.heatTreatment || null,
@@ -2290,9 +2312,52 @@ export default function QualityPage() {
         gain: values.gain ?? null,
         distanceCorrection: values.distanceCorrection || null,
         scanRate: values.scanRate ?? null,
-        minResolution: values.minResolution || null,
+        minResolution: values.minResolution ?? null,
         rejectionCriteria: values.rejectionCriteria || null,
         finalNotes: values.finalNotes || null,
+        procedureCode: values.procedureCode || null,
+        procedureRevision: values.procedureRevision || null,
+        serviceOrder: values.serviceOrder || null,
+        purchaseOrder: values.purchaseOrder || null,
+        drawingNumber: values.drawingNumber || null,
+        drawingRevision: values.drawingRevision || null,
+        wpsApplicable: values.wpsApplicable || null,
+        weldJointId: values.weldJointId || null,
+        material: values.material || null,
+        thickness: values.thickness || null,
+        weldingProcess: values.weldingProcess || null,
+        jointType: values.jointType || null,
+        awsCategory: values.awsCategory || null,
+        inspectedLength: values.inspectedLength ?? null,
+        partNumber: values.partNumber || null,
+        executionStandardFull: values.executionStandardFull || null,
+        evaluationMethod: values.evaluationMethod || null,
+        acceptanceTable: values.acceptanceTable || null,
+        equipmentModel: values.equipmentModel || null,
+        equipmentManufacturer: values.equipmentManufacturer || null,
+        equipmentCalibrationCert: values.equipmentCalibrationCert || null,
+        equipmentFrequencyRange: values.equipmentFrequencyRange || null,
+        probeAngle: values.probeAngle ?? null,
+        probeCrystalSize: values.probeCrystalSize || null,
+        probeManufacturer: values.probeManufacturer || null,
+        calibrationBlockType: values.calibrationBlockType || null,
+        calibrationBlockId: values.calibrationBlockId || null,
+        calibrationBlockCert: values.calibrationBlockCert || null,
+        rangeScale: values.rangeScale ?? null,
+        zeroOffset: values.zeroOffset || null,
+        soundVelocity: values.soundVelocity ?? null,
+        referenceGain: values.referenceGain ?? null,
+        evaluationGain: values.evaluationGain || null,
+        dacApplicable: values.dacApplicable ?? null,
+        tcgApplicable: values.tcgApplicable ?? null,
+        transferFactor: values.transferFactor || null,
+        surfaceCorrection: values.surfaceCorrection || null,
+        attenuationApplied: values.attenuationApplied || null,
+        awsIndicationClass: values.awsIndicationClass || null,
+        awsResult: values.awsResult || null,
+        conclusionText: values.conclusionText || null,
+        results: values.results || [],
+        photos: values.photos || [],
       };
 
       // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
@@ -2653,8 +2718,12 @@ export default function QualityPage() {
             ...defaultValues,
             ...report,
             inspectionDate: new Date(report.inspectionDate),
-            equipmentCalibrationValidity: report.equipmentCalibrationValidity ? convertFirestoreDate(report.equipmentCalibrationValidity) : null,
-            calibrationBlockValidity: report.calibrationBlockValidity ? convertFirestoreDate(report.calibrationBlockValidity) : null,
+            equipmentCalibrationValidity: report.equipmentCalibrationValidity
+              ? new Date(report.equipmentCalibrationValidity)
+              : null,
+            calibrationBlockValidity: report.calibrationBlockValidity
+              ? new Date(report.calibrationBlockValidity)
+              : null,
         });
     } else {
         ultrasoundReportForm.reset(defaultValues);
