@@ -56,6 +56,18 @@ const convertFirestoreDate = (dateField: any): Date => {
   }
 };
 
+const removeUndefined = (obj: any): any => {
+  if (Array.isArray(obj)) return obj.map(removeUndefined);
+  if (obj !== null && typeof obj === 'object' && !(obj instanceof Date) && typeof obj.toDate !== 'function') {
+    return Object.fromEntries(
+      Object.entries(obj)
+        .filter(([, v]) => v !== undefined)
+        .map(([k, v]) => [k, removeUndefined(v)])
+    );
+  }
+  return obj;
+};
+
 // === COMPONENTE VISUAL DE INDICADOR DE TAMANHO ===
 const DataSizeIndicator = ({ data, maxSizeKB = 900 }: { data: any, maxSizeKB?: number }) => {
     const currentSizeKB = (JSON.stringify(data).length / 1024);
@@ -1874,6 +1886,106 @@ export default function QualityPage() {
         console.log("✓ Formulário preenchido com dados duplicados");
     };
 
+    const handleDuplicateUltrasoundReport = (originalReport: UltrasoundReport) => {
+      const toDate = (val: any): Date | null => {
+        if (!val) return null;
+        if (typeof val.toDate === 'function') return val.toDate();
+        if (val instanceof Date) return val;
+        if (typeof val === 'string') return new Date(val);
+        return null;
+      };
+
+      setSelectedInspection(null);
+      setDialogType('ultrasound');
+
+      ultrasoundReportForm.reset({
+        orderId: originalReport.orderId || undefined,
+        itemId: originalReport.itemId || undefined,
+        inspectedBy: originalReport.inspectedBy || "",
+        inspectionDate: new Date(),
+        finalResult: originalReport.finalResult || "Conforme",
+        photos: [],
+        results: (originalReport.results || []).map(r => ({ ...r, id: Date.now().toString() + Math.random() })),
+        procedureCode: originalReport.procedureCode || "",
+        procedureRevision: originalReport.procedureRevision || "",
+        serviceOrder: originalReport.serviceOrder || "",
+        purchaseOrder: originalReport.purchaseOrder || "",
+        drawingNumber: originalReport.drawingNumber || "",
+        drawingRevision: originalReport.drawingRevision || "",
+        wpsApplicable: originalReport.wpsApplicable || "",
+        weldJointId: originalReport.weldJointId || "",
+        qualificationLevel: originalReport.qualificationLevel || "",
+        baseMaterial: originalReport.baseMaterial || "",
+        heatTreatment: originalReport.heatTreatment || "",
+        material: originalReport.material || "",
+        thickness: originalReport.thickness || "",
+        weldingProcess: originalReport.weldingProcess || "",
+        jointType: originalReport.jointType || "",
+        awsCategory: originalReport.awsCategory || "",
+        inspectedLength: originalReport.inspectedLength ?? undefined,
+        partNumber: originalReport.partNumber || "",
+        weldTypeAndThickness: originalReport.weldTypeAndThickness || "",
+        examinedAreaDescription: originalReport.examinedAreaDescription || "",
+        quantityInspected: originalReport.quantityInspected ?? undefined,
+        testLocation: originalReport.testLocation || "",
+        executionStandard: originalReport.executionStandard || "AWS D1.1:2020",
+        executionStandardFull: originalReport.executionStandardFull || "AWS D1.1:2020",
+        evaluationMethod: originalReport.evaluationMethod || "Capítulo 6 – Ultrasonic Testing",
+        acceptanceTable: originalReport.acceptanceTable || "Tabela 6.2",
+        acceptanceCriteria: originalReport.acceptanceCriteria || "",
+        examinationType: originalReport.examinationType || undefined,
+        testExtent: originalReport.testExtent || "100%",
+        equipment: originalReport.equipment || "",
+        equipmentModel: originalReport.equipmentModel || "",
+        equipmentSerial: originalReport.equipmentSerial || "",
+        equipmentManufacturer: originalReport.equipmentManufacturer || "",
+        equipmentCalibration: originalReport.equipmentCalibration || "",
+        equipmentCalibrationCert: originalReport.equipmentCalibrationCert || "",
+        equipmentCalibrationValidity: toDate(originalReport.equipmentCalibrationValidity),
+        equipmentFrequencyRange: originalReport.equipmentFrequencyRange || "",
+        headType: originalReport.headType || "",
+        frequency: originalReport.frequency ?? undefined,
+        incidentAngle: originalReport.incidentAngle ?? undefined,
+        probeCrystalSize: originalReport.probeCrystalSize || "",
+        probeManufacturer: originalReport.probeManufacturer || "",
+        couplant: originalReport.couplant || "",
+        referenceBlock: originalReport.referenceBlock || "",
+        calibrationBlockType: originalReport.calibrationBlockType || "V1",
+        calibrationBlockId: originalReport.calibrationBlockId || "",
+        calibrationBlockCert: originalReport.calibrationBlockCert || "",
+        calibrationBlockValidity: toDate(originalReport.calibrationBlockValidity),
+        pulseMode: originalReport.pulseMode || "",
+        rangeScale: originalReport.rangeScale ?? undefined,
+        range: originalReport.range ?? undefined,
+        zeroOffset: originalReport.zeroOffset || "",
+        soundVelocity: originalReport.soundVelocity ?? undefined,
+        referenceGain: originalReport.referenceGain ?? undefined,
+        gain: originalReport.gain ?? undefined,
+        evaluationGain: originalReport.evaluationGain || "+6 dB",
+        distanceCorrection: originalReport.distanceCorrection || "",
+        dacApplicable: originalReport.dacApplicable ?? true,
+        tcgApplicable: originalReport.tcgApplicable ?? false,
+        transferFactor: originalReport.transferFactor || "",
+        surfaceCorrection: originalReport.surfaceCorrection || "",
+        attenuationApplied: originalReport.attenuationApplied || "0 dB",
+        scanRate: originalReport.scanRate ?? undefined,
+        gainSweep: originalReport.gainSweep || "",
+        minResolution: originalReport.minResolution ?? undefined,
+        awsIndicationClass: "",
+        awsResult: undefined,
+        rejectionCriteria: originalReport.rejectionCriteria || "",
+        conclusionText: "",
+        finalNotes: "",
+      });
+
+      setIsInspectionFormOpen(true);
+
+      toast({
+        title: "Relatório duplicado",
+        description: `Relatório ${originalReport.reportNumber} duplicado. Ajuste as indicações e conclusão antes de salvar.`,
+      });
+    };
+
   const onMaterialInspectionSubmit = async (values: z.infer<typeof rawMaterialInspectionSchema>) => {
     try {
       console.log("=== SALVANDO RELATÓRIO DE MATERIAL ===");
@@ -2279,41 +2391,74 @@ export default function QualityPage() {
       console.log("Dados recebidos:", values);
       console.log("Fotos recebidas:", values.photos?.length || 0);
 
-      const dataToSave = {
+      const dataToSave = removeUndefined({
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
         equipmentCalibrationValidity: values.equipmentCalibrationValidity
-          ? Timestamp.fromDate(values.equipmentCalibrationValidity)
-          : null,
+          ? Timestamp.fromDate(values.equipmentCalibrationValidity) : null,
         calibrationBlockValidity: values.calibrationBlockValidity
-          ? Timestamp.fromDate(values.calibrationBlockValidity)
-          : null,
+          ? Timestamp.fromDate(values.calibrationBlockValidity) : null,
+        results: values.results || [],
+        photos: values.photos || [],
         qualificationLevel: values.qualificationLevel || null,
         baseMaterial: values.baseMaterial || null,
         heatTreatment: values.heatTreatment || null,
+        material: values.material || null,
+        thickness: values.thickness || null,
+        weldingProcess: values.weldingProcess || null,
+        jointType: values.jointType || null,
+        awsCategory: values.awsCategory || null,
+        inspectedLength: values.inspectedLength ?? null,
+        partNumber: values.partNumber || null,
         weldTypeAndThickness: values.weldTypeAndThickness || null,
         examinedAreaDescription: values.examinedAreaDescription || null,
         quantityInspected: values.quantityInspected ?? null,
         testLocation: values.testLocation || null,
         executionStandard: values.executionStandard || null,
+        executionStandardFull: values.executionStandardFull || null,
+        evaluationMethod: values.evaluationMethod || null,
+        acceptanceTable: values.acceptanceTable || null,
         acceptanceCriteria: values.acceptanceCriteria || null,
         examinationType: values.examinationType || null,
         testExtent: values.testExtent || null,
         equipment: values.equipment || null,
+        equipmentModel: values.equipmentModel || null,
         equipmentSerial: values.equipmentSerial || null,
+        equipmentManufacturer: values.equipmentManufacturer || null,
         equipmentCalibration: values.equipmentCalibration || null,
+        equipmentCalibrationCert: values.equipmentCalibrationCert || null,
+        equipmentFrequencyRange: values.equipmentFrequencyRange || null,
         headType: values.headType || null,
         frequency: values.frequency ?? null,
         incidentAngle: values.incidentAngle ?? null,
+        probeCrystalSize: values.probeCrystalSize || null,
+        probeManufacturer: values.probeManufacturer || null,
         couplant: values.couplant || null,
         referenceBlock: values.referenceBlock || null,
+        calibrationBlockType: values.calibrationBlockType || null,
+        calibrationBlockId: values.calibrationBlockId || null,
+        calibrationBlockCert: values.calibrationBlockCert || null,
         pulseMode: values.pulseMode || null,
+        rangeScale: values.rangeScale ?? null,
         range: values.range ?? null,
+        zeroOffset: values.zeroOffset || null,
+        soundVelocity: values.soundVelocity ?? null,
+        referenceGain: values.referenceGain ?? null,
         gain: values.gain ?? null,
+        evaluationGain: values.evaluationGain || null,
         distanceCorrection: values.distanceCorrection || null,
+        dacApplicable: values.dacApplicable ?? null,
+        tcgApplicable: values.tcgApplicable ?? null,
+        transferFactor: values.transferFactor || null,
+        surfaceCorrection: values.surfaceCorrection || null,
+        attenuationApplied: values.attenuationApplied || null,
         scanRate: values.scanRate ?? null,
+        gainSweep: values.gainSweep || null,
         minResolution: values.minResolution ?? null,
+        awsIndicationClass: values.awsIndicationClass || null,
+        awsResult: values.awsResult || null,
         rejectionCriteria: values.rejectionCriteria || null,
+        conclusionText: values.conclusionText || null,
         finalNotes: values.finalNotes || null,
         procedureCode: values.procedureCode || null,
         procedureRevision: values.procedureRevision || null,
@@ -2323,42 +2468,7 @@ export default function QualityPage() {
         drawingRevision: values.drawingRevision || null,
         wpsApplicable: values.wpsApplicable || null,
         weldJointId: values.weldJointId || null,
-        material: values.material || null,
-        thickness: values.thickness || null,
-        weldingProcess: values.weldingProcess || null,
-        jointType: values.jointType || null,
-        awsCategory: values.awsCategory || null,
-        inspectedLength: values.inspectedLength ?? null,
-        partNumber: values.partNumber || null,
-        executionStandardFull: values.executionStandardFull || null,
-        evaluationMethod: values.evaluationMethod || null,
-        acceptanceTable: values.acceptanceTable || null,
-        equipmentModel: values.equipmentModel || null,
-        equipmentManufacturer: values.equipmentManufacturer || null,
-        equipmentCalibrationCert: values.equipmentCalibrationCert || null,
-        equipmentFrequencyRange: values.equipmentFrequencyRange || null,
-        probeAngle: values.probeAngle ?? null,
-        probeCrystalSize: values.probeCrystalSize || null,
-        probeManufacturer: values.probeManufacturer || null,
-        calibrationBlockType: values.calibrationBlockType || null,
-        calibrationBlockId: values.calibrationBlockId || null,
-        calibrationBlockCert: values.calibrationBlockCert || null,
-        rangeScale: values.rangeScale ?? null,
-        zeroOffset: values.zeroOffset || null,
-        soundVelocity: values.soundVelocity ?? null,
-        referenceGain: values.referenceGain ?? null,
-        evaluationGain: values.evaluationGain || null,
-        dacApplicable: values.dacApplicable ?? null,
-        tcgApplicable: values.tcgApplicable ?? null,
-        transferFactor: values.transferFactor || null,
-        surfaceCorrection: values.surfaceCorrection || null,
-        attenuationApplied: values.attenuationApplied || null,
-        awsIndicationClass: values.awsIndicationClass || null,
-        awsResult: values.awsResult || null,
-        conclusionText: values.conclusionText || null,
-        results: values.results || [],
-        photos: values.photos || [],
-      };
+      });
 
       // VALIDAÇÃO CRÍTICA DO TAMANHO PARA FIRESTORE
       if (!validateDataSizeBeforeSave(dataToSave)) {
@@ -2634,100 +2744,178 @@ export default function QualityPage() {
   const handleOpenUltrasoundForm = (report: UltrasoundReport | null = null, order: OrderInfo | null = selectedOrderForInspections) => {
     setSelectedInspection(report);
     setDialogType('ultrasound');
+
     const defaultValues = {
-        orderId: order?.id || undefined,
-        inspectionDate: new Date(),
-        finalResult: "Conforme" as const,
-        photos: [],
-        results: [],
-        qualificationLevel: "",
-        baseMaterial: "",
-        heatTreatment: "Normalizado",
-        weldTypeAndThickness: "",
-        examinedAreaDescription: "",
-        quantityInspected: undefined,
-        testLocation: "Produção",
-        executionStandard: "AWSD1.1/2020",
-        acceptanceCriteria: "Dinâmica",
-        examinationType: undefined,
-        testExtent: "100%",
-        equipment: "Mitech - Detector de falhas MFD350",
-        equipmentSerial: "FD22081501",
-        equipmentCalibration: "2895 / 3585/25",
-        headType: "Angular",
-        frequency: undefined,
-        incidentAngle: undefined,
-        couplant: "",
-        referenceBlock: "",
-        pulseMode: "",
-        range: undefined,
-        gain: undefined,
-        distanceCorrection: "",
-        scanRate: 3250,
-        gainSweep: "20 DB",
-        minResolution: undefined,
-        rejectionCriteria: "",
-        finalNotes: "",
-        procedureCode: "",
-        procedureRevision: "",
-        serviceOrder: "",
-        purchaseOrder: "",
-        drawingNumber: "",
-        drawingRevision: "",
-        wpsApplicable: "",
-        weldJointId: "",
-        material: "",
-        thickness: "",
-        weldingProcess: "",
-        jointType: "",
-        awsCategory: "",
-        inspectedLength: undefined,
-        partNumber: "",
-        executionStandardFull: "AWS D1.1:2020",
-        evaluationMethod: "Capítulo 6 – Ultrasonic Testing",
-        acceptanceTable: "Tabela 6.2",
-        equipmentModel: "",
-        equipmentManufacturer: "",
-        equipmentCalibrationCert: "",
-        equipmentCalibrationValidity: null,
-        equipmentFrequencyRange: "",
-        probeAngle: undefined,
-        probeCrystalSize: "",
-        probeManufacturer: "",
-        calibrationBlockType: "V1",
-        calibrationBlockId: "",
-        calibrationBlockCert: "",
-        calibrationBlockValidity: null,
-        rangeScale: undefined,
-        zeroOffset: "",
-        soundVelocity: undefined,
-        referenceGain: undefined,
-        evaluationGain: "+6 dB",
-        dacApplicable: true,
-        tcgApplicable: false,
-        transferFactor: "",
-        surfaceCorrection: "",
-        attenuationApplied: "0 dB",
-        awsIndicationClass: "",
-        awsResult: undefined,
-        conclusionText: "",
+      orderId: order?.id || undefined,
+      inspectionDate: new Date(),
+      finalResult: "Conforme" as const,
+      photos: [],
+      results: [],
+      procedureCode: "",
+      procedureRevision: "",
+      serviceOrder: "",
+      purchaseOrder: "",
+      drawingNumber: "",
+      drawingRevision: "",
+      wpsApplicable: "",
+      weldJointId: "",
+      qualificationLevel: "",
+      baseMaterial: "",
+      heatTreatment: "",
+      material: "",
+      thickness: "",
+      weldingProcess: "",
+      jointType: "",
+      awsCategory: "",
+      inspectedLength: undefined,
+      partNumber: "",
+      weldTypeAndThickness: "",
+      examinedAreaDescription: "",
+      quantityInspected: undefined,
+      testLocation: "",
+      executionStandard: "AWS D1.1:2020",
+      executionStandardFull: "AWS D1.1:2020",
+      evaluationMethod: "Capítulo 6 – Ultrasonic Testing",
+      acceptanceTable: "Tabela 6.2",
+      acceptanceCriteria: "",
+      examinationType: undefined,
+      testExtent: "100%",
+      equipment: "",
+      equipmentModel: "",
+      equipmentSerial: "",
+      equipmentManufacturer: "",
+      equipmentCalibration: "",
+      equipmentCalibrationCert: "",
+      equipmentCalibrationValidity: null,
+      equipmentFrequencyRange: "",
+      headType: "",
+      frequency: undefined,
+      incidentAngle: undefined,
+      probeCrystalSize: "",
+      probeManufacturer: "",
+      couplant: "",
+      referenceBlock: "",
+      calibrationBlockType: "V1",
+      calibrationBlockId: "",
+      calibrationBlockCert: "",
+      calibrationBlockValidity: null,
+      pulseMode: "",
+      rangeScale: undefined,
+      range: undefined,
+      zeroOffset: "",
+      soundVelocity: undefined,
+      referenceGain: undefined,
+      gain: undefined,
+      evaluationGain: "+6 dB",
+      distanceCorrection: "",
+      dacApplicable: true,
+      tcgApplicable: false,
+      transferFactor: "",
+      surfaceCorrection: "",
+      attenuationApplied: "0 dB",
+      scanRate: undefined,
+      gainSweep: "",
+      minResolution: undefined,
+      awsIndicationClass: "",
+      awsResult: undefined,
+      rejectionCriteria: "",
+      conclusionText: "",
+      finalNotes: "",
     };
 
     if (report) {
-        ultrasoundReportForm.reset({
-            ...defaultValues,
-            ...report,
-            inspectionDate: new Date(report.inspectionDate),
-            equipmentCalibrationValidity: report.equipmentCalibrationValidity
-              ? new Date(report.equipmentCalibrationValidity)
-              : null,
-            calibrationBlockValidity: report.calibrationBlockValidity
-              ? new Date(report.calibrationBlockValidity)
-              : null,
-        });
+      const toDate = (val: any): Date | null => {
+        if (!val) return null;
+        if (typeof val.toDate === 'function') return val.toDate();
+        if (val instanceof Date) return val;
+        if (typeof val === 'string') return new Date(val);
+        return null;
+      };
+
+      ultrasoundReportForm.reset({
+        ...defaultValues,
+        orderId: report.orderId || defaultValues.orderId,
+        itemId: report.itemId || undefined,
+        inspectedBy: report.inspectedBy || "",
+        inspectionDate: toDate(report.inspectionDate) || new Date(),
+        finalResult: report.finalResult || "Conforme",
+        photos: report.photos || [],
+        results: report.results || [],
+        procedureCode: report.procedureCode || "",
+        procedureRevision: report.procedureRevision || "",
+        serviceOrder: report.serviceOrder || "",
+        purchaseOrder: report.purchaseOrder || "",
+        drawingNumber: report.drawingNumber || "",
+        drawingRevision: report.drawingRevision || "",
+        wpsApplicable: report.wpsApplicable || "",
+        weldJointId: report.weldJointId || "",
+        qualificationLevel: report.qualificationLevel || "",
+        baseMaterial: report.baseMaterial || "",
+        heatTreatment: report.heatTreatment || "",
+        material: report.material || "",
+        thickness: report.thickness || "",
+        weldingProcess: report.weldingProcess || "",
+        jointType: report.jointType || "",
+        awsCategory: report.awsCategory || "",
+        inspectedLength: report.inspectedLength ?? undefined,
+        partNumber: report.partNumber || "",
+        weldTypeAndThickness: report.weldTypeAndThickness || "",
+        examinedAreaDescription: report.examinedAreaDescription || "",
+        quantityInspected: report.quantityInspected ?? undefined,
+        testLocation: report.testLocation || "",
+        executionStandard: report.executionStandard || "AWS D1.1:2020",
+        executionStandardFull: report.executionStandardFull || "AWS D1.1:2020",
+        evaluationMethod: report.evaluationMethod || "Capítulo 6 – Ultrasonic Testing",
+        acceptanceTable: report.acceptanceTable || "Tabela 6.2",
+        acceptanceCriteria: report.acceptanceCriteria || "",
+        examinationType: report.examinationType || undefined,
+        testExtent: report.testExtent || "100%",
+        equipment: report.equipment || "",
+        equipmentModel: report.equipmentModel || "",
+        equipmentSerial: report.equipmentSerial || "",
+        equipmentManufacturer: report.equipmentManufacturer || "",
+        equipmentCalibration: report.equipmentCalibration || "",
+        equipmentCalibrationCert: report.equipmentCalibrationCert || "",
+        equipmentCalibrationValidity: toDate(report.equipmentCalibrationValidity),
+        equipmentFrequencyRange: report.equipmentFrequencyRange || "",
+        headType: report.headType || "",
+        frequency: report.frequency ?? undefined,
+        incidentAngle: report.incidentAngle ?? undefined,
+        probeCrystalSize: report.probeCrystalSize || "",
+        probeManufacturer: report.probeManufacturer || "",
+        couplant: report.couplant || "",
+        referenceBlock: report.referenceBlock || "",
+        calibrationBlockType: report.calibrationBlockType || "V1",
+        calibrationBlockId: report.calibrationBlockId || "",
+        calibrationBlockCert: report.calibrationBlockCert || "",
+        calibrationBlockValidity: toDate(report.calibrationBlockValidity),
+        pulseMode: report.pulseMode || "",
+        rangeScale: report.rangeScale ?? undefined,
+        range: report.range ?? undefined,
+        zeroOffset: report.zeroOffset || "",
+        soundVelocity: report.soundVelocity ?? undefined,
+        referenceGain: report.referenceGain ?? undefined,
+        gain: report.gain ?? undefined,
+        evaluationGain: report.evaluationGain || "+6 dB",
+        distanceCorrection: report.distanceCorrection || "",
+        dacApplicable: report.dacApplicable ?? true,
+        tcgApplicable: report.tcgApplicable ?? false,
+        transferFactor: report.transferFactor || "",
+        surfaceCorrection: report.surfaceCorrection || "",
+        attenuationApplied: report.attenuationApplied || "0 dB",
+        scanRate: report.scanRate ?? undefined,
+        gainSweep: report.gainSweep || "",
+        minResolution: report.minResolution ?? undefined,
+        awsIndicationClass: report.awsIndicationClass || "",
+        awsResult: report.awsResult || undefined,
+        rejectionCriteria: report.rejectionCriteria || "",
+        conclusionText: report.conclusionText || "",
+        finalNotes: report.finalNotes || "",
+      });
     } else {
-        ultrasoundReportForm.reset(defaultValues);
+      ultrasoundReportForm.reset(defaultValues);
     }
+
     setIsInspectionFormOpen(true);
   };
 
@@ -4257,9 +4445,35 @@ export default function QualityPage() {
                                             <TableCell><Badge variant={getStatusVariant(rep.finalResult)}>{rep.finalResult}</Badge></TableCell>
                                             <TableCell>{rep.inspectedBy}</TableCell>
                                             <TableCell className="text-right">
-                                                <Button variant="ghost" size="icon" onClick={() => handleUltrasoundReportPDF(rep)}><FileDown className="h-4 w-4" /></Button>
-                                                <Button variant="ghost" size="icon" onClick={() => handleOpenUltrasoundForm(rep)}><Pencil className="h-4 w-4" /></Button>
-                                                <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDeleteInspectionClick(rep, 'ultrasound')}><Trash2 className="h-4 w-4" /></Button>
+                                              <DropdownMenu>
+                                                <DropdownMenuTrigger asChild>
+                                                  <Button variant="ghost" size="icon">
+                                                    <MoreVertical className="h-4 w-4" />
+                                                  </Button>
+                                                </DropdownMenuTrigger>
+                                                <DropdownMenuContent align="end">
+                                                  <DropdownMenuItem onClick={() => handleUltrasoundReportPDF(rep)}>
+                                                    <FileDown className="mr-2 h-4 w-4" />
+                                                    Exportar PDF
+                                                  </DropdownMenuItem>
+                                                  <DropdownMenuItem onClick={() => handleOpenUltrasoundForm(rep)}>
+                                                    <Pencil className="mr-2 h-4 w-4" />
+                                                    Editar
+                                                  </DropdownMenuItem>
+                                                  <DropdownMenuItem onClick={() => handleDuplicateUltrasoundReport(rep)}>
+                                                    <Plus className="mr-2 h-4 w-4" />
+                                                    Duplicar Relatório
+                                                  </DropdownMenuItem>
+                                                  <DropdownMenuSeparator />
+                                                  <DropdownMenuItem
+                                                    onClick={() => handleDeleteInspectionClick(rep, 'ultrasound')}
+                                                    className="text-destructive"
+                                                  >
+                                                    <Trash2 className="mr-2 h-4 w-4" />
+                                                    Excluir
+                                                  </DropdownMenuItem>
+                                                </DropdownMenuContent>
+                                              </DropdownMenu>
                                             </TableCell>
                                         </TableRow>
                                     )) : <TableRow><TableCell colSpan={6} className="h-24 text-center">Nenhum relatório de ultrassom para este pedido.</TableCell></TableRow>}
