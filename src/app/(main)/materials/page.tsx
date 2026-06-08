@@ -1028,7 +1028,7 @@ export default function MaterialsPage() {
             docPdf.text(`Cliente: ${customerName}`, pageWidth - 15, subheaderY + 5, { align: 'right' });
             docPdf.text(`Entrega do Pedido: ${orderDeliveryDate}`, pageWidth - 15, subheaderY + 10, { align: 'right' });
 
-            const head = [['Cód.', 'Descrição', 'Dimensão', 'Material', 'Qtd.', 'Peso Unit. (kg)', 'Entrega Prev.', 'Status']];
+            const head = [['Cód.', 'Descrição', 'Dimensão', 'Material', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)', 'Entrega Prev.', 'Status']];
             const body = requisitionToExport.items.map(item => {
                 // Função para conversão segura de data
                 const formatDeliveryDate = (date: any) => {
@@ -1063,13 +1063,39 @@ export default function MaterialsPage() {
                     item.material || '-', 
                     item.quantityRequested.toString(), 
                     (item.pesoUnitario || 0).toFixed(2), 
+                    ((item.pesoUnitario || 0) * (item.quantityRequested || 0)).toFixed(2),
                     formatDeliveryDate(item.deliveryDate), 
                     item.status || 'Pendente'
                 ];
             });
-            autoTable(docPdf, { startY: 55, head, body, styles: { fontSize: 8 }, headStyles: { fillColor: [40, 40, 40] }, columnStyles: { 0: { cellWidth: 20 }, 1: { cellWidth: 'auto' }, 2: { cellWidth: 40 }, 3: { cellWidth: 30 }, 4: { cellWidth: 20, halign: 'center' }, 5: { cellWidth: 25, halign: 'center' }, 6: { cellWidth: 25, halign: 'center' }, 7: { cellWidth: 40 }, } });
+            autoTable(docPdf, { 
+                startY: 55, 
+                head, 
+                body, 
+                styles: { fontSize: 8 }, 
+                headStyles: { fillColor: [40, 40, 40] }, 
+                columnStyles: {
+                    0: { cellWidth: 20 },
+                    1: { cellWidth: 'auto' },
+                    2: { cellWidth: 35 },
+                    3: { cellWidth: 25 },
+                    4: { cellWidth: 15, halign: 'center' },
+                    5: { cellWidth: 25, halign: 'center' },
+                    6: { cellWidth: 25, halign: 'center' }, // Peso Total (novo)
+                    7: { cellWidth: 25, halign: 'center' },
+                    8: { cellWidth: 35 },
+                } 
+            });
 
             let finalY = (docPdf as any).lastAutoTable.finalY + 10;
+            const pesoTotal = requisitionToExport.items.reduce((sum, item) => {
+                return sum + ((item.pesoUnitario || 0) * (item.quantityRequested || 0));
+            }, 0);
+
+            docPdf.setFontSize(10).setFont(undefined, 'bold');
+            docPdf.text(`Peso Total da Requisição: ${pesoTotal.toFixed(2)} kg`, pageWidth - 15, finalY, { align: 'right' });
+            finalY += 10;
+
             if (requisitionToExport.generalNotes) {
                 docPdf.setFontSize(10).setFont(undefined, 'bold');
                 docPdf.text('Observações Gerais:', 15, finalY);
