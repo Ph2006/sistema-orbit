@@ -69,7 +69,7 @@ const calculateLeadTime = (product: Product): number => {
     return total + (stage.durationDays || 0);
   }, 0);
   
-  return Math.round(totalDays); // Arredonda para número inteiro
+  return Math.round(totalDays);
 };
 
 // Função para obter badge de lead time com cor baseada na duração
@@ -319,57 +319,48 @@ const exportCalculatorReportPDF = (
     return;
   }
 
-  // Criar um elemento canvas para gerar o PDF
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
 
-  // Configurações do PDF
-  const pageWidth = 595; // A4 width em pontos
-  const pageHeight = 842; // A4 height em pontos
+  const pageWidth = 595;
+  const pageHeight = 842;
   const margin = 40;
   const lineHeight = 20;
   
   canvas.width = pageWidth;
   canvas.height = pageHeight;
   
-  // Configurar fonte
   ctx.fillStyle = '#000000';
   ctx.font = '12px Arial';
   
   let currentY = margin;
   
-  // Função auxiliar para adicionar texto
   const addText = (text: string, x: number = margin, fontSize: number = 12, isBold: boolean = false) => {
     ctx.font = `${isBold ? 'bold ' : ''}${fontSize}px Arial`;
     ctx.fillText(text, x, currentY);
     currentY += lineHeight * (fontSize / 12);
   };
   
-  // Função auxiliar para quebrar linha
   const addLine = () => {
     currentY += lineHeight / 2;
   };
 
-  // Cabeçalho
   addText('MECALD - RELATÓRIO DE ANÁLISE DE PRAZOS', margin, 16, true);
   addText(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, margin, 10);
   addLine();
   
-  // Linha horizontal
   ctx.beginPath();
   ctx.moveTo(margin, currentY);
   ctx.lineTo(pageWidth - margin, currentY);
   ctx.stroke();
   currentY += lineHeight;
   
-  // Dados da solicitação
   addText('DADOS DA SOLICITAÇÃO', margin, 14, true);
   addText(`Data de entrega solicitada: ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}`);
   addText(`Quantidade de itens: ${calculatorItems.length}`);
   addLine();
   
-  // Lista de produtos
   addText('PRODUTOS ANALISADOS', margin, 14, true);
   calculatorItems.forEach((item, index) => {
     addText(`${index + 1}. ${item.productCode} - ${item.productDescription}`);
@@ -383,7 +374,6 @@ const exportCalculatorReportPDF = (
   });
   addLine();
   
-  // Resultados da análise
   if (calculatorResults) {
     addText('RESULTADO DA ANÁLISE', margin, 14, true);
     addText(`Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}`, margin, 12, true);
@@ -401,7 +391,6 @@ const exportCalculatorReportPDF = (
     });
     addLine();
     
-    // Recomendações
     addText('RECOMENDAÇÕES', margin, 14, true);
     if (!calculatorResults.isViable) {
       addText('• Prazo inviável para a data solicitada', margin, 11);
@@ -416,7 +405,6 @@ const exportCalculatorReportPDF = (
     }
   }
   
-  // Converter canvas para blob e fazer download
   canvas.toBlob((blob) => {
     if (blob) {
       const url = URL.createObjectURL(blob);
@@ -445,6 +433,9 @@ export default function ProductsPage() {
   const [isLoadingStages, setIsLoadingStages] = useState(true);
   const [newStageName, setNewStageName] = useState("");
   const [activeTab, setActiveTab] = useState("catalog");
+
+  // ─── NOVO: conjunto de códigos com precificação salva ───────────────────────
+  const [savedPricingCodes, setSavedPricingCodes] = useState<Set<string>>(new Set());
 
   // Estados da calculadora de prazos
   const [calculatorItems, setCalculatorItems] = useState<Array<{
@@ -475,17 +466,16 @@ export default function ProductsPage() {
     confidence: number;
   } | null>(null);
   
-  // Simulação de carga de trabalho por setor (em uma implementação real, isso viria do banco de dados)
   const [sectorWorkload, setSectorWorkload] = useState<Record<string, number>>({});
 
     // Estados da calculadora de preços
     const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
-    const [machineHourRate, setMachineHourRate] = useState<number>(150); // R$/hora
-    const [consumablesCostPerKg, setConsumablesCostPerKg] = useState<number>(0); // NOVO
+    const [machineHourRate, setMachineHourRate] = useState<number>(150);
+    const [consumablesCostPerKg, setConsumablesCostPerKg] = useState<number>(0);
     const [selectedProductForPricing, setSelectedProductForPricing] = useState<Product | null>(null);
     const [pricingCalculation, setPricingCalculation] = useState<PricingCalculation | null>(null);
     const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
-    const [profitMargin, setProfitMargin] = useState<number>(30); // percentual
+    const [profitMargin, setProfitMargin] = useState<number>(30);
     const [machiningHours, setMachiningHours] = useState<number>(0);
     const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
     
@@ -498,22 +488,18 @@ export default function ProductsPage() {
 
   // Combinar materiais padrão com personalizados
   const allMaterials = useMemo(() => {
-    // Materiais marcados como deletados
     const deletedIds = customMaterials
       .filter((m: any) => m.deleted === true)
       .map(m => m.id);
     
-    // IDs de materiais padrão que foram customizados
     const customizedDefaultIds = customMaterials
       .filter((m: any) => m.deleted !== true && DEFAULT_MATERIALS.some(dm => dm.id === m.id))
       .map(m => m.id);
     
-    // Filtrar materiais padrão: remover deletados e customizados
     const filteredDefaults = DEFAULT_MATERIALS.filter(
       m => !deletedIds.includes(m.id) && !customizedDefaultIds.includes(m.id)
     );
     
-    // Materiais personalizados (excluir os marcados como deleted)
     const activeCustom = customMaterials.filter((m: any) => m.deleted !== true);
     
     return [...filteredDefaults, ...activeCustom];
@@ -523,13 +509,11 @@ export default function ProductsPage() {
   const simulateSectorWorkload = useCallback(() => {
     const workload: Record<string, number> = {};
     manufacturingStages.forEach(stage => {
-      // Simula uma carga entre 0% e 95% para cada setor
       workload[stage] = Math.random() * 0.95;
     });
     setSectorWorkload(workload);
   }, [manufacturingStages]);
 
-  // Gera carga de trabalho inicial
   useEffect(() => {
     if (manufacturingStages.length > 0) {
       simulateSectorWorkload();
@@ -546,7 +530,6 @@ export default function ProductsPage() {
   const [isDeleteStageDialogOpen, setIsDeleteStageDialogOpen] = useState(false);
   const [stageToDeleteConfirmation, setStageToDeleteConfirmation] = useState<string | null>(null);
 
-  // Estados para drag and drop
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null);
 
@@ -660,6 +643,65 @@ export default function ProductsPage() {
     }
   }, []);
 
+  // ─── NOVO: busca todos os códigos que já têm precificação salva ─────────────
+  const fetchSavedPricingCodes = useCallback(async () => {
+    try {
+      const snap = await getDocs(collection(db, "companies", "mecald", "pricingCalculations"));
+      setSavedPricingCodes(new Set(snap.docs.map(d => d.id)));
+    } catch (error) {
+      console.error("Error fetching saved pricing codes:", error);
+    }
+  }, []);
+
+  // ─── NOVO: salva o resultado da precificação no Firestore ───────────────────
+  const savePricingCalculation = useCallback(async (
+    calculation: PricingCalculation,
+    composition: MaterialCompositionItem[],
+    hours: number
+  ) => {
+    try {
+      const docRef = doc(db, "companies", "mecald", "pricingCalculations", calculation.productCode);
+      await setDoc(docRef, {
+        ...calculation,
+        materialComposition: composition,
+        machiningHours: hours,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      }, { merge: true });
+      setSavedPricingCodes(prev => new Set([...prev, calculation.productCode]));
+      toast({ title: "Precificação salva!", description: "Os dados foram armazenados e serão carregados automaticamente." });
+    } catch (error) {
+      console.error("Error saving pricing calculation:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar precificação" });
+    }
+  }, [toast]);
+
+  // ─── NOVO: carrega precificação salva ao selecionar produto ────────────────
+  const loadSavedPricing = useCallback(async (productCode: string) => {
+    try {
+      const docRef = doc(db, "companies", "mecald", "pricingCalculations", productCode);
+      const snap = await getDoc(docRef);
+      if (snap.exists()) {
+        const data = snap.data();
+        const composition: MaterialCompositionItem[] = data.materialComposition || [];
+        setMaterialComposition(composition);
+        setPricingCalculation(data as PricingCalculation);
+        setProfitMargin(data.profitMargin ?? 30);
+        setMachiningHours(data.machiningHours ?? 0);
+        toast({
+          title: "Precificação carregada!",
+          description: `Dados anteriores de ${productCode} recuperados.`,
+        });
+      } else {
+        setMaterialComposition([]);
+        setPricingCalculation(null);
+        setMachiningHours(0);
+      }
+    } catch (error) {
+      console.error("Error loading saved pricing:", error);
+    }
+  }, [toast]);
+
   const saveMaterial = async (values: z.infer<typeof materialSchema>) => {
     try {
       const materialId = values.id || `custom-${Date.now()}`;
@@ -672,24 +714,18 @@ export default function ProductsPage() {
       let isDefaultMaterial = false;
 
       if (materialToEdit) {
-        // Verificar se é um material padrão sendo editado
         const isDefault = DEFAULT_MATERIALS.some(m => m.id === materialToEdit.id);
         
         if (isDefault) {
-          // Se editar um material padrão, adicionar às customizações
           isDefaultMaterial = true;
-          // Remove se já existia nas customizações
           updatedCustomMaterials = updatedCustomMaterials.filter(m => m.id !== materialToEdit.id);
-          // Adiciona a versão editada
           updatedCustomMaterials.push(newMaterial);
         } else {
-          // Editar material personalizado existente
           updatedCustomMaterials = updatedCustomMaterials.map(m => 
             m.id === materialToEdit.id ? newMaterial : m
           );
         }
       } else {
-        // Adicionar novo material
         updatedCustomMaterials.push(newMaterial);
       }
 
@@ -722,7 +758,6 @@ export default function ProductsPage() {
       let updatedCustomMaterials = [...customMaterials];
       
       if (isDefault) {
-        // Para materiais padrão, adicionar às customizações marcado como "deleted"
         const hiddenMaterial = { 
           ...DEFAULT_MATERIALS.find(m => m.id === materialId)!,
           deleted: true 
@@ -730,7 +765,6 @@ export default function ProductsPage() {
         updatedCustomMaterials = updatedCustomMaterials.filter(m => m.id !== materialId);
         updatedCustomMaterials.push(hiddenMaterial as any);
       } else {
-        // Para materiais personalizados, remover completamente
         updatedCustomMaterials = updatedCustomMaterials.filter(m => m.id !== materialId);
       }
       
@@ -774,8 +808,9 @@ export default function ProductsPage() {
       fetchProducts();
       fetchStages();
       fetchCustomMaterials();
+      fetchSavedPricingCodes(); // ─── NOVO ───
     }
-  }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials]);
+  }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials, fetchSavedPricingCodes]);
   
   const syncCatalog = useCallback(async () => {
     setIsSyncing(true);
@@ -927,11 +962,9 @@ export default function ProductsPage() {
   };
   
   const handleDuplicateClick = (product: Product) => {
-    // Gera um novo código baseado no original
     const originalCode = product.code;
     const duplicatedCode = `${originalCode}_COPIA`;
     
-    // Verifica se já existe um produto com esse código
     let finalCode = duplicatedCode;
     let counter = 1;
     while (products.some(p => p.code === finalCode)) {
@@ -939,7 +972,7 @@ export default function ProductsPage() {
       counter++;
     }
     
-    setSelectedProduct(null); // Limpa a seleção para criar um novo produto
+    setSelectedProduct(null);
     const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
         ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
         : []);
@@ -1011,13 +1044,11 @@ export default function ProductsPage() {
     setIsCopyPopoverOpen(false);
   };
 
-  // Funções de drag and drop para reordenar etapas
   const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
     setDraggedIndex(index);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/html', e.currentTarget.outerHTML);
     
-    // Efeito visual sutil
     setTimeout(() => {
       if (e.currentTarget) {
         e.currentTarget.style.opacity = '0.5';
@@ -1046,15 +1077,12 @@ export default function ProductsPage() {
     const newStages = [...manufacturingStages];
     const draggedItem = newStages[draggedIndex];
     
-    // Remove o item da posição original
     newStages.splice(draggedIndex, 1);
     
-    // Insere na nova posição
     const insertIndex = draggedIndex < dropIndex ? dropIndex - 1 : dropIndex;
     newStages.splice(insertIndex, 0, draggedItem);
     
     try {
-      // Atualiza no Firebase
       await updateDoc(stagesDocRef, { stages: newStages });
       toast({ title: "Ordem das etapas atualizada!" });
       await fetchStages(); 
@@ -1064,7 +1092,6 @@ export default function ProductsPage() {
     }
   }, [draggedIndex, manufacturingStages, stagesDocRef, fetchStages, toast]);
 
-  // Componente de item de etapa arrastável
   const DraggableStageItem = ({ stage, index, onEdit, onDelete, isDragging }: {
     stage: string;
     index: number;
@@ -1196,7 +1223,6 @@ export default function ProductsPage() {
     }
   };
 
-  // Estatísticas do lead time para o dashboard
   const leadTimeStats = useMemo(() => {
     if (products.length === 0) return { avgLeadTime: 0, maxLeadTime: 0, productsWithLeadTime: 0 };
     
@@ -1213,7 +1239,6 @@ export default function ProductsPage() {
     };
   }, [products]);
 
-  // Função para adicionar item à calculadora
   const addItemToCalculator = () => {
     if (!selectedProductForCalculator || calculatorQuantity <= 0) {
       toast({
@@ -1242,12 +1267,10 @@ export default function ProductsPage() {
     setCalculatorQuantity(1);
   };
 
-  // Função para remover item da calculadora
   const removeItemFromCalculator = (id: string) => {
     setCalculatorItems(prev => prev.filter(item => item.id !== id));
   };
 
-  // Algoritmo MELHORADO de cálculo de viabilidade - mais realista
   const calculateFeasibility = () => {
     if (calculatorItems.length === 0) {
       toast({
@@ -1258,7 +1281,6 @@ export default function ProductsPage() {
       return;
     }
 
-    // Consolida todas as etapas de todos os itens (corrigido para considerar paralelismo)
     const stageMaxDuration: Record<string, number> = {};
     
     calculatorItems.forEach(item => {
@@ -1271,7 +1293,6 @@ export default function ProductsPage() {
       });
     });
 
-    // NOVA LÓGICA: identifica o produto crítico (maior lead time individual)
     const baseLeadTime = Math.max(...calculatorItems.map(item => {
       return item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
     }));
@@ -1280,7 +1301,6 @@ export default function ProductsPage() {
       return itemLeadTime === baseLeadTime;
     });
 
-    // Se não houver produto, aborta
     if (!longestProductItem) {
       toast({
         variant: "destructive",
@@ -1290,7 +1310,6 @@ export default function ProductsPage() {
       return;
     }
 
-    // Analisa apenas as etapas do produto crítico
     const analysis = longestProductItem.stages.map((stage) => {
       const currentWorkload = sectorWorkload[stage.stageName] || 0;
       let adjustmentFactor = 1;
@@ -1319,18 +1338,14 @@ export default function ProductsPage() {
       };
     });
 
-    // Lead time ajustado = soma das etapas do produto crítico com ajustes
     let totalAdjustedLeadTime = analysis.reduce((sum, stage) => sum + stage.adjustedDuration, 0);
 
-    // Data sugerida baseada no lead time ajustado
     const suggestedDate = new Date();
     suggestedDate.setDate(suggestedDate.getDate() + totalAdjustedLeadTime);
 
-    // Verifica se é viável para a data solicitada
     const daysUntilRequested = Math.ceil((requestedDeliveryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
     const isViable = daysUntilRequested >= totalAdjustedLeadTime;
 
-    // Calcula confiança de forma mais criteriosa
     let confidence = 90;
     const avgWorkload = analysis.reduce((sum, a) => sum + a.workload, 0) / analysis.length;
     confidence -= avgWorkload * 60;
@@ -1355,7 +1370,6 @@ export default function ProductsPage() {
     });
   };
 
-  // Função para limpar a calculadora
   const clearCalculator = () => {
     setCalculatorItems([]);
     setCalculatorResults(null);
@@ -1363,7 +1377,6 @@ export default function ProductsPage() {
     setCalculatorQuantity(1);
   };
 
-  // Função para exportar catálogo em Excel
   const exportCatalogToExcel = () => {
     if (filteredProducts.length === 0) {
       toast({
@@ -1386,13 +1399,12 @@ export default function ProductsPage() {
 
     const ws = XLSX.utils.json_to_sheet(data);
 
-    // Ajustar largura das colunas
     ws["!cols"] = [
-      { wch: 20 }, // Código
-      { wch: 50 }, // Descrição
-      { wch: 18 }, // Preço
-      { wch: 18 }, // Peso
-      { wch: 16 }, // Lead Time
+      { wch: 20 },
+      { wch: 50 },
+      { wch: 18 },
+      { wch: 18 },
+      { wch: 16 },
     ];
 
     const wb = XLSX.utils.book_new();
@@ -1407,7 +1419,6 @@ export default function ProductsPage() {
     });
   };
 
-  // Função para exportar relatório em PDF melhorado
   const handleExportReport = () => {
     if (calculatorItems.length === 0) {
       toast({
@@ -1418,7 +1429,6 @@ export default function ProductsPage() {
       return;
     }
 
-    // Usar biblioteca HTML para PDF ao invés de canvas
     const printWindow = window.open('', '_blank');
     if (!printWindow) return;
 
@@ -1440,7 +1450,6 @@ export default function ProductsPage() {
             .result-box { padding: 20px; border: 2px solid #ddd; border-radius: 10px; text-align: center; margin: 20px 0; }
             .viable { border-color: #16a34a; background-color: #f0fdf4; }
             .not-viable { border-color: #dc2626; background-color: #fef2f2; }
-            .stage-analysis { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 10px 0; }
             .bottleneck { color: #dc2626; font-weight: bold; }
             .recommendation { padding: 15px; margin: 10px 0; border-radius: 5px; }
             .rec-danger { background-color: #fef2f2; border-left: 4px solid #dc2626; }
@@ -1449,10 +1458,7 @@ export default function ProductsPage() {
             table { width: 100%; border-collapse: collapse; margin: 10px 0; }
             th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
             th { background-color: #f5f5f5; }
-            @media print { 
-              .no-print { display: none; } 
-              body { margin: 0; }
-            }
+            @media print { .no-print { display: none; } body { margin: 0; } }
           </style>
         </head>
         <body>
@@ -1527,19 +1533,15 @@ export default function ProductsPage() {
               ${!calculatorResults.isViable ? `
                 <div class="recommendation rec-danger">
                   <strong>⚠️ Prazo Inviável</strong><br>
-                  O prazo solicitado não pode ser cumprido com a capacidade atual. 
-                  Recomenda-se reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })} ou posterior.
+                  O prazo solicitado não pode ser cumprido. Recomenda-se reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })} ou posterior.
                 </div>
               ` : ''}
-              
               ${calculatorResults.confidence < 70 ? `
                 <div class="recommendation rec-warning">
                   <strong>⚠️ Baixa Confiança (${calculatorResults.confidence}%)</strong><br>
-                  A alta carga dos setores produtivos pode causar atrasos. 
-                  Recomenda-se monitoramento constante e planos de contingência.
+                  A alta carga dos setores produtivos pode causar atrasos. Recomenda-se monitoramento constante e planos de contingência.
                 </div>
               ` : ''}
-              
               ${calculatorResults.analysis.some(a => a.bottleneck) ? `
                 <div class="recommendation rec-warning">
                   <strong>🚨 Gargalos Identificados</strong><br>
@@ -1548,12 +1550,10 @@ export default function ProductsPage() {
                   Considere: realocação de recursos, horas extras, terceirização ou renegociação de prazos.
                 </div>
               ` : ''}
-              
               ${calculatorResults.isViable && calculatorResults.confidence >= 70 ? `
                 <div class="recommendation rec-info">
                   <strong>✅ Análise Positiva</strong><br>
-                  O prazo é viável com boa margem de segurança. 
-                  Mantenha o monitoramento regular do progresso.
+                  O prazo é viável com boa margem de segurança. Mantenha o monitoramento regular do progresso.
                 </div>
               ` : ''}
             </div>
@@ -1561,14 +1561,10 @@ export default function ProductsPage() {
 
           <div class="section" style="margin-top: 40px; font-size: 10px; color: #666; text-align: center;">
             <p>Este relatório foi gerado automaticamente pelo sistema MECALD em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
-            <p>Para mais informações, entre em contato com o setor de planejamento.</p>
           </div>
 
           <script>
-            window.onload = function() {
-              window.print();
-              setTimeout(function() { window.close(); }, 1000);
-            }
+            window.onload = function() { window.print(); setTimeout(function() { window.close(); }, 1000); }
           </script>
         </body>
       </html>
@@ -1583,7 +1579,6 @@ export default function ProductsPage() {
     });
   };
 
-    // Função auxiliar para buscar dados da empresa
     const fetchCompanyDataForPDF = useCallback(async () => {
         try {
         const companyRef = doc(db, "companies", "mecald", "settings", "company");
@@ -1597,7 +1592,6 @@ export default function ProductsPage() {
         return null;
     }, []);
 
-    // Salvar custos de etapas no Firebase
     const saveStageCosts = useCallback(async () => {
         try {
         const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
@@ -1613,7 +1607,6 @@ export default function ProductsPage() {
         }
     }, [stageCosts, machineHourRate, consumablesCostPerKg, toast]);
 
-    // Carregar custos de etapas do Firebase
     const loadStageCosts = useCallback(async () => {
         try {
         const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
@@ -1629,7 +1622,6 @@ export default function ProductsPage() {
         }
     }, []);
 
-    // Carregar ao iniciar
     useEffect(() => {
         if (!authLoading && user) {
         loadStageCosts();
@@ -1653,7 +1645,6 @@ export default function ProductsPage() {
             </div>
         </div>
 
-        {/* Dashboard de Lead Time */}
         {products.length > 0 && (
           <div className="grid gap-4 md:grid-cols-3 mb-6">
             <Card>
@@ -1747,6 +1738,8 @@ export default function ProductsPage() {
                                 <TableHead>Descrição</TableHead>
                                 <TableHead className="w-[140px] text-right">Preço Unitário (R$)</TableHead>
                                 <TableHead className="w-[120px] text-center">Lead Time</TableHead>
+                                {/* ─── NOVO: coluna de precificação ─── */}
+                                <TableHead className="w-[100px] text-center">Precificação</TableHead>
                                 <TableHead className="w-[140px] text-center">Ações</TableHead>
                                 </TableRow>
                             </TableHeader>
@@ -1769,6 +1762,27 @@ export default function ProductsPage() {
                                                 {leadTimeBadge.text}
                                             </Badge>
                                         </TableCell>
+                                        {/* ─── NOVO: badge indicador de precificação salva ─── */}
+                                        <TableCell className="text-center">
+                                            {savedPricingCodes.has(product.code) ? (
+                                                <Badge
+                                                    variant="outline"
+                                                    className="cursor-pointer border-green-500 text-green-600 hover:bg-green-50"
+                                                    title="Precificação salva — clique para abrir"
+                                                    onClick={() => {
+                                                        setActiveTab("pricing");
+                                                        setPricingProductSearch(product.code);
+                                                        setSelectedProductForPricing(product);
+                                                        loadSavedPricing(product.code);
+                                                    }}
+                                                >
+                                                    <Calculator className="mr-1 h-3 w-3" />
+                                                    Salvo
+                                                </Badge>
+                                            ) : (
+                                                <span className="text-xs text-muted-foreground">—</span>
+                                            )}
+                                        </TableCell>
                                         <TableCell className="text-center">
                                             <div className="flex items-center justify-center gap-2">
                                                 <Button variant="ghost" size="icon" onClick={() => handleEditClick(product)}>
@@ -1790,7 +1804,7 @@ export default function ProductsPage() {
                                 })
                                 ) : (
                                 <TableRow>
-                                    <TableCell colSpan={5} className="text-center h-24">
+                                    <TableCell colSpan={6} className="text-center h-24">
                                     {searchQuery ? `Nenhum produto encontrado para "${searchQuery}".` : "Nenhum produto encontrado."}
                                     </TableCell>
                                 </TableRow>
@@ -1865,7 +1879,6 @@ export default function ProductsPage() {
                             </div>
                         )}
                         
-                        {/* Dicas de uso */}
                         {manufacturingStages.length > 1 && (
                             <div className="bg-muted/30 rounded-lg p-4 text-sm border">
                                 <div className="font-medium mb-2 flex items-center gap-2">
@@ -1883,7 +1896,6 @@ export default function ProductsPage() {
             </TabsContent>
             <TabsContent value="calculator" className="mt-4">
                 <div className="grid gap-6 lg:grid-cols-2">
-                    {/* Painel de Entrada */}
                     <Card>
                         <CardHeader>
                             <CardTitle>Calculadora de Viabilidade de Prazos</CardTitle>
@@ -1892,7 +1904,6 @@ export default function ProductsPage() {
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-6">
-                            {/* Carga Atual dos Setores */}
                             <div>
                                 <h4 className="text-sm font-medium mb-3">Carga Atual dos Setores</h4>
                                 <div className="grid gap-2">
@@ -1932,7 +1943,6 @@ export default function ProductsPage() {
 
                             <Separator />
 
-                            {/* Adicionar Produtos */}
                             <div>
                                 <h4 className="text-sm font-medium mb-3">Adicionar Produtos à Análise</h4>
                                 <div className="space-y-3">
@@ -1964,7 +1974,6 @@ export default function ProductsPage() {
                                 </div>
                             </div>
 
-                            {/* Lista de Itens */}
                             {calculatorItems.length > 0 && (
                                 <div>
                                     <div className="flex items-center justify-between mb-3">
@@ -1997,7 +2006,6 @@ export default function ProductsPage() {
                                 </div>
                             )}
 
-                            {/* Data Solicitada */}
                             <div>
                                 <Label className="text-sm font-medium">Data de Entrega Solicitada</Label>
                                 <Popover>
@@ -2018,7 +2026,6 @@ export default function ProductsPage() {
                                 </Popover>
                             </div>
 
-                            {/* Botão de Calcular */}
                             <Button 
                                 onClick={calculateFeasibility} 
                                 className="w-full"
@@ -2030,7 +2037,6 @@ export default function ProductsPage() {
                         </CardContent>
                     </Card>
 
-                    {/* Painel de Resultados */}
                     <Card>
                         <CardHeader>
                             <div className="flex items-center justify-between">
@@ -2051,7 +2057,6 @@ export default function ProductsPage() {
                         <CardContent>
                             {calculatorResults ? (
                                 <div className="space-y-6">
-                                    {/* Resultado Principal */}
                                     <div className="text-center p-6 border rounded-lg">
                                         <div className={`text-3xl font-bold mb-2 ${calculatorResults.isViable ? 'text-green-600' : 'text-red-600'}`}>
                                             {calculatorResults.isViable ? '✓ VIÁVEL' : '✗ INVIÁVEL'}
@@ -2072,7 +2077,6 @@ export default function ProductsPage() {
                                         </div>
                                     </div>
 
-                                    {/* Análise por Setor */}
                                     <div>
                                         <h4 className="text-sm font-medium mb-3">Análise por Setor</h4>
                                         <div className="space-y-3">
@@ -2102,7 +2106,6 @@ export default function ProductsPage() {
                                         </div>
                                     </div>
 
-                                    {/* Recomendações */}
                                     <div>
                                         <h4 className="text-sm font-medium mb-3">Recomendações</h4>
                                         <div className="space-y-2 text-sm text-muted-foreground">
@@ -2146,7 +2149,6 @@ export default function ProductsPage() {
             </TabsContent>
                 <TabsContent value="pricing" className="mt-4">
                     <div className="grid gap-6">
-                        {/* Card de Configurações Gerais */}
                         <Card>
                             <CardHeader>
                                 <CardTitle>Configurações de Custos</CardTitle>
@@ -2229,7 +2231,6 @@ export default function ProductsPage() {
                                         ))}
                                     </div>
                                     
-                                    {/* Exemplo de cálculo */}
                                     <div className="mt-3 p-3 bg-muted rounded-md text-xs space-y-1">
                                         <div className="font-medium">Exemplo de cálculo:</div>
                                         <div className="text-muted-foreground">
@@ -2247,7 +2248,6 @@ export default function ProductsPage() {
                             </CardContent>
                         </Card>
 
-                        {/* Card de Seleção de Produto e Composição */}
                         <div className="grid gap-6 lg:grid-cols-2">
                             <Card>
                                 <CardHeader>
@@ -2257,11 +2257,9 @@ export default function ProductsPage() {
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
-                                    {/* Seleção de Produto com busca integrada */}
                                     <div className="space-y-2">
                                         <Label>Produto</Label>
                                         
-                                        {/* Campo de busca */}
                                         <div className="relative">
                                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                             <Input
@@ -2282,19 +2280,19 @@ export default function ProductsPage() {
                                             )}
                                         </div>
                                         
-                                        {/* Select de produtos filtrados */}
+                                        {/* ─── MODIFICADO: onValueChange agora também chama loadSavedPricing ─── */}
                                         <Select 
                                             value={selectedProductForPricing?.id || ''} 
                                             onValueChange={(value) => {
                                                 const product = products.find(p => p.id === value);
                                                 setSelectedProductForPricing(product || null);
-                                                setMaterialComposition([]);
-                                                setPricingCalculation(null);
-                                                setMachiningHours(0);
-                                                toast({
-                                                    title: "Produto selecionado",
-                                                    description: `${product?.code} - ${product?.description}`
-                                                });
+                                                if (product) {
+                                                    loadSavedPricing(product.code);
+                                                } else {
+                                                    setMaterialComposition([]);
+                                                    setPricingCalculation(null);
+                                                    setMachiningHours(0);
+                                                }
                                             }}
                                         >
                                             <SelectTrigger>
@@ -2302,7 +2300,7 @@ export default function ProductsPage() {
                                             </SelectTrigger>
                                             <SelectContent className="max-h-[350px]">
                                                 {(() => {
-                                                    const filteredProducts = products
+                                                    const filteredForPricing = products
                                                         .filter(p => p.unitWeight && p.unitWeight > 0)
                                                         .filter(p => {
                                                             if (!pricingProductSearch) return true;
@@ -2313,7 +2311,7 @@ export default function ProductsPage() {
                                                             );
                                                         });
 
-                                                    if (filteredProducts.length === 0) {
+                                                    if (filteredForPricing.length === 0) {
                                                         return (
                                                             <div className="p-6 text-center text-sm text-muted-foreground">
                                                                 {pricingProductSearch ? (
@@ -2337,7 +2335,7 @@ export default function ProductsPage() {
                                                         );
                                                     }
 
-                                                    return filteredProducts.map(product => (
+                                                    return filteredForPricing.map(product => (
                                                         <SelectItem key={product.id} value={product.id}>
                                                             <div className="flex items-start gap-3 py-1">
                                                                 <div className="flex-shrink-0">
@@ -2351,6 +2349,13 @@ export default function ProductsPage() {
                                                                         <span>⚖️ {product.unitWeight}kg</span>
                                                                         <span>•</span>
                                                                         <span>⏱️ {calculateLeadTime(product)} dias</span>
+                                                                        {/* ─── NOVO: indicador visual inline no select ─── */}
+                                                                        {savedPricingCodes.has(product.code) && (
+                                                                            <>
+                                                                                <span>•</span>
+                                                                                <span className="text-green-600 font-medium">✓ Salvo</span>
+                                                                            </>
+                                                                        )}
                                                                     </div>
                                                                 </div>
                                                             </div>
@@ -2360,7 +2365,6 @@ export default function ProductsPage() {
                                             </SelectContent>
                                         </Select>
                                         
-                                        {/* Contador de resultados */}
                                         {pricingProductSearch && (
                                             <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                                 <span className="inline-flex items-center gap-1">
@@ -2390,12 +2394,21 @@ export default function ProductsPage() {
                                                         <span className="font-medium">Lead time:</span>
                                                         <span>{calculateLeadTime(selectedProductForPricing)} dias</span>
                                                     </div>
+                                                    {/* ─── NOVO: indicador de precificação salva no card ─── */}
+                                                    {savedPricingCodes.has(selectedProductForPricing.code) && (
+                                                        <div className="flex justify-between items-center pt-1 border-t mt-1">
+                                                            <span className="font-medium text-green-700">Precificação salva</span>
+                                                            <Badge variant="outline" className="border-green-500 text-green-600 text-xs">
+                                                                <Calculator className="mr-1 h-3 w-3" />
+                                                                Dados carregados
+                                                            </Badge>
+                                                        </div>
+                                                    )}
                                                 </div>
                                             </div>
 
                                             <Separator />
 
-                                            {/* Composição de Materiais */}
                                             <div>
                                                 <h4 className="text-sm font-medium mb-3">Composição de Materiais</h4>
                                                 <p className="text-xs text-muted-foreground mb-3">
@@ -2403,21 +2416,14 @@ export default function ProductsPage() {
                                                 </p>
 
                                                 <div className="space-y-3">
-                                                    {/* Seletor de material para adicionar */}
                                                     <div className="space-y-2">
                                                         <Label className="text-xs text-muted-foreground">Selecione um material para adicionar:</Label>
                                                         <Select
-                                                            value="" // Sempre vazio para permitir adicionar o mesmo material novamente se necessário
+                                                            value=""
                                                             onValueChange={(materialId) => {
-                                                                console.log("Material selecionado:", materialId); // Debug
-                                                                
                                                                 const material = allMaterials.find(m => m.id === materialId);
-                                                                if (!material) {
-                                                                    console.error("Material não encontrado:", materialId);
-                                                                    return;
-                                                                }
+                                                                if (!material) return;
                                                                 
-                                                                // Verifica se o material já foi adicionado
                                                                 if (materialComposition.some(m => m.materialId === materialId)) {
                                                                     toast({
                                                                         variant: "destructive",
@@ -2436,12 +2442,7 @@ export default function ProductsPage() {
                                                                     totalCost: 0
                                                                 };
                                                                 
-                                                                console.log("Adicionando item:", newItem); // Debug
-                                                                setMaterialComposition(prev => {
-                                                                    const updated = [...prev, newItem];
-                                                                    console.log("Nova composição:", updated); // Debug
-                                                                    return updated;
-                                                                });
+                                                                setMaterialComposition(prev => [...prev, newItem]);
                                                                 
                                                                 toast({
                                                                     title: "Material adicionado",
@@ -2489,16 +2490,8 @@ export default function ProductsPage() {
                                                                 })}
                                                             </SelectContent>
                                                         </Select>
-                                                        
-                                                        {/* DEBUG - Remover depois */}
-                                                        <div className="text-xs text-muted-foreground p-2 bg-muted rounded">
-                                                            <div>Total de materiais disponíveis: {allMaterials.length}</div>
-                                                            <div>Materiais personalizados: {customMaterials.length}</div>
-                                                            <div>Materiais na composição: {materialComposition.length}</div>
-                                                        </div>
                                                     </div>
 
-                                                    {/* Lista de materiais adicionados */}
                                                     {materialComposition.length > 0 ? (
                                                         <div className="space-y-2 max-h-[400px] overflow-y-auto">
                                                             {materialComposition.map((item, index) => (
@@ -2542,7 +2535,6 @@ export default function ProductsPage() {
                                                                 </div>
                                                             ))}
 
-                                                            {/* Resumo dos materiais */}
                                                             <div className="p-3 bg-muted rounded-md space-y-1">
                                                                 <div className="flex justify-between text-sm">
                                                                     <span className="font-medium">Total de materiais:</span>
@@ -2582,7 +2574,6 @@ export default function ProductsPage() {
                                                 </div>
                                             </div>
 
-                                            {/* Horas de Usinagem */}
                                             {selectedProductForPricing.productionPlanTemplate?.some(stage => 
                                                 stage.stageName.toLowerCase().includes('usinagem')
                                             ) && (
@@ -2604,8 +2595,9 @@ export default function ProductsPage() {
                                                 </>
                                             )}
 
+                                            {/* ─── MODIFICADO: botão Calcular agora também salva ─── */}
                                             <Button 
-                                                onClick={() => {
+                                                onClick={async () => {
                                                     if (materialComposition.length === 0) {
                                                         toast({
                                                             variant: "destructive",
@@ -2615,7 +2607,6 @@ export default function ProductsPage() {
                                                         return;
                                                     }
 
-                                                    // Verifica se todos os materiais têm peso definido
                                                     const materialsWithoutWeight = materialComposition.filter(m => !m.weightKg || m.weightKg <= 0);
                                                     if (materialsWithoutWeight.length > 0) {
                                                         toast({
@@ -2628,7 +2619,6 @@ export default function ProductsPage() {
 
                                                     const productWeight = selectedProductForPricing.unitWeight || 0;
 
-                                                    // Calcular custos por etapa - AGORA MULTIPLICADO PELO PESO DO PRODUTO
                                                     const stageCostItems: StageCostItem[] = (selectedProductForPricing.productionPlanTemplate || []).map(stage => {
                                                         const costPerKg = stageCosts[stage.stageName] || 0;
                                                         const totalCost = costPerKg * productWeight;
@@ -2636,7 +2626,7 @@ export default function ProductsPage() {
                                                         return {
                                                             stageName: stage.stageName,
                                                             durationDays: stage.durationDays || 0,
-                                                            costPerDay: costPerKg, // Agora representa custo por kg
+                                                            costPerDay: costPerKg,
                                                             totalCost: totalCost
                                                         };
                                                     });
@@ -2644,11 +2634,7 @@ export default function ProductsPage() {
                                                     const materialCostTotal = materialComposition.reduce((sum, m) => sum + m.totalCost, 0);
                                                     const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
                                                     const machiningCost = machiningHours * machineHourRate;
-                                                    
-                                                    // Insumos calculados automaticamente: consumablesCostPerKg × productWeight
                                                     const consumablesCost = consumablesCostPerKg * productWeight;
-                                                    
-                                                    // Custo total agora inclui insumos
                                                     const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesCost;
                                                     const profitValue = totalCost * (profitMargin / 100);
                                                     const finalPrice = totalCost + profitValue;
@@ -2672,24 +2658,21 @@ export default function ProductsPage() {
                                                     };
 
                                                     setPricingCalculation(calculation);
-                                                    
-                                                    toast({
-                                                        title: "Preço calculado!",
-                                                        description: `Preço final: R$ ${finalPrice.toFixed(2)} (R$ ${pricePerKg.toFixed(2)}/kg)`
-                                                    });
+
+                                                    // ─── NOVO: salva automaticamente no Firestore ───
+                                                    await savePricingCalculation(calculation, materialComposition, machiningHours);
                                                 }} 
                                                 className="w-full"
                                                 disabled={materialComposition.length === 0}
                                             >
                                                 <Calculator className="mr-2 h-4 w-4" />
-                                                Calcular Preço
+                                                Calcular e Salvar Preço
                                             </Button>
                                         </>
                                     )}
                                 </CardContent>
                             </Card>
 
-                            {/* Card de Resultado */}
                             <Card>
                                 <CardHeader>
                                     <div className="flex items-center justify-between">
@@ -2704,19 +2687,16 @@ export default function ProductsPage() {
                                                 variant="outline"
                                                 size="sm"
                                                 onClick={async () => {
-                                                    // Buscar dados da empresa
                                                     const companyData = await fetchCompanyDataForPDF();
                                                     
                                                     const doc = new jsPDF();
                                                     
-                                                    // Configurações
                                                     const pageWidth = doc.internal.pageSize.getWidth();
                                                     const pageHeight = doc.internal.pageSize.getHeight();
                                                     const margin = 20;
                                                     let yPosition = margin;
                                                     const lineHeight = 7;
                                                     
-                                                    // Função auxiliar para adicionar texto
                                                     const addText = (text: string, fontSize: number = 10, isBold: boolean = false, align: 'left' | 'center' | 'right' = 'left') => {
                                                         doc.setFontSize(fontSize);
                                                         doc.setFont('helvetica', isBold ? 'bold' : 'normal');
@@ -2732,14 +2712,12 @@ export default function ProductsPage() {
                                                         yPosition += lineHeight;
                                                     };
                                                     
-                                                    // Função para adicionar linha horizontal
                                                     const addLine = () => {
                                                         doc.setDrawColor(200, 200, 200);
                                                         doc.line(margin, yPosition, pageWidth - margin, yPosition);
                                                         yPosition += lineHeight;
                                                     };
                                                     
-                                                    // Função para verificar quebra de página
                                                     const checkPageBreak = (spaceNeeded: number = 20) => {
                                                         if (yPosition + spaceNeeded > pageHeight - margin) {
                                                             doc.addPage();
@@ -2749,11 +2727,10 @@ export default function ProductsPage() {
                                                         return false;
                                                     };
                                                     
-                                                    // Função para adicionar seção com título
                                                     const addSection = (title: string) => {
                                                         checkPageBreak(15);
                                                         yPosition += 3;
-                                                        doc.setFillColor(37, 99, 235); // Azul
+                                                        doc.setFillColor(37, 99, 235);
                                                         doc.rect(margin, yPosition - 5, pageWidth - (2 * margin), 8, 'F');
                                                         doc.setTextColor(255, 255, 255);
                                                         addText(title, 11, true);
@@ -2761,326 +2738,246 @@ export default function ProductsPage() {
                                                         yPosition += 2;
                                                     };
                                                     
-                                                // CABEÇALHO PRINCIPAL COM DADOS DA EMPRESA
-                                                doc.setFillColor(37, 99, 235);
-                                                doc.rect(0, 0, pageWidth, 50, 'F');
-                                                doc.setTextColor(255, 255, 255);
-                                                
-                                                // Nome da empresa (grande e destacado)
-                                                doc.setFontSize(24);
-                                                doc.setFont('helvetica', 'bold');
-                                                doc.text((companyData?.nomeFantasia || 'MECALD').toUpperCase(), pageWidth / 2, 18, { align: 'center' });
-                                                
-                                                // Título do relatório
-                                                doc.setFontSize(16);
-                                                doc.setFont('helvetica', 'normal');
-                                                doc.text('RELATÓRIO DE PRECIFICAÇÃO', pageWidth / 2, 28, { align: 'center' });
-                                                
-                                                // Data de geração
-                                                doc.setFontSize(9);
-                                                doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, pageWidth / 2, 38, { align: 'center' });
-                                                
-                                                yPosition = 60;
-                                                doc.setTextColor(0, 0, 0);
-                                                
-                                                // SUB-CABEÇALHO COM DADOS DETALHADOS DA EMPRESA
-                                                doc.setFillColor(249, 250, 251);
-                                                doc.rect(0, yPosition, pageWidth, 35, 'F');
-                                                
-                                                // Logo (se disponível) - lado direito
-                                                const logoX = pageWidth - margin - 50;
-                                                const logoY = yPosition + 5;
-                                                const logoWidth = 45;
-                                                const logoHeight = 25;
-                                                
-                                                // Desenhar container do logo
-                                                doc.setFillColor(255, 255, 255);
-                                                doc.roundedRect(logoX, logoY, logoWidth, logoHeight, 2, 2, 'F');
-                                                doc.setDrawColor(200, 200, 200);
-                                                doc.setLineWidth(0.5);
-                                                doc.roundedRect(logoX, logoY, logoWidth, logoHeight, 2, 2, 'D');
-                                                
-                                                if (companyData?.logo?.preview) {
-                                                    try {
-                                                        // Tentar carregar a logo
-                                                        let logoSrc = companyData.logo.preview;
-                                                        
-                                                        // Garantir que está em formato Base64 correto
-                                                        if (!logoSrc.startsWith('data:')) {
-                                                            // Se não começar com data:, assumir que é Base64 puro
-                                                            logoSrc = `data:image/png;base64,${logoSrc}`;
-                                                        }
-                                                        
-                                                        // Converter Base64 para blob temporariamente e adicionar ao PDF
-                                                        // jsPDF suporta addImage com Base64 diretamente
-                                                        if (logoSrc.startsWith('data:image/')) {
-                                                            // Extrair apenas a parte Base64
-                                                            const base64Data = logoSrc.split(',')[1] || logoSrc;
-                                                            const imageType = logoSrc.match(/data:image\/(\w+)/)?.[1] || 'png';
-                                                            
-                                                            // Adicionar imagem ao PDF (jsPDF suporta PNG e JPEG)
-                                                            try {
-                                                                doc.addImage(base64Data, imageType.toUpperCase(), logoX + 2, logoY + 2, logoWidth - 4, logoHeight - 4, undefined, 'FAST');
-                                                            } catch (imgError) {
-                                                                // Se falhar, mostrar placeholder
-                                                                console.error("Error adding logo image:", imgError);
+                                                    doc.setFillColor(37, 99, 235);
+                                                    doc.rect(0, 0, pageWidth, 50, 'F');
+                                                    doc.setTextColor(255, 255, 255);
+                                                    
+                                                    doc.setFontSize(24);
+                                                    doc.setFont('helvetica', 'bold');
+                                                    doc.text((companyData?.nomeFantasia || 'MECALD').toUpperCase(), pageWidth / 2, 18, { align: 'center' });
+                                                    
+                                                    doc.setFontSize(16);
+                                                    doc.setFont('helvetica', 'normal');
+                                                    doc.text('RELATÓRIO DE PRECIFICAÇÃO', pageWidth / 2, 28, { align: 'center' });
+                                                    
+                                                    doc.setFontSize(9);
+                                                    doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, pageWidth / 2, 38, { align: 'center' });
+                                                    
+                                                    yPosition = 60;
+                                                    doc.setTextColor(0, 0, 0);
+                                                    
+                                                    doc.setFillColor(249, 250, 251);
+                                                    doc.rect(0, yPosition, pageWidth, 35, 'F');
+                                                    
+                                                    const logoX = pageWidth - margin - 50;
+                                                    const logoY = yPosition + 5;
+                                                    const logoWidth = 45;
+                                                    const logoHeight = 25;
+                                                    
+                                                    doc.setFillColor(255, 255, 255);
+                                                    doc.roundedRect(logoX, logoY, logoWidth, logoHeight, 2, 2, 'F');
+                                                    doc.setDrawColor(200, 200, 200);
+                                                    doc.setLineWidth(0.5);
+                                                    doc.roundedRect(logoX, logoY, logoWidth, logoHeight, 2, 2, 'D');
+                                                    
+                                                    if (companyData?.logo?.preview) {
+                                                        try {
+                                                            let logoSrc = companyData.logo.preview;
+                                                            if (!logoSrc.startsWith('data:')) {
+                                                                logoSrc = `data:image/png;base64,${logoSrc}`;
+                                                            }
+                                                            if (logoSrc.startsWith('data:image/')) {
+                                                                const base64Data = logoSrc.split(',')[1] || logoSrc;
+                                                                const imageType = logoSrc.match(/data:image\/(\w+)/)?.[1] || 'png';
+                                                                try {
+                                                                    doc.addImage(base64Data, imageType.toUpperCase(), logoX + 2, logoY + 2, logoWidth - 4, logoHeight - 4, undefined, 'FAST');
+                                                                } catch (imgError) {
+                                                                    doc.setFontSize(7);
+                                                                    doc.setTextColor(150, 150, 150);
+                                                                    doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
+                                                                }
+                                                            } else {
                                                                 doc.setFontSize(7);
                                                                 doc.setTextColor(150, 150, 150);
                                                                 doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
                                                             }
-                                                        } else {
-                                                            // Se não for Base64 válido, mostrar placeholder
+                                                        } catch (error) {
                                                             doc.setFontSize(7);
                                                             doc.setTextColor(150, 150, 150);
                                                             doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
                                                         }
-                                                    } catch (error) {
-                                                        console.error("Error processing logo:", error);
-                                                        // Mostrar placeholder em caso de erro
+                                                    } else {
                                                         doc.setFontSize(7);
                                                         doc.setTextColor(150, 150, 150);
                                                         doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
                                                     }
-                                                } else {
-                                                    // Sem logo disponível, mostrar placeholder
-                                                    doc.setFontSize(7);
-                                                    doc.setTextColor(150, 150, 150);
-                                                    doc.text('LOGO', logoX + logoWidth / 2, logoY + logoHeight / 2, { align: 'center' });
-                                                }
-                                                
-                                                doc.setTextColor(0, 0, 0);
-                                                
-                                                // Dados da empresa - lado esquerdo
-                                                doc.setFontSize(8);
-                                                doc.setFont('helvetica', 'normal');
-                                                let infoY = yPosition + 8;
-                                                
-                                                if (companyData?.cnpj) {
-                                                    doc.setFont('helvetica', 'bold');
-                                                    doc.text('CNPJ:', margin, infoY);
-                                                    doc.setFont('helvetica', 'normal');
-                                                    doc.text(companyData.cnpj, margin + 20, infoY);
-                                                    infoY += 5;
-                                                }
-                                                
-                                                if (companyData?.inscricaoEstadual) {
-                                                    doc.setFont('helvetica', 'bold');
-                                                    doc.text('I.E.:', margin, infoY);
-                                                    doc.setFont('helvetica', 'normal');
-                                                    doc.text(companyData.inscricaoEstadual, margin + 20, infoY);
-                                                    infoY += 5;
-                                                }
-                                                
-                                                if (companyData?.email) {
-                                                    doc.setFont('helvetica', 'bold');
-                                                    doc.text('E-mail:', margin, infoY);
-                                                    doc.setFont('helvetica', 'normal');
-                                                    doc.text(companyData.email, margin + 25, infoY);
-                                                    infoY += 5;
-                                                }
-                                                
-                                                if (companyData?.celular) {
-                                                    doc.setFont('helvetica', 'bold');
-                                                    doc.text('Telefone:', margin, infoY);
-                                                    doc.setFont('helvetica', 'normal');
-                                                    doc.text(companyData.celular, margin + 30, infoY);
-                                                }
-                                                
-                                                if (companyData?.endereco) {
-                                                    doc.setFont('helvetica', 'bold');
-                                                    doc.text('Endereço:', margin, infoY + 5);
-                                                    doc.setFont('helvetica', 'normal');
-                                                    const enderecoText = companyData.endereco.length > 50 
-                                                        ? companyData.endereco.substring(0, 50) + '...' 
-                                                        : companyData.endereco;
-                                                    doc.text(enderecoText, margin + 30, infoY + 5);
-                                                }
-                                                
-                                                // Linha separadora
-                                                doc.setDrawColor(200, 200, 200);
-                                                doc.setLineWidth(0.5);
-                                                doc.line(margin, yPosition + 35, pageWidth - margin, yPosition + 35);
-                                                
-                                                yPosition += 45;
-                                                doc.setTextColor(0, 0, 0);
-                                                
-                                                // DADOS DO PRODUTO (Box destacado)
-                                                checkPageBreak(35);
-                                                const productBoxY = yPosition;
-                                                doc.setFillColor(239, 246, 255); // Azul claro
-                                                doc.setDrawColor(59, 130, 246); // Azul
-                                                doc.setLineWidth(0.5);
-                                                doc.roundedRect(margin, productBoxY, pageWidth - (2 * margin), 30, 3, 3, 'FD');
-                                                
-                                                yPosition = productBoxY + 8;
-                                                doc.setFontSize(11);
-                                                doc.setFont('helvetica', 'bold');
-                                                doc.setTextColor(30, 64, 175); // Azul escuro
-                                                doc.text('DADOS DO PRODUTO', margin + 5, yPosition);
-                                                
-                                                yPosition += 8;
-                                                doc.setFontSize(9);
-                                                doc.setFont('helvetica', 'normal');
-                                                doc.setTextColor(0, 0, 0);
-                                                doc.text(`Código: ${pricingCalculation.productCode}`, margin + 5, yPosition);
-                                                doc.text(`Peso: ${pricingCalculation.productWeight} kg`, pageWidth / 2 + 10, yPosition);
-                                                
-                                                yPosition += 5;
-                                                doc.text(`Descrição: ${pricingCalculation.productDescription}`, margin + 5, yPosition);
-                                                
-                                                const leadTimeDays = calculateLeadTime(selectedProductForPricing || {
-                                                    productionPlanTemplate: pricingCalculation.stageCosts.map(s => ({
-                                                        stageName: s.stageName,
-                                                        durationDays: s.durationDays
-                                                    }))
-                                                } as Product);
-                                                doc.text(`Lead Time: ${leadTimeDays} dias`, pageWidth / 2 + 10, yPosition);
-                                                
-                                                yPosition += 10;
-                                                
-                                                // Calcular totais
-                                                const materialTotal = pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0);
-                                                
-                                                // COMPOSIÇÃO DE MATERIAIS (Tabela)
-                                                addSection('COMPOSIÇÃO DE MATERIAIS');
-                                                
-                                                if (pricingCalculation.materialCosts.length > 0) {
-                                                    // Cabeçalho da tabela
-                                                    const tableY = yPosition;
-                                                    doc.setFillColor(243, 244, 246);
-                                                    doc.rect(margin, tableY, pageWidth - (2 * margin), 8, 'F');
-                                                    doc.setFontSize(9);
-                                                    doc.setFont('helvetica', 'bold');
-                                                    
-                                                    doc.text('Material', margin + 2, tableY + 6);
-                                                    doc.text('Peso (kg)', pageWidth - margin - 60, tableY + 6, { align: 'right' });
-                                                    doc.text('R$/kg', pageWidth - margin - 30, tableY + 6, { align: 'right' });
-                                                    doc.text('Subtotal', pageWidth - margin - 2, tableY + 6, { align: 'right' });
-                                                    
-                                                    yPosition = tableY + 10;
-                                                    
-                                                    // Linhas da tabela
-                                                    pricingCalculation.materialCosts.forEach((m, index) => {
-                                                        checkPageBreak(10);
-                                                        
-                                                        // Linha alternada
-                                                        if (index % 2 === 0) {
-                                                            doc.setFillColor(249, 250, 251);
-                                                            doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 8, 'F');
-                                                        }
-                                                        
-                                                        doc.setFontSize(8);
-                                                        doc.setFont('helvetica', 'normal');
-                                                        doc.setTextColor(0, 0, 0);
-                                                        
-                                                        // Material
-                                                        const materialText = `${index + 1}. ${m.materialDescription}`;
-                                                        const maxWidth = pageWidth - margin - 80;
-                                                        doc.text(materialText.substring(0, 50) + (materialText.length > 50 ? '...' : ''), margin + 2, yPosition);
-                                                        
-                                                        // Peso
-                                                        doc.text(m.weightKg.toFixed(3), pageWidth - margin - 60, yPosition, { align: 'right' });
-                                                        
-                                                        // Preço/kg
-                                                        doc.text(`R$ ${m.pricePerKg.toFixed(2)}`, pageWidth - margin - 30, yPosition, { align: 'right' });
-                                                        
-                                                        // Subtotal
-                                                        doc.setFont('helvetica', 'bold');
-                                                        doc.text(`R$ ${m.totalCost.toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
-                                                        
-                                                        yPosition += 8;
-                                                    });
-                                                    
-                                                    // Total da tabela
-                                                    checkPageBreak(10);
-                                                    doc.setFillColor(254, 243, 199); // Amarelo claro
-                                                    doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 10, 'F');
-                                                    
-                                                    doc.setFontSize(10);
-                                                    doc.setFont('helvetica', 'bold');
-                                                    doc.setTextColor(146, 64, 14); // Marrom
-                                                    doc.text('TOTAL MATERIAIS:', margin + 2, yPosition + 4);
-                                                    doc.text(`R$ ${materialTotal.toFixed(2)}`, pageWidth - margin - 2, yPosition + 4, { align: 'right' });
                                                     
                                                     doc.setTextColor(0, 0, 0);
-                                                    yPosition += 12;
-                                                } else {
-                                                    addText('Nenhum material adicionado', 9);
-                                                    yPosition += 5;
-                                                }
-                                                
-                                                // CUSTOS DE PRODUÇÃO (FILTRAR apenas etapas com custo > 0)
-                                                const activeStages = pricingCalculation.stageCosts.filter(s => s.totalCost > 0);
-                                                
-                                                if (activeStages.length > 0) {
-                                                    addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
                                                     
-                                                    // Cabeçalho da tabela de etapas
-                                                    const stagesTableY = yPosition;
-                                                    doc.setFillColor(239, 246, 255); // Azul claro
-                                                    doc.rect(margin, stagesTableY, pageWidth - (2 * margin), 8, 'F');
-                                                    doc.setFontSize(9);
-                                                    doc.setFont('helvetica', 'bold');
+                                                    doc.setFontSize(8);
+                                                    doc.setFont('helvetica', 'normal');
+                                                    let infoY = yPosition + 8;
                                                     
-                                                    doc.text('Etapa', margin + 2, stagesTableY + 6);
-                                                    doc.text('Custo/kg', pageWidth - margin - 80, stagesTableY + 6, { align: 'right' });
-                                                    doc.text('Peso Total', pageWidth - margin - 50, stagesTableY + 6, { align: 'right' });
-                                                    doc.text('Custo Total', pageWidth - margin - 2, stagesTableY + 6, { align: 'right' });
-                                                    
-                                                    yPosition = stagesTableY + 10;
-                                                    
-                                                    // Linhas da tabela de etapas
-                                                    activeStages.forEach((s, index) => {
-                                                        checkPageBreak(10);
-                                                        
-                                                        // Linha alternada
-                                                        if (index % 2 === 0) {
-                                                            doc.setFillColor(249, 250, 251);
-                                                            doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 8, 'F');
-                                                        }
-                                                        
-                                                        doc.setFontSize(8);
-                                                        doc.setFont('helvetica', 'normal');
-                                                        doc.setTextColor(0, 0, 0);
-                                                        
-                                                        // Etapa
-                                                        doc.text(`${index + 1}. ${s.stageName}`, margin + 2, yPosition);
-                                                        
-                                                        // Custo/kg
-                                                        doc.text(`R$ ${s.costPerDay.toFixed(2)}/kg`, pageWidth - margin - 80, yPosition, { align: 'right' });
-                                                        
-                                                        // Peso Total
-                                                        doc.text(`${pricingCalculation.productWeight.toFixed(2)} kg`, pageWidth - margin - 50, yPosition, { align: 'right' });
-                                                        
-                                                        // Custo Total
+                                                    if (companyData?.cnpj) {
                                                         doc.setFont('helvetica', 'bold');
-                                                        doc.text(`R$ ${s.totalCost.toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
-                                                        
-                                                        yPosition += 8;
-                                                    });
+                                                        doc.text('CNPJ:', margin, infoY);
+                                                        doc.setFont('helvetica', 'normal');
+                                                        doc.text(companyData.cnpj, margin + 20, infoY);
+                                                        infoY += 5;
+                                                    }
+                                                    if (companyData?.inscricaoEstadual) {
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.text('I.E.:', margin, infoY);
+                                                        doc.setFont('helvetica', 'normal');
+                                                        doc.text(companyData.inscricaoEstadual, margin + 20, infoY);
+                                                        infoY += 5;
+                                                    }
+                                                    if (companyData?.email) {
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.text('E-mail:', margin, infoY);
+                                                        doc.setFont('helvetica', 'normal');
+                                                        doc.text(companyData.email, margin + 25, infoY);
+                                                        infoY += 5;
+                                                    }
+                                                    if (companyData?.celular) {
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.text('Telefone:', margin, infoY);
+                                                        doc.setFont('helvetica', 'normal');
+                                                        doc.text(companyData.celular, margin + 30, infoY);
+                                                    }
+                                                    if (companyData?.endereco) {
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.text('Endereço:', margin, infoY + 5);
+                                                        doc.setFont('helvetica', 'normal');
+                                                        const enderecoText = companyData.endereco.length > 50 
+                                                            ? companyData.endereco.substring(0, 50) + '...' 
+                                                            : companyData.endereco;
+                                                        doc.text(enderecoText, margin + 30, infoY + 5);
+                                                    }
                                                     
-                                                    // Total da tabela de etapas
-                                                    checkPageBreak(10);
-                                                    doc.setFillColor(254, 243, 199); // Amarelo claro
-                                                    doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 10, 'F');
-                                                    
-                                                    doc.setFontSize(10);
-                                                    doc.setFont('helvetica', 'bold');
-                                                    doc.setTextColor(146, 64, 14); // Marrom
-                                                    doc.text('TOTAL ETAPAS:', margin + 2, yPosition + 4);
-                                                    
-                                                    const stageTotal = activeStages.reduce((s, st) => s + st.totalCost, 0);
-                                                    doc.text(`R$ ${stageTotal.toFixed(2)}`, pageWidth - margin - 2, yPosition + 4, { align: 'right' });
-                                                    
+                                                    doc.setDrawColor(200, 200, 200);
+                                                    doc.setLineWidth(0.5);
+                                                    doc.line(margin, yPosition + 35, pageWidth - margin, yPosition + 35);
+                                                    yPosition += 45;
                                                     doc.setTextColor(0, 0, 0);
-                                                    yPosition += 12;
-                                                } else {
-                                                    addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
-                                                    addText('Nenhuma etapa com custo configurado', 9);
-                                                    yPosition += 5;
-                                                }
                                                     
-                                                    // OUTROS CUSTOS
+                                                    checkPageBreak(35);
+                                                    const productBoxY = yPosition;
+                                                    doc.setFillColor(239, 246, 255);
+                                                    doc.setDrawColor(59, 130, 246);
+                                                    doc.setLineWidth(0.5);
+                                                    doc.roundedRect(margin, productBoxY, pageWidth - (2 * margin), 30, 3, 3, 'FD');
+                                                    
+                                                    yPosition = productBoxY + 8;
+                                                    doc.setFontSize(11);
+                                                    doc.setFont('helvetica', 'bold');
+                                                    doc.setTextColor(30, 64, 175);
+                                                    doc.text('DADOS DO PRODUTO', margin + 5, yPosition);
+                                                    
+                                                    yPosition += 8;
+                                                    doc.setFontSize(9);
+                                                    doc.setFont('helvetica', 'normal');
+                                                    doc.setTextColor(0, 0, 0);
+                                                    doc.text(`Código: ${pricingCalculation.productCode}`, margin + 5, yPosition);
+                                                    doc.text(`Peso: ${pricingCalculation.productWeight} kg`, pageWidth / 2 + 10, yPosition);
+                                                    
+                                                    yPosition += 5;
+                                                    doc.text(`Descrição: ${pricingCalculation.productDescription}`, margin + 5, yPosition);
+                                                    
+                                                    const leadTimeDays = calculateLeadTime(selectedProductForPricing || {
+                                                        productionPlanTemplate: pricingCalculation.stageCosts.map(s => ({
+                                                            stageName: s.stageName,
+                                                            durationDays: s.durationDays
+                                                        }))
+                                                    } as Product);
+                                                    doc.text(`Lead Time: ${leadTimeDays} dias`, pageWidth / 2 + 10, yPosition);
+                                                    
+                                                    yPosition += 10;
+                                                    
+                                                    const materialTotal = pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0);
+                                                    
+                                                    addSection('COMPOSIÇÃO DE MATERIAIS');
+                                                    
+                                                    if (pricingCalculation.materialCosts.length > 0) {
+                                                        const tableY = yPosition;
+                                                        doc.setFillColor(243, 244, 246);
+                                                        doc.rect(margin, tableY, pageWidth - (2 * margin), 8, 'F');
+                                                        doc.setFontSize(9);
+                                                        doc.setFont('helvetica', 'bold');
+                                                        
+                                                        doc.text('Material', margin + 2, tableY + 6);
+                                                        doc.text('Peso (kg)', pageWidth - margin - 60, tableY + 6, { align: 'right' });
+                                                        doc.text('R$/kg', pageWidth - margin - 30, tableY + 6, { align: 'right' });
+                                                        doc.text('Subtotal', pageWidth - margin - 2, tableY + 6, { align: 'right' });
+                                                        
+                                                        yPosition = tableY + 10;
+                                                        
+                                                        pricingCalculation.materialCosts.forEach((m, index) => {
+                                                            checkPageBreak(10);
+                                                            if (index % 2 === 0) {
+                                                                doc.setFillColor(249, 250, 251);
+                                                                doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 8, 'F');
+                                                            }
+                                                            doc.setFontSize(8);
+                                                            doc.setFont('helvetica', 'normal');
+                                                            doc.setTextColor(0, 0, 0);
+                                                            const materialText = `${index + 1}. ${m.materialDescription}`;
+                                                            doc.text(materialText.substring(0, 50) + (materialText.length > 50 ? '...' : ''), margin + 2, yPosition);
+                                                            doc.text(m.weightKg.toFixed(3), pageWidth - margin - 60, yPosition, { align: 'right' });
+                                                            doc.text(`R$ ${m.pricePerKg.toFixed(2)}`, pageWidth - margin - 30, yPosition, { align: 'right' });
+                                                            doc.setFont('helvetica', 'bold');
+                                                            doc.text(`R$ ${m.totalCost.toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
+                                                            yPosition += 8;
+                                                        });
+                                                        
+                                                        checkPageBreak(10);
+                                                        doc.setFillColor(254, 243, 199);
+                                                        doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 10, 'F');
+                                                        doc.setFontSize(10);
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.setTextColor(146, 64, 14);
+                                                        doc.text('TOTAL MATERIAIS:', margin + 2, yPosition + 4);
+                                                        doc.text(`R$ ${materialTotal.toFixed(2)}`, pageWidth - margin - 2, yPosition + 4, { align: 'right' });
+                                                        doc.setTextColor(0, 0, 0);
+                                                        yPosition += 12;
+                                                    }
+                                                    
+                                                    const activeStages = pricingCalculation.stageCosts.filter(s => s.totalCost > 0);
+                                                    
+                                                    if (activeStages.length > 0) {
+                                                        addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
+                                                        
+                                                        const stagesTableY = yPosition;
+                                                        doc.setFillColor(239, 246, 255);
+                                                        doc.rect(margin, stagesTableY, pageWidth - (2 * margin), 8, 'F');
+                                                        doc.setFontSize(9);
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.text('Etapa', margin + 2, stagesTableY + 6);
+                                                        doc.text('Custo/kg', pageWidth - margin - 80, stagesTableY + 6, { align: 'right' });
+                                                        doc.text('Peso Total', pageWidth - margin - 50, stagesTableY + 6, { align: 'right' });
+                                                        doc.text('Custo Total', pageWidth - margin - 2, stagesTableY + 6, { align: 'right' });
+                                                        yPosition = stagesTableY + 10;
+                                                        
+                                                        activeStages.forEach((s, index) => {
+                                                            checkPageBreak(10);
+                                                            if (index % 2 === 0) {
+                                                                doc.setFillColor(249, 250, 251);
+                                                                doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 8, 'F');
+                                                            }
+                                                            doc.setFontSize(8);
+                                                            doc.setFont('helvetica', 'normal');
+                                                            doc.setTextColor(0, 0, 0);
+                                                            doc.text(`${index + 1}. ${s.stageName}`, margin + 2, yPosition);
+                                                            doc.text(`R$ ${s.costPerDay.toFixed(2)}/kg`, pageWidth - margin - 80, yPosition, { align: 'right' });
+                                                            doc.text(`${pricingCalculation.productWeight.toFixed(2)} kg`, pageWidth - margin - 50, yPosition, { align: 'right' });
+                                                            doc.setFont('helvetica', 'bold');
+                                                            doc.text(`R$ ${s.totalCost.toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
+                                                            yPosition += 8;
+                                                        });
+                                                        
+                                                        checkPageBreak(10);
+                                                        doc.setFillColor(254, 243, 199);
+                                                        doc.rect(margin, yPosition - 4, pageWidth - (2 * margin), 10, 'F');
+                                                        doc.setFontSize(10);
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.setTextColor(146, 64, 14);
+                                                        doc.text('TOTAL ETAPAS:', margin + 2, yPosition + 4);
+                                                        const stageTotal = activeStages.reduce((s, st) => s + st.totalCost, 0);
+                                                        doc.text(`R$ ${stageTotal.toFixed(2)}`, pageWidth - margin - 2, yPosition + 4, { align: 'right' });
+                                                        doc.setTextColor(0, 0, 0);
+                                                        yPosition += 12;
+                                                    }
+                                                    
                                                     addSection('OUTROS CUSTOS');
                                                     if (pricingCalculation.machiningCost > 0) {
                                                         addText(`Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
@@ -3090,11 +2987,9 @@ export default function ProductsPage() {
                                                         addText(`   R$ ${consumablesCostPerKg.toFixed(2)}/kg × ${pricingCalculation.productWeight}kg = R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
                                                     }
                                                     
-                                                    // RESUMO FINANCEIRO
                                                     checkPageBreak(40);
                                                     addSection('RESUMO FINANCEIRO');
                                                     
-                                                    // Box com resultado final
                                                     yPosition += 3;
                                                     const boxY = yPosition;
                                                     doc.setFillColor(240, 240, 240);
@@ -3108,7 +3003,7 @@ export default function ProductsPage() {
                                                     
                                                     yPosition = boxY + 16;
                                                     doc.setFont('helvetica', 'normal');
-                                                    doc.setTextColor(22, 163, 74); // Verde
+                                                    doc.setTextColor(22, 163, 74);
                                                     doc.text(`Margem de Lucro (${pricingCalculation.profitMargin}%):`, margin + 5, yPosition);
                                                     doc.setFont('helvetica', 'bold');
                                                     doc.text(`R$ ${pricingCalculation.profitValue.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
@@ -3132,77 +3027,64 @@ export default function ProductsPage() {
                                                     doc.text(`Preço por kg: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg`, pageWidth - margin - 5, yPosition, { align: 'right' });
                                                     doc.setTextColor(0, 0, 0);
                                                     
-                                                // COMPOSIÇÃO PERCENTUAL
-                                                yPosition += 10;
-                                                checkPageBreak(50);
-                                                addSection('COMPOSIÇÃO DO PREÇO FINAL');
-                                                
-                                                // Calcular total de etapas (usando apenas as ativas)
-                                                const stageTotal = activeStages.length > 0 
-                                                    ? activeStages.reduce((s, st) => s + st.totalCost, 0)
-                                                    : 0;
-                                                
-                                                const percentages = [
-                                                    { label: 'Materiais', value: materialTotal, color: [59, 130, 246] },
-                                                    { label: 'Etapas de Produção', value: stageTotal, color: [16, 185, 129] },
-                                                    { label: 'Usinagem', value: pricingCalculation.machiningCost, color: [245, 158, 11] },
-                                                    { label: 'Insumos', value: pricingCalculation.consumablesCost, color: [139, 92, 246] },
-                                                    { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] }
-                                                ].filter(item => item.value > 0);
-                                                
-                                                percentages.forEach((item, index) => {
-                                                    checkPageBreak();
-                                                    const percentage = ((item.value / pricingCalculation.finalPrice) * 100).toFixed(1);
+                                                    yPosition += 10;
+                                                    checkPageBreak(50);
+                                                    addSection('COMPOSIÇÃO DO PREÇO FINAL');
                                                     
-                                                    // Bolinha colorida
-                                                    doc.setFillColor(item.color[0], item.color[1], item.color[2]);
-                                                    doc.circle(margin + 2, yPosition - 2, 2, 'F');
+                                                    const stageTotal2 = activeStages.length > 0 
+                                                        ? activeStages.reduce((s, st) => s + st.totalCost, 0)
+                                                        : 0;
                                                     
-                                                    // Texto
+                                                    const percentages = [
+                                                        { label: 'Materiais', value: materialTotal, color: [59, 130, 246] },
+                                                        { label: 'Etapas de Produção', value: stageTotal2, color: [16, 185, 129] },
+                                                        { label: 'Usinagem', value: pricingCalculation.machiningCost, color: [245, 158, 11] },
+                                                        { label: 'Insumos', value: pricingCalculation.consumablesCost, color: [139, 92, 246] },
+                                                        { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] }
+                                                    ].filter(item => item.value > 0);
+                                                    
+                                                    percentages.forEach((item, index) => {
+                                                        checkPageBreak();
+                                                        const percentage = ((item.value / pricingCalculation.finalPrice) * 100).toFixed(1);
+                                                        doc.setFillColor(item.color[0], item.color[1], item.color[2]);
+                                                        doc.circle(margin + 2, yPosition - 2, 2, 'F');
+                                                        doc.setFont('helvetica', 'normal');
+                                                        doc.text(`${item.label}:`, margin + 8, yPosition);
+                                                        doc.setFont('helvetica', 'bold');
+                                                        doc.text(`R$ ${item.value.toFixed(2)} (${percentage}%)`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                        yPosition += lineHeight;
+                                                    });
+                                                    
+                                                    yPosition += 5;
+                                                    checkPageBreak(15);
+                                                    doc.setFillColor(255, 243, 205);
+                                                    doc.roundedRect(margin, yPosition, pageWidth - (2 * margin), 15, 2, 2, 'F');
+                                                    doc.setFontSize(9);
+                                                    doc.setTextColor(133, 77, 14);
+                                                    yPosition += 5;
+                                                    doc.text('⚠️ IMPORTANTE:', margin + 5, yPosition);
+                                                    yPosition += 5;
                                                     doc.setFont('helvetica', 'normal');
-                                                    doc.text(`${item.label}:`, margin + 8, yPosition);
+                                                    doc.text('Este é o preço SEM impostos. Lembre-se de adicionar os impostos aplicáveis', margin + 5, yPosition);
+                                                    yPosition += 5;
+                                                    doc.text('(ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.', margin + 5, yPosition);
                                                     
-                                                    // Valor e percentual
-                                                    doc.setFont('helvetica', 'bold');
-                                                    const valueText = `R$ ${item.value.toFixed(2)} (${percentage}%)`;
-                                                    doc.text(valueText, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                    const totalPages = doc.internal.pages.length - 1;
+                                                    for (let i = 1; i <= totalPages; i++) {
+                                                        doc.setPage(i);
+                                                        const footerY = pageHeight - 15;
+                                                        doc.setFontSize(8);
+                                                        doc.setTextColor(150, 150, 150);
+                                                        doc.text('MECALD - Indústria e Comércio', pageWidth / 2, footerY, { align: 'center' });
+                                                        doc.text(`Página ${i} de ${totalPages}`, pageWidth / 2, footerY + 5, { align: 'center' });
+                                                    }
                                                     
-                                                    yPosition += lineHeight;
-                                                });
-                                                
-                                                // Observação importante
-                                                yPosition += 5;
-                                                checkPageBreak(15);
-                                                doc.setFillColor(255, 243, 205);
-                                                doc.roundedRect(margin, yPosition, pageWidth - (2 * margin), 15, 2, 2, 'F');
-                                                doc.setFontSize(9);
-                                                doc.setTextColor(133, 77, 14);
-                                                yPosition += 5;
-                                                doc.text('⚠️ IMPORTANTE:', margin + 5, yPosition);
-                                                yPosition += 5;
-                                                doc.setFont('helvetica', 'normal');
-                                                doc.text('Este é o preço SEM impostos. Lembre-se de adicionar os impostos aplicáveis', margin + 5, yPosition);
-                                                yPosition += 5;
-                                                doc.text('(ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.', margin + 5, yPosition);
-                                                
-                                                // RODAPÉ em todas as páginas
-                                                const totalPages = doc.internal.pages.length - 1;
-                                                for (let i = 1; i <= totalPages; i++) {
-                                                    doc.setPage(i);
-                                                    const footerY = pageHeight - 15;
-                                                    doc.setFontSize(8);
-                                                    doc.setTextColor(150, 150, 150);
-                                                    doc.text('MECALD - Indústria e Comércio', pageWidth / 2, footerY, { align: 'center' });
-                                                    doc.text(`Página ${i} de ${totalPages}`, pageWidth / 2, footerY + 5, { align: 'center' });
-                                                }
-                                                
-                                                // Salvar PDF
-                                                doc.save(`precificacao-${pricingCalculation.productCode}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`);
-                                                
-                                                toast({
-                                                    title: "PDF exportado!",
-                                                    description: "O relatório de precificação foi baixado com sucesso."
-                                                });
+                                                    doc.save(`precificacao-${pricingCalculation.productCode}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`);
+                                                    
+                                                    toast({
+                                                        title: "PDF exportado!",
+                                                        description: "O relatório de precificação foi baixado com sucesso."
+                                                    });
                                                 }}
                                             >
                                                 <Download className="mr-2 h-3 w-3" />
@@ -3214,7 +3096,6 @@ export default function ProductsPage() {
                                 <CardContent>
                                     {pricingCalculation ? (
                                         <div className="space-y-4">
-                                            {/* Custos de Materiais */}
                                             <div>
                                                 <h4 className="text-sm font-medium mb-2">Materiais</h4>
                                                 <div className="space-y-1 text-sm">
@@ -3235,7 +3116,6 @@ export default function ProductsPage() {
 
                                             <Separator />
 
-                                            {/* Custos de Etapas */}
                                             <div>
                                                 <h4 className="text-sm font-medium mb-2">Custos de Produção</h4>
                                                 <div className="space-y-1 text-sm">
@@ -3287,7 +3167,6 @@ export default function ProductsPage() {
 
                                             <Separator />
 
-                                            {/* Total e Margem */}
                                             <div className="space-y-2">
                                                 <div className="flex justify-between text-sm">
                                                     <span className="font-medium">Custo Total</span>
@@ -3301,7 +3180,6 @@ export default function ProductsPage() {
 
                                             <Separator />
 
-                                            {/* Preço Final */}
                                             <div className="p-4 bg-primary/5 rounded-lg border-2 border-primary/20">
                                                 <div className="space-y-2">
                                                     <div className="flex justify-between items-center">
@@ -3319,7 +3197,6 @@ export default function ProductsPage() {
                                                 </div>
                                             </div>
 
-                                            {/* Dica */}
                                             <div className="text-xs text-muted-foreground p-3 bg-muted rounded-md">
                                                 💡 <strong>Dica:</strong> Este é o preço sem impostos. Lembre-se de adicionar 
                                                 os impostos aplicáveis (ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.
@@ -3353,7 +3230,6 @@ export default function ProductsPage() {
                             </CardHeader>
                             <CardContent>
                                 <div className="space-y-4">
-                                    {/* Campo de busca */}
                                     <div className="relative">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                         <Input
@@ -3422,7 +3298,6 @@ export default function ProductsPage() {
                                                                                     const confirmMessage = isDefault
                                                                                         ? `Deseja ocultar "${material.description}"?`
                                                                                         : `Deseja excluir "${material.description}"?`;
-                                                                                    
                                                                                     if (confirm(confirmMessage)) {
                                                                                         deleteMaterial(material.id);
                                                                                     }
@@ -3440,7 +3315,6 @@ export default function ProductsPage() {
                                                 );
                                             })}
 
-                                            {/* Mensagem quando não há resultados */}
                                             {materialSearchQuery && allMaterials.filter(m =>
                                                 m.description.toLowerCase().includes(materialSearchQuery.toLowerCase()) ||
                                                 m.category.toLowerCase().includes(materialSearchQuery.toLowerCase())
@@ -3568,7 +3442,6 @@ export default function ProductsPage() {
                                 </div>
                             </div>
                             
-                            {/* Preview do lead time atual */}
                             {field.value && field.value.length > 0 && (
                                 <div className="mb-4 p-3 bg-muted rounded-md">
                                     <div className="flex items-center gap-2 text-sm">
@@ -3636,7 +3509,6 @@ export default function ProductsPage() {
               <DialogFooter className="pt-6 border-t mt-4">
                  <Button type="submit" disabled={form.formState.isSubmitting}>
                   {form.formState.isSubmitting ? "Salvando..." : "Salvar Produto"}
-
                  </Button>
               </DialogFooter>
             </form>
