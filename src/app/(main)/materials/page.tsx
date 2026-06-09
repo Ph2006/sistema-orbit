@@ -1144,29 +1144,18 @@ export default function MaterialsPage() {
                     ['Material da Barra:', plan.materialDescription || 'Não especificado'], 
                     ['Comprimento da Barra:', `${plan.stockLength} mm`], 
                     ['Espessura do Corte (Kerf):', `${plan.kerf} mm`], 
-                    ['Entrega Prevista do Corte:', (() => {
-                        if (!plan.deliveryDate) return 'N/A';
+                    ['Entrega do Pedido:', (() => {
+                        const orderDeliveryDate = orders.find(o => o.id === plan.orderId)?.deliveryDate;
+                        if (!orderDeliveryDate) return 'N/A';
                         try {
-                            // Se for um Timestamp do Firestore
-                            if (plan.deliveryDate && typeof plan.deliveryDate.toDate === 'function') {
-                                return format(plan.deliveryDate.toDate(), 'dd/MM/yyyy');
+                            if (typeof orderDeliveryDate.toDate === 'function') return format(orderDeliveryDate.toDate(), 'dd/MM/yyyy');
+                            if (typeof orderDeliveryDate === 'string' || typeof orderDeliveryDate === 'number') {
+                                const parsed = new Date(orderDeliveryDate);
+                                if (!isNaN(parsed.getTime())) return format(parsed, 'dd/MM/yyyy');
                             }
-                            // Se for uma string ou número
-                            if (typeof plan.deliveryDate === 'string' || typeof plan.deliveryDate === 'number') {
-                                const parsedDate = new Date(plan.deliveryDate);
-                                if (!isNaN(parsedDate.getTime())) {
-                                    return format(parsedDate, 'dd/MM/yyyy');
-                                }
-                            }
-                            // Se já for um objeto Date
-                            if (plan.deliveryDate instanceof Date && !isNaN(plan.deliveryDate.getTime())) {
-                                return format(plan.deliveryDate, 'dd/MM/yyyy');
-                            }
+                            if (orderDeliveryDate instanceof Date && !isNaN(orderDeliveryDate.getTime())) return format(orderDeliveryDate, 'dd/MM/yyyy');
                             return 'N/A';
-                        } catch (error) {
-                            console.warn('Erro ao formatar data de entrega do plano:', error);
-                            return 'N/A';
-                        }
+                        } catch { return 'N/A'; }
                     })()], 
                 ], 
             });
