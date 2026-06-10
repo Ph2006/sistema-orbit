@@ -7,11 +7,13 @@ import {
   doc, 
   getDoc,
   updateDoc,
+  addDoc,
+  deleteDoc,
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, startOfWeek, endOfWeek, isWithinInterval, addWeeks, subWeeks, startOfMonth, endOfMonth, addMonths, subMonths } from "date-fns";
+import { format, startOfWeek, endOfWeek, isWithinInterval, addWeeks, subWeeks, startOfMonth, endOfMonth, addMonths, subMonths, isSameDay } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -38,7 +40,14 @@ import {
   Package,
   Settings,
   User,
-  Edit
+  Edit,
+  Play,
+  Pause,
+  Ban,
+  Plus,
+  ListChecks,
+  CheckSquare,
+  Trash2
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -49,6 +58,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
 
 // Tipos simplificados
 type AssignedResource = {
@@ -78,6 +88,7 @@ type SimpleTask = {
   customerName: string;
   itemId: string;
   itemDescription: string;
+  itemCode?: string;
   itemNumber?: string;
   stageName: string;
   assignedResource?: AssignedResource;
@@ -118,6 +129,101 @@ type CompanyData = {
   celular?: string;
 };
 
+type TaskStatus =
+  | 'Programada'
+  | 'Liberada para execução'
+  | 'Em execução'
+  | 'Bloqueada'
+  | 'Parcialmente concluída'
+  | 'Concluída'
+  | 'Cancelada';
+
+type ReleaseChecklist = {
+  drawingLatestRevision: boolean;
+  materialsReady: boolean;
+  equipmentAvailable: boolean;
+  inputsAvailable: boolean;
+};
+
+type DailyTask = {
+  id: string;
+  executionDate: Date;
+  orderId: string;
+  orderNumber: string;
+  customerName: string;
+  itemId: string;
+  itemDescription: string;
+  itemCode: string;
+  stageName: string;
+  resourceId: string;
+  resourceName: string;
+  responsibleId: string;
+  responsibleName: string;
+  plannedQuantity: number;
+  plannedHours: number;
+  executedHours: number;
+  priority: string;
+  checklist: ReleaseChecklist;
+  blockReason: string;
+  status: TaskStatus;
+  progress: number;
+  createdAt: Date;
+  startedAt: Date | null;
+  completedAt: Date | null;
+  activeSince: Date | null;
+};
+
+const EMPTY_CHECKLIST: ReleaseChecklist = {
+  drawingLatestRevision: false,
+  materialsReady: false,
+  equipmentAvailable: false,
+  inputsAvailable: false,
+};
+
+const CHECKLIST_FIELDS: { key: keyof ReleaseChecklist; label: string }[] = [
+  { key: 'drawingLatestRevision', label: 'Desenho na última revisão disponível?' },
+  { key: 'materialsReady', label: 'Materiais preparados disponíveis para o recurso?' },
+  { key: 'equipmentAvailable', label: 'Equipamentos disponíveis para o recurso?' },
+  { key: 'inputsAvailable', label: 'Insumos disponíveis para o recurso?' },
+];
+
+const isChecklistComplete = (c: ReleaseChecklist) =>
+  c.drawingLatestRevision && c.materialsReady && c.equipmentAvailable && c.inputsAvailable;
+
+const priorityRank = (p: string) =>
+  (({ urgente: 4, alta: 3, media: 2, baixa: 1 } as Record<string, number>)[p] || 0);
+
+type TaskFormState = {
+  executionDate: string;
+  orderId: string;
+  itemId: string;
+  stageName: string;
+  resourceId: string;
+  responsibleId: string;
+  plannedQuantity: number;
+  plannedHours: number;
+  priority: string;
+  checklist: ReleaseChecklist;
+  blockReason: string;
+  status: TaskStatus;
+};
+
+const newTaskForm = (): TaskFormState => ({
+  executionDate: format(new Date(), 'yyyy-MM-dd'),
+  orderId: '',
+  itemId: '',
+  stageName: '',
+  resourceId: '',
+  responsibleId: '',
+  plannedQuantity: 0,
+  plannedHours: 0,
+  priority: 'media',
+  checklist: { ...EMPTY_CHECKLIST },
+  blockReason: '',
+  status: 'Programada',
+});
+
+
 export default function TasksPage() {
   // Estados simplificados
   const [tasks, setTasks] = useState<SimpleTask[]>([]);
@@ -146,6 +252,14 @@ export default function TasksPage() {
     estimatedHours: 0
   });
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  // Estados para tarefas do dia
+  const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
+  const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<DailyTask | null>(null);
+  const [taskForm, setTaskForm] = useState<TaskFormState>(newTaskForm());
+  const [dailyFilterDate, setDailyFilterDate] = useState<Date>(new Date());
+  const [, setTick] = useState(0);
 
   // Função simplificada para determinar prioridade
   const determinePriority = (orderData: any): string => {
@@ -307,6 +421,7 @@ export default function TasksPage() {
                     customerName: String(orderData.customer?.name || 'Cliente não informado'),
                     itemId: String(item.id || `item-${itemIndex}`),
                     itemDescription: String(item.description || 'Sem descrição'),
+                    itemCode: String(item.code || item.product_code || ''),
                     itemNumber: item.itemNumber ? String(item.itemNumber) : undefined,
                     stageName: String(stage.stageName),
                     assignedResource,
@@ -365,6 +480,48 @@ export default function TasksPage() {
       }
     } catch (error) {
       console.error("Erro ao buscar recursos e equipe:", error);
+    }
+  };
+
+
+  // Buscar tarefas programadas para o dia
+  const fetchDailyTasks = async () => {
+    try {
+      const ref = collection(db, "companies", "mecald", "dailyTasks");
+      const snap = await getDocs(ref);
+      const list: DailyTask[] = snap.docs.map(d => {
+        const data = d.data();
+        return {
+          id: d.id,
+          executionDate: safeToDate(data.executionDate) || new Date(),
+          orderId: data.orderId || '',
+          orderNumber: data.orderNumber || '',
+          customerName: data.customerName || '',
+          itemId: data.itemId || '',
+          itemDescription: data.itemDescription || '',
+          itemCode: data.itemCode || '',
+          stageName: data.stageName || '',
+          resourceId: data.resourceId || '',
+          resourceName: data.resourceName || '',
+          responsibleId: data.responsibleId || '',
+          responsibleName: data.responsibleName || '',
+          plannedQuantity: Number(data.plannedQuantity) || 0,
+          plannedHours: Number(data.plannedHours) || 0,
+          executedHours: Number(data.executedHours) || 0,
+          priority: data.priority || 'media',
+          checklist: { ...EMPTY_CHECKLIST, ...(data.checklist || {}) },
+          blockReason: data.blockReason || '',
+          status: (data.status || 'Programada') as TaskStatus,
+          progress: Number(data.progress) || 0,
+          createdAt: safeToDate(data.createdAt) || new Date(),
+          startedAt: safeToDate(data.startedAt),
+          completedAt: safeToDate(data.completedAt),
+          activeSince: safeToDate(data.activeSince),
+        };
+      });
+      setDailyTasks(list);
+    } catch (e) {
+      console.error("Erro ao buscar tarefas do dia:", e);
     }
   };
 
@@ -437,13 +594,20 @@ export default function TasksPage() {
       const loadData = async () => {
         await Promise.all([
           fetchTasksFromOrders(),
-          fetchResourcesAndTeam()
+          fetchResourcesAndTeam(),
+          fetchDailyTasks()
         ]);
         setIsLoading(false);
       };
       loadData();
     }
   }, [user, authLoading]);
+
+  useEffect(() => {
+    if (!dailyTasks.some(t => t.status === 'Em execução')) return;
+    const id = setInterval(() => setTick(t => t + 1), 60000);
+    return () => clearInterval(id);
+  }, [dailyTasks]);
 
   // Navegação de período
   const navigatePeriod = (direction: 'prev' | 'next') => {
@@ -512,6 +676,271 @@ export default function TasksPage() {
       completionRate: total > 0 ? (completed / total) * 100 : 0,
     };
   }, [getFilteredTasks]);
+
+
+  // Opções em cascata reaproveitando "tasks" (pedidos -> produto -> etapa)
+  const orderOptions = useMemo(() => {
+    const map = new Map<string, { orderId: string; orderNumber: string; customerName: string }>();
+    tasks.forEach(t => {
+      if (!map.has(t.orderId)) {
+        map.set(t.orderId, { orderId: t.orderId, orderNumber: t.orderNumber, customerName: t.customerName });
+      }
+    });
+    return Array.from(map.values());
+  }, [tasks]);
+
+  const itemOptions = useMemo(() => {
+    const map = new Map<string, { itemId: string; itemDescription: string; itemCode: string }>();
+    tasks.filter(t => t.orderId === taskForm.orderId).forEach(t => {
+      if (!map.has(t.itemId)) {
+        map.set(t.itemId, { itemId: t.itemId, itemDescription: t.itemDescription, itemCode: t.itemCode || '' });
+      }
+    });
+    return Array.from(map.values());
+  }, [tasks, taskForm.orderId]);
+
+  const stageOptions = useMemo(() => {
+    return tasks
+      .filter(t => t.orderId === taskForm.orderId && t.itemId === taskForm.itemId)
+      .map(t => ({ stageName: t.stageName, estimatedHours: t.estimatedHours }));
+  }, [tasks, taskForm.orderId, taskForm.itemId]);
+
+  const dailyTasksForDate = useMemo(() => {
+    return dailyTasks
+      .filter(t => isSameDay(t.executionDate, dailyFilterDate))
+      .sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority));
+  }, [dailyTasks, dailyFilterDate]);
+
+  const liveExecutedHours = (t: DailyTask): number => {
+    let h = t.executedHours;
+    if (t.status === 'Em execução' && t.activeSince) {
+      h += (Date.now() - t.activeSince.getTime()) / 3600000;
+    }
+    return h;
+  };
+
+  const taskIPP = (t: DailyTask): number => {
+    if (t.status === 'Concluída') return 100;
+    if (t.plannedHours > 0) return Math.min(100, Math.round((liveExecutedHours(t) / t.plannedHours) * 100));
+    return t.status === 'Em execução' ? 50 : 0;
+  };
+
+  const dailySummary = useMemo(() => {
+    const list = dailyTasksForDate;
+    const planned = list.reduce((s, t) => s + (t.plannedHours || 0), 0);
+    const executed = list.reduce((s, t) => s + liveExecutedHours(t), 0);
+    return {
+      total: list.length,
+      running: list.filter(t => t.status === 'Em execução').length,
+      blocked: list.filter(t => t.status === 'Bloqueada').length,
+      done: list.filter(t => t.status === 'Concluída').length,
+      plannedHours: planned,
+      executedHours: executed,
+    };
+  }, [dailyTasksForDate]);
+
+  const persistTask = async (id: string, patch: any) => {
+    try {
+      await updateDoc(doc(db, "companies", "mecald", "dailyTasks", id), {
+        ...patch,
+        updatedAt: Timestamp.now(),
+      });
+      await fetchDailyTasks();
+    } catch (e) {
+      console.error("Erro ao atualizar tarefa:", e);
+      toast({ variant: "destructive", title: "Erro", description: "Não foi possível atualizar a tarefa." });
+    }
+  };
+
+  const handleReleaseTask = async (t: DailyTask) => {
+    if (!isChecklistComplete(t.checklist)) {
+      toast({
+        variant: "destructive",
+        title: "Checklist incompleto",
+        description: "Bloqueada por preparação insuficiente. Conclua o checklist para liberar.",
+      });
+      return;
+    }
+    await persistTask(t.id, { status: 'Liberada para execução', blockReason: '' });
+  };
+
+  const handleStartTask = async (t: DailyTask) => {
+    if (!isChecklistComplete(t.checklist) && t.status !== 'Parcialmente concluída') {
+      toast({
+        variant: "destructive",
+        title: "Não é possível iniciar",
+        description: "O checklist de liberação precisa estar 100% completo.",
+      });
+      return;
+    }
+    await persistTask(t.id, {
+      status: 'Em execução',
+      activeSince: Timestamp.now(),
+      startedAt: t.startedAt ? Timestamp.fromDate(t.startedAt) : Timestamp.now(),
+    });
+  };
+
+  const handlePauseTask = async (t: DailyTask) => {
+    await persistTask(t.id, {
+      status: 'Parcialmente concluída',
+      executedHours: Number(liveExecutedHours(t).toFixed(2)),
+      activeSince: null,
+    });
+  };
+
+  const handleCompleteTask = async (t: DailyTask) => {
+    await persistTask(t.id, {
+      status: 'Concluída',
+      executedHours: Number(liveExecutedHours(t).toFixed(2)),
+      activeSince: null,
+      progress: 100,
+      completedAt: Timestamp.now(),
+    });
+  };
+
+  const handleBlockTask = async (t: DailyTask) => {
+    const reason = window.prompt("Motivo do bloqueio:", t.blockReason || "");
+    if (reason === null) return;
+    await persistTask(t.id, {
+      status: 'Bloqueada',
+      blockReason: reason.trim() || 'Bloqueada por preparação insuficiente',
+      executedHours: Number(liveExecutedHours(t).toFixed(2)),
+      activeSince: null,
+    });
+  };
+
+  const handleCancelTask = async (t: DailyTask) => {
+    await persistTask(t.id, { status: 'Cancelada', activeSince: null });
+  };
+
+  const handleDeleteTask = async (id: string) => {
+    try {
+      await deleteDoc(doc(db, "companies", "mecald", "dailyTasks", id));
+      setIsTaskModalOpen(false);
+      await fetchDailyTasks();
+      toast({ title: "Tarefa excluída" });
+    } catch (e) {
+      toast({ variant: "destructive", title: "Erro ao excluir" });
+    }
+  };
+
+  const openNewTaskModal = () => {
+    setEditingTask(null);
+    setTaskForm({ ...newTaskForm(), executionDate: format(dailyFilterDate, 'yyyy-MM-dd') });
+    setIsTaskModalOpen(true);
+  };
+
+  const openEditTaskModal = (t: DailyTask) => {
+    setEditingTask(t);
+    setTaskForm({
+      executionDate: format(t.executionDate, 'yyyy-MM-dd'),
+      orderId: t.orderId,
+      itemId: t.itemId,
+      stageName: t.stageName,
+      resourceId: t.resourceId,
+      responsibleId: t.responsibleId,
+      plannedQuantity: t.plannedQuantity,
+      plannedHours: t.plannedHours,
+      priority: t.priority,
+      checklist: { ...t.checklist },
+      blockReason: t.blockReason,
+      status: t.status,
+    });
+    setIsTaskModalOpen(true);
+  };
+
+  const handleSaveTask = async () => {
+    if (!taskForm.orderId || !taskForm.itemId || !taskForm.stageName) {
+      toast({ variant: "destructive", title: "Campos obrigatórios", description: "Selecione pedido, produto e etapa." });
+      return;
+    }
+    if (!taskForm.resourceId) {
+      toast({ variant: "destructive", title: "Recurso obrigatório", description: "Selecione o recurso responsável pela execução." });
+      return;
+    }
+
+    const checklistOk = isChecklistComplete(taskForm.checklist);
+    if (!checklistOk && !taskForm.blockReason.trim()) {
+      toast({
+        variant: "destructive",
+        title: "Observação obrigatória",
+        description: "Há item do checklist marcado como Não. Informe o motivo do bloqueio.",
+      });
+      return;
+    }
+
+    let status = taskForm.status;
+    if ((status === 'Liberada para execução' || status === 'Em execução') && !checklistOk) {
+      status = 'Bloqueada';
+      toast({
+        title: "Tarefa bloqueada",
+        description: "Bloqueada por preparação insuficiente — checklist incompleto.",
+      });
+    }
+
+    const order = orderOptions.find(o => o.orderId === taskForm.orderId);
+    const itemInfo = itemOptions.find(i => i.itemId === taskForm.itemId);
+    const res = resources.find(r => r.id === taskForm.resourceId);
+    const mem = teamMembers.find(m => m.id === taskForm.responsibleId);
+    const [y, m, d] = taskForm.executionDate.split('-').map(Number);
+
+    const payload: any = {
+      executionDate: Timestamp.fromDate(new Date(y, m - 1, d)),
+      orderId: taskForm.orderId,
+      orderNumber: order?.orderNumber || '',
+      customerName: order?.customerName || '',
+      itemId: taskForm.itemId,
+      itemDescription: itemInfo?.itemDescription || '',
+      itemCode: itemInfo?.itemCode || '',
+      stageName: taskForm.stageName,
+      resourceId: taskForm.resourceId,
+      resourceName: res?.name || '',
+      responsibleId: taskForm.responsibleId || '',
+      responsibleName: mem?.name || '',
+      plannedQuantity: Number(taskForm.plannedQuantity) || 0,
+      plannedHours: Number(taskForm.plannedHours) || 0,
+      priority: taskForm.priority,
+      checklist: taskForm.checklist,
+      blockReason: checklistOk ? '' : taskForm.blockReason.trim(),
+      status,
+      updatedAt: Timestamp.now(),
+    };
+
+    try {
+      if (editingTask) {
+        await updateDoc(doc(db, "companies", "mecald", "dailyTasks", editingTask.id), payload);
+      } else {
+        await addDoc(collection(db, "companies", "mecald", "dailyTasks"), {
+          ...payload,
+          executedHours: 0,
+          progress: 0,
+          createdAt: Timestamp.now(),
+          startedAt: null,
+          completedAt: null,
+          activeSince: null,
+        });
+      }
+      toast({ title: editingTask ? "Tarefa atualizada!" : "Tarefa criada!" });
+      setIsTaskModalOpen(false);
+      fetchDailyTasks();
+    } catch (e) {
+      console.error("Erro ao salvar tarefa:", e);
+      toast({ variant: "destructive", title: "Erro ao salvar" });
+    }
+  };
+
+  const getDailyStatusBadge = (status: TaskStatus) => {
+    switch (status) {
+      case 'Programada': return <Badge variant="secondary"><Clock className="mr-1 h-3 w-3" />Programada</Badge>;
+      case 'Liberada para execução': return <Badge className="bg-cyan-600"><CheckSquare className="mr-1 h-3 w-3" />Liberada</Badge>;
+      case 'Em execução': return <Badge className="bg-blue-600 animate-pulse"><Play className="mr-1 h-3 w-3" />Em execução</Badge>;
+      case 'Bloqueada': return <Badge variant="destructive"><Ban className="mr-1 h-3 w-3" />Bloqueada</Badge>;
+      case 'Parcialmente concluída': return <Badge className="bg-amber-500"><Pause className="mr-1 h-3 w-3" />Parcial</Badge>;
+      case 'Concluída': return <Badge className="bg-green-600"><CheckCircle className="mr-1 h-3 w-3" />Concluída</Badge>;
+      case 'Cancelada': return <Badge variant="outline" className="text-muted-foreground">Cancelada</Badge>;
+      default: return <Badge variant="outline">{status}</Badge>;
+    }
+  };
 
   // Funções de manipulação de alocação
   const handleAllocateTask = (task: SimpleTask) => {
@@ -811,6 +1240,7 @@ export default function TasksPage() {
       <Tabs defaultValue="tasks" className="space-y-4">
         <TabsList>
           <TabsTrigger value="tasks">Tarefas Ativas</TabsTrigger>
+          <TabsTrigger value="daily">Tarefas do Dia</TabsTrigger>
           <TabsTrigger value="analytics">Análise de Performance</TabsTrigger>
         </TabsList>
 
@@ -1019,6 +1449,162 @@ export default function TasksPage() {
           </Card>
         </TabsContent>
 
+
+        <TabsContent value="daily" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div className="flex items-center gap-2">
+                  <ListChecks className="h-5 w-5 text-muted-foreground" />
+                  <CardTitle>Tarefas do Dia</CardTitle>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="date"
+                    value={format(dailyFilterDate, 'yyyy-MM-dd')}
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      const [y, m, d] = e.target.value.split('-').map(Number);
+                      setDailyFilterDate(new Date(y, m - 1, d));
+                    }}
+                    className="w-[170px]"
+                  />
+                  <Button onClick={openNewTaskModal}>
+                    <Plus className="mr-2 h-4 w-4" /> Nova Tarefa
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+                <div className="p-3 rounded-lg bg-muted text-center">
+                  <p className="text-2xl font-bold">{dailySummary.total}</p>
+                  <p className="text-xs text-muted-foreground">Tarefas</p>
+                </div>
+                <div className="p-3 rounded-lg bg-blue-50 text-center">
+                  <p className="text-2xl font-bold text-blue-600">{dailySummary.running}</p>
+                  <p className="text-xs text-muted-foreground">Em execução</p>
+                </div>
+                <div className="p-3 rounded-lg bg-red-50 text-center">
+                  <p className="text-2xl font-bold text-red-600">{dailySummary.blocked}</p>
+                  <p className="text-xs text-muted-foreground">Bloqueadas</p>
+                </div>
+                <div className="p-3 rounded-lg bg-green-50 text-center">
+                  <p className="text-2xl font-bold text-green-600">{dailySummary.done}</p>
+                  <p className="text-xs text-muted-foreground">Concluídas</p>
+                </div>
+                <div className="p-3 rounded-lg bg-secondary text-center">
+                  <p className="text-sm font-bold">
+                    {dailySummary.executedHours.toFixed(1)}h / {dailySummary.plannedHours.toFixed(1)}h
+                  </p>
+                  <p className="text-xs text-muted-foreground">Exec. / Planej.</p>
+                </div>
+              </div>
+
+              {dailyTasksForDate.length === 0 ? (
+                <div className="text-center py-12">
+                  <ListChecks className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                  <h3 className="text-lg font-medium mb-2">Nenhuma tarefa para esta data</h3>
+                  <p className="text-gray-600 mb-4">Clique em "Nova Tarefa" para programar a execução do dia.</p>
+                </div>
+              ) : (
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                  {dailyTasksForDate.map(t => {
+                    const exec = liveExecutedHours(t);
+                    const ready = isChecklistComplete(t.checklist);
+                    const isToday = isSameDay(t.executionDate, new Date());
+                    return (
+                      <Card
+                        key={t.id}
+                        className="p-4 border-l-4"
+                        style={{
+                          borderLeftColor:
+                            t.status === 'Concluída' ? '#16a34a' :
+                            t.status === 'Em execução' ? '#2563eb' :
+                            t.status === 'Bloqueada' ? '#dc2626' :
+                            t.status === 'Parcialmente concluída' ? '#f59e0b' :
+                            t.status === 'Cancelada' ? '#9ca3af' : '#06b6d4'
+                        }}
+                      >
+                        <div className="flex items-start justify-between mb-2">
+                          <div className="min-w-0">
+                            <p className="font-semibold text-sm truncate">
+                              Pedido {t.orderNumber} {t.itemCode && <span className="text-muted-foreground">| Produto {t.itemCode}</span>}
+                            </p>
+                            <p className="text-xs text-muted-foreground truncate">{t.itemDescription}</p>
+                          </div>
+                          {getDailyStatusBadge(t.status)}
+                        </div>
+
+                        <div className="space-y-1 text-sm">
+                          <p><span className="text-muted-foreground">Etapa:</span> <span className="font-medium">{t.stageName}</span></p>
+                          <p><span className="text-muted-foreground">Recurso:</span> <span className="font-medium">{t.resourceName || 'Não alocado'}</span></p>
+                          {t.responsibleName && <p><span className="text-muted-foreground">Responsável:</span> {t.responsibleName}</p>}
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs text-muted-foreground">Prazo: {isToday ? 'Hoje' : format(t.executionDate, 'dd/MM')}</span>
+                            {getPriorityBadge(t.priority)}
+                          </div>
+                        </div>
+
+                        <div className="mt-2">
+                          <div className="flex items-center justify-between text-xs mb-1">
+                            <span className="text-muted-foreground">IPP: {taskIPP(t)}%</span>
+                            <span className="text-muted-foreground">{t.plannedHours}h planej. / {exec.toFixed(1)}h exec.</span>
+                          </div>
+                          <Progress value={taskIPP(t)} className="h-1.5" />
+                        </div>
+
+                        {!ready && (
+                          <div className="mt-2 flex items-center gap-1 text-xs text-red-600">
+                            <Ban className="h-3 w-3" />
+                            <span>Preparação insuficiente{t.blockReason ? `: ${t.blockReason}` : ''}</span>
+                          </div>
+                        )}
+
+                        <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t">
+                          {t.status === 'Programada' && (
+                            <Button size="sm" variant="outline" onClick={() => handleReleaseTask(t)}>
+                              <CheckSquare className="h-3 w-3 mr-1" /> Liberar
+                            </Button>
+                          )}
+                          {(t.status === 'Liberada para execução' || t.status === 'Parcialmente concluída') && (
+                            <Button size="sm" className="bg-blue-600" onClick={() => handleStartTask(t)}>
+                              <Play className="h-3 w-3 mr-1" /> Iniciar
+                            </Button>
+                          )}
+                          {t.status === 'Em execução' && (
+                            <>
+                              <Button size="sm" variant="outline" onClick={() => handlePauseTask(t)}>
+                                <Pause className="h-3 w-3 mr-1" /> Pausar
+                              </Button>
+                              <Button size="sm" className="bg-green-600" onClick={() => handleCompleteTask(t)}>
+                                <CheckCircle className="h-3 w-3 mr-1" /> Concluir
+                              </Button>
+                            </>
+                          )}
+                          {['Liberada para execução', 'Em execução', 'Parcialmente concluída', 'Programada'].includes(t.status) && (
+                            <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleBlockTask(t)}>
+                              <Ban className="h-3 w-3 mr-1" /> Bloquear
+                            </Button>
+                          )}
+                          {t.status !== 'Cancelada' && t.status !== 'Concluída' && (
+                            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => handleCancelTask(t)}>
+                              Cancelar
+                            </Button>
+                          )}
+                          <Button size="sm" variant="ghost" onClick={() => openEditTaskModal(t)}>
+                            <Edit className="h-3 w-3 mr-1" /> Editar
+                          </Button>
+                        </div>
+                      </Card>
+                    );
+                  })}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
         {/* Aba de Análise de Performance */}
         <TabsContent value="analytics" className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
@@ -1073,6 +1659,209 @@ export default function TasksPage() {
           </div>
         </TabsContent>
       </Tabs>
+
+
+      <Dialog open={isTaskModalOpen} onOpenChange={setIsTaskModalOpen}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editingTask ? 'Editar Tarefa do Dia' : 'Nova Tarefa do Dia'}</DialogTitle>
+            <DialogDescription>
+              Programe a execução de uma etapa do produto e libere o recurso através do checklist.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Data da execução</Label>
+                <Input
+                  type="date"
+                  value={taskForm.executionDate}
+                  onChange={(e) => setTaskForm(p => ({ ...p, executionDate: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Prioridade</Label>
+                <Select value={taskForm.priority} onValueChange={(v) => setTaskForm(p => ({ ...p, priority: v }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="baixa">Baixa</SelectItem>
+                    <SelectItem value="media">Média</SelectItem>
+                    <SelectItem value="alta">Alta</SelectItem>
+                    <SelectItem value="urgente">Urgente</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Pedido</Label>
+              <Select
+                value={taskForm.orderId}
+                onValueChange={(v) => setTaskForm(p => ({ ...p, orderId: v, itemId: '', stageName: '' }))}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecione o pedido" /></SelectTrigger>
+                <SelectContent>
+                  {orderOptions.map(o => (
+                    <SelectItem key={o.orderId} value={o.orderId}>
+                      Pedido {o.orderNumber} — {o.customerName}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Produto do pedido</Label>
+              <Select
+                value={taskForm.itemId}
+                disabled={!taskForm.orderId}
+                onValueChange={(v) => setTaskForm(p => ({ ...p, itemId: v, stageName: '' }))}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecione o produto" /></SelectTrigger>
+                <SelectContent>
+                  {itemOptions.map(i => (
+                    <SelectItem key={i.itemId} value={i.itemId}>
+                      {i.itemCode ? `[${i.itemCode}] ` : ''}{i.itemDescription}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Etapa do produto</Label>
+              <Select
+                value={taskForm.stageName}
+                disabled={!taskForm.itemId}
+                onValueChange={(v) => {
+                  const st = stageOptions.find(s => s.stageName === v);
+                  setTaskForm(p => ({ ...p, stageName: v, plannedHours: p.plannedHours || (st?.estimatedHours || 0) }));
+                }}
+              >
+                <SelectTrigger><SelectValue placeholder="Selecione a etapa" /></SelectTrigger>
+                <SelectContent>
+                  {stageOptions.map((s, i) => (
+                    <SelectItem key={`${s.stageName}-${i}`} value={s.stageName}>{s.stageName}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Recurso</Label>
+                <Select value={taskForm.resourceId} onValueChange={(v) => setTaskForm(p => ({ ...p, resourceId: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Selecione o recurso" /></SelectTrigger>
+                  <SelectContent>
+                    {resources.map(r => (
+                      <SelectItem key={r.id} value={r.id}>{r.name} ({r.type})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Responsável</Label>
+                <Select value={taskForm.responsibleId} onValueChange={(v) => setTaskForm(p => ({ ...p, responsibleId: v }))}>
+                  <SelectTrigger><SelectValue placeholder="Selecione o responsável" /></SelectTrigger>
+                  <SelectContent>
+                    {teamMembers.map(m => (
+                      <SelectItem key={m.id} value={m.id}>{m.name} — {m.position}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            {taskForm.resourceId && dailyTasks.some(t =>
+              t.resourceId === taskForm.resourceId && t.status === 'Em execução' &&
+              (!editingTask || t.id !== editingTask.id)) && (
+              <div className="flex items-center gap-2 p-2 bg-orange-50 border border-orange-200 rounded text-sm text-orange-700">
+                <AlertTriangle className="h-4 w-4" />
+                <span>Atenção: este recurso já está em execução em outra tarefa.</span>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Quantidade planejada</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={taskForm.plannedQuantity}
+                  onChange={(e) => setTaskForm(p => ({ ...p, plannedQuantity: Number(e.target.value) || 0 }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Horas planejadas</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={taskForm.plannedHours}
+                  onChange={(e) => setTaskForm(p => ({ ...p, plannedHours: Number(e.target.value) || 0 }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-base">Checklist de liberação</Label>
+              {CHECKLIST_FIELDS.map(({ key, label }) => (
+                <div key={key} className="flex items-center justify-between rounded-lg border p-3">
+                  <Label className="cursor-pointer font-normal">{label}</Label>
+                  <Checkbox
+                    checked={taskForm.checklist[key]}
+                    onCheckedChange={(c) => setTaskForm(p => ({
+                      ...p,
+                      checklist: { ...p.checklist, [key]: c === true },
+                    }))}
+                  />
+                </div>
+              ))}
+            </div>
+
+            {!isChecklistComplete(taskForm.checklist) && (
+              <div className="space-y-2">
+                <Label className="text-red-600">Observação / motivo do bloqueio *</Label>
+                <Textarea
+                  placeholder="Descreva o que está faltando (material, desenho, equipamento, insumo...)"
+                  value={taskForm.blockReason}
+                  onChange={(e) => setTaskForm(p => ({ ...p, blockReason: e.target.value }))}
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label>Status da tarefa</Label>
+              <Select value={taskForm.status} onValueChange={(v) => setTaskForm(p => ({ ...p, status: v as TaskStatus }))}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Programada">Programada</SelectItem>
+                  <SelectItem value="Liberada para execução" disabled={!isChecklistComplete(taskForm.checklist)}>
+                    Liberada para execução {!isChecklistComplete(taskForm.checklist) && '(checklist incompleto)'}
+                  </SelectItem>
+                  <SelectItem value="Bloqueada">Bloqueada</SelectItem>
+                  <SelectItem value="Parcialmente concluída">Parcialmente concluída</SelectItem>
+                  <SelectItem value="Concluída">Concluída</SelectItem>
+                  <SelectItem value="Cancelada">Cancelada</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter className="flex items-center justify-between sm:justify-between">
+            {editingTask ? (
+              <Button variant="ghost" className="text-red-600 mr-auto" onClick={() => handleDeleteTask(editingTask.id)}>
+                <Trash2 className="h-4 w-4 mr-1" /> Excluir
+              </Button>
+            ) : <span />}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setIsTaskModalOpen(false)}>Cancelar</Button>
+              <Button onClick={handleSaveTask}>Salvar Tarefa</Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog de Alocação */}
       <Dialog open={isAllocationDialogOpen} onOpenChange={setIsAllocationDialogOpen}>
