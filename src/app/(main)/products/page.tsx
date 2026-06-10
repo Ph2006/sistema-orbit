@@ -943,6 +943,48 @@ export default function ProductsPage() {
     }
   }, [products, toast]);
 
+  // Comprime e converte imagem para base64
+  const compressImageToDataUrl = (file: File, maxWidth = 1000, quality = 0.7): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Falha ao ler o arquivo"));
+      reader.onload = (e) => {
+        const img = new window.Image();
+        img.onerror = () => reject(new Error("Falha ao decodificar a imagem"));
+        img.onload = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            let { width, height } = img;
+            if (width > maxWidth) {
+              height = Math.round((height * maxWidth) / width);
+              width = maxWidth;
+            }
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return reject(new Error("Canvas não suportado"));
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, width, height);
+            ctx.drawImage(img, 0, 0, width, height);
+            resolve(canvas.toDataURL('image/jpeg', quality));
+          } catch (err) {
+            reject(err);
+          }
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const getImageDimensions = (dataUrl: string): Promise<{ w: number; h: number }> =>
+    new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => resolve({ w: img.width, h: img.height });
+      img.onerror = () => resolve({ w: 4, h: 3 });
+      img.src = dataUrl;
+    });
+
   // Upload de imagens em uma tarefa
   const handlePlanImageUpload = useCallback(async (taskIndex: number, files: File[]) => {
     if (!files.length) return;
@@ -4293,48 +4335,5 @@ export default function ProductsPage() {
       </Dialog>
     </>
   );
-
-// Comprime e converte imagem para base64 (reduz tamanho antes de salvar no Firestore)
-const compressImageToDataUrl = (file: File, maxWidth = 1000, quality = 0.7): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Falha ao ler o arquivo"));
-    reader.onload = (e) => {
-      const img = new window.Image(); // window.Image evita conflito com next/image
-      img.onerror = () => reject(new Error("Falha ao decodificar a imagem"));
-      img.onload = () => {
-        try {
-          const canvas = document.createElement('canvas');
-          let { width, height } = img;
-          if (width > maxWidth) {
-            height = Math.round((height * maxWidth) / width);
-            width = maxWidth;
-          }
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          if (!ctx) return reject(new Error("Canvas não suportado neste navegador"));
-          ctx.fillStyle = '#ffffff'; // fundo branco p/ PNG transparente
-          ctx.fillRect(0, 0, width, height);
-          ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', quality));
-        } catch (err) {
-          reject(err);
-        }
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-};
-
-// Lê dimensões de um dataURL (usado para manter proporção das imagens no PDF)
-const getImageDimensions = (dataUrl: string): Promise<{ w: number; h: number }> =>
-  new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ w: img.width, h: img.height });
-    img.onerror = () => resolve({ w: 4, h: 3 });
-    img.src = dataUrl;
-  });
 
 }
