@@ -13,7 +13,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
-import { format, startOfWeek, endOfWeek, isWithinInterval, addWeeks, subWeeks, startOfMonth, endOfMonth, addMonths, subMonths, isSameDay } from "date-fns";
+import { format, startOfWeek, endOfWeek, isWithinInterval, addWeeks, subWeeks, startOfMonth, endOfMonth, addMonths, subMonths, isSameDay, addDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -155,6 +155,7 @@ type DailyTask = {
   itemDescription: string;
   itemCode: string;
   stageName: string;
+  stageOrder: number;
   resourceId: string;
   resourceName: string;
   responsibleId: string;
@@ -193,11 +194,55 @@ const isChecklistComplete = (c: ReleaseChecklist) =>
 const priorityRank = (p: string) =>
   (({ urgente: 4, alta: 3, media: 2, baixa: 1 } as Record<string, number>)[p] || 0);
 
+const HOURS_PER_DAY = 8; // jornada usada para converter horas em dias
+
+const isBusinessDay = (d: Date) => {
+  const g = d.getDay();
+  return g !== 0 && g !== 6; // se quiser, inclua feriados aqui
+};
+
+const nextBusinessDay = (d: Date) => {
+  const r = new Date(d);
+  do {
+    r.setDate(r.getDate() + 1);
+  } while (!isBusinessDay(r));
+  return r;
+};
+
+const addBusinessDays = (start: Date, days: number) => {
+  let r = new Date(start);
+  let rem = days;
+  while (rem > 0) {
+    r = nextBusinessDay(r);
+    rem--;
+  }
+  return r;
+};
+
+const hoursToDays = (h: number) => Math.max(1, Math.ceil((h || 0) / HOURS_PER_DAY));
+
+// Encadeia etapas: cada uma começa no dia útil seguinte ao término da anterior
+const predictChain = (
+  startDate: Date,
+  stages: { estimatedHours: number }[]
+) => {
+  let start = isBusinessDay(startDate) ? new Date(startDate) : nextBusinessDay(startDate);
+  return stages.map((s, i) => {
+    if (i > 0) start = nextBusinessDay(start);
+    const durationDays = hoursToDays(s.estimatedHours);
+    const finish = durationDays <= 1 ? new Date(start) : addBusinessDays(start, durationDays - 1);
+    const predicted = { start: new Date(start), finish };
+    start = finish;
+    return predicted;
+  });
+};
+
 type TaskFormState = {
   executionDate: string;
   orderId: string;
   itemId: string;
   stageName: string;
+  stageOrder: number;
   resourceId: string;
   responsibleId: string;
   plannedQuantity: number;
@@ -206,6 +251,7 @@ type TaskFormState = {
   checklist: ReleaseChecklist;
   blockReason: string;
   status: TaskStatus;
+  scheduleChain: boolean;
 };
 
 const newTaskForm = (): TaskFormState => ({
@@ -213,6 +259,7 @@ const newTaskForm = (): TaskFormState => ({
   orderId: '',
   itemId: '',
   stageName: '',
+  stageOrder: 0,
   resourceId: '',
   responsibleId: '',
   plannedQuantity: 0,
@@ -221,6 +268,7 @@ const newTaskForm = (): TaskFormState => ({
   checklist: { ...EMPTY_CHECKLIST },
   blockReason: '',
   status: 'Programada',
+  scheduleChain: false,
 });
 
 
@@ -259,6 +307,8 @@ export default function TasksPage() {
   const [editingTask, setEditingTask] = useState<DailyTask | null>(null);
   const [taskForm, setTaskForm] = useState<TaskFormState>(newTaskForm());
   const [dailyFilterDate, setDailyFilterDate] = useState<Date>(new Date());
+  const [scheduleViewMode, setScheduleViewMode] = useState<'day' | 'week'>('day');
+  const [weekAnchor, setWeekAnchor] = useState<Date>(new Date());
   const [, setTick] = useState(0);
 
   // Função simplificada para determinar prioridade
@@ -501,6 +551,7 @@ export default function TasksPage() {
           itemDescription: data.itemDescription || '',
           itemCode: data.itemCode || '',
           stageName: data.stageName || '',
+          stageOrder: Number(data.stageOrder) || 0,
           resourceId: data.resourceId || '',
           resourceName: data.resourceName || '',
           responsibleId: data.responsibleId || '',
@@ -711,6 +762,97 @@ export default function TasksPage() {
       .sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority));
   }, [dailyTasks, dailyFilterDate]);
 
+  const taskPredictions = useMemo(() => {
+    const groups = new Map<string, DailyTask[]>();
+    const result = new Map<string, { start: Date; finish: Date }>();
+
+    dailyTasks
+      .filter(t => t.status !== 'Cancelada')
+      .forEach(t => {
+        const k = `${t.orderId}__${t.itemId}`;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k)!.push(t);
+      });
+
+    groups.forEach(list => {
+      const ordered = [...list].sort((a, b) =>
+        (a.stageOrder - b.stageOrder) || (a.executionDate.getTime() - b.executionDate.getTime())
+      );
+
+      let prevFinish: Date | null = null;
+      ordered.forEach(t => {
+        if (t.status === 'Concluída' && t.completedAt) {
+          result.set(t.id, { start: t.startedAt || t.completedAt, finish: t.completedAt });
+          prevFinish = t.completedAt;
+          return;
+        }
+
+        let start = t.executionDate;
+        if (prevFinish) {
+          const afterPrev = nextBusinessDay(prevFinish);
+          start = afterPrev > t.executionDate ? afterPrev : t.executionDate;
+        }
+        if (!isBusinessDay(start)) start = nextBusinessDay(start);
+
+        const dur = hoursToDays(t.plannedHours);
+        const finish = dur <= 1 ? new Date(start) : addBusinessDays(start, dur - 1);
+        result.set(t.id, { start, finish });
+        prevFinish = finish;
+      });
+    });
+
+    return result;
+  }, [dailyTasks]);
+
+  const productForecast = useMemo(() => {
+    const m = new Map<string, { orderNumber: string; itemCode: string; itemDescription: string; finish: Date; pending: number; total: number }>();
+
+    dailyTasks.forEach(t => {
+      if (t.status === 'Cancelada') return;
+      const pred = taskPredictions.get(t.id);
+      if (!pred) return;
+
+      const k = `${t.orderId}__${t.itemId}`;
+      const cur = m.get(k);
+      const pending = t.status !== 'Concluída' ? 1 : 0;
+
+      if (!cur) {
+        m.set(k, {
+          orderNumber: t.orderNumber,
+          itemCode: t.itemCode,
+          itemDescription: t.itemDescription,
+          finish: pred.finish,
+          pending,
+          total: 1,
+        });
+      } else {
+        if (pred.finish > cur.finish) cur.finish = pred.finish;
+        cur.pending += pending;
+        cur.total += 1;
+      }
+    });
+
+    return Array.from(m.values()).sort((a, b) => a.finish.getTime() - b.finish.getTime());
+  }, [dailyTasks, taskPredictions]);
+
+  const weekDays = useMemo(() => {
+    const start = startOfWeek(weekAnchor, { locale: ptBR });
+    return Array.from({ length: 7 }, (_, i) => addDays(start, i));
+  }, [weekAnchor]);
+
+  const tasksByDay = useMemo(() => {
+    const m = new Map<string, DailyTask[]>();
+    weekDays.forEach(d => m.set(format(d, 'yyyy-MM-dd'), []));
+
+    dailyTasks.forEach(t => {
+      const key = format(t.executionDate, 'yyyy-MM-dd');
+      if (m.has(key)) m.get(key)!.push(t);
+    });
+
+    m.forEach(list => list.sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority)));
+    return m;
+  }, [dailyTasks, weekDays]);
+
   const liveExecutedHours = (t: DailyTask): number => {
     let h = t.executedHours;
     if (t.status === 'Em execução' && t.activeSince) {
@@ -837,6 +979,7 @@ export default function TasksPage() {
       orderId: t.orderId,
       itemId: t.itemId,
       stageName: t.stageName,
+      stageOrder: t.stageOrder || 0,
       resourceId: t.resourceId,
       responsibleId: t.responsibleId,
       plannedQuantity: t.plannedQuantity,
@@ -845,6 +988,7 @@ export default function TasksPage() {
       checklist: { ...t.checklist },
       blockReason: t.blockReason,
       status: t.status,
+      scheduleChain: false,
     });
     setIsTaskModalOpen(true);
   };
@@ -855,72 +999,112 @@ export default function TasksPage() {
       return;
     }
     if (!taskForm.resourceId) {
-      toast({ variant: "destructive", title: "Recurso obrigatório", description: "Selecione o recurso responsável pela execução." });
+      toast({ variant: "destructive", title: "Recurso obrigatório", description: "Selecione o recurso responsável." });
       return;
     }
 
     const checklistOk = isChecklistComplete(taskForm.checklist);
     if (!checklistOk && !taskForm.blockReason.trim()) {
-      toast({
-        variant: "destructive",
-        title: "Observação obrigatória",
-        description: "Há item do checklist marcado como Não. Informe o motivo do bloqueio.",
-      });
+      toast({ variant: "destructive", title: "Observação obrigatória", description: "Há item do checklist como Não. Informe o motivo do bloqueio." });
       return;
     }
 
     let status = taskForm.status;
     if ((status === 'Liberada para execução' || status === 'Em execução') && !checklistOk) {
       status = 'Bloqueada';
-      toast({
-        title: "Tarefa bloqueada",
-        description: "Bloqueada por preparação insuficiente — checklist incompleto.",
-      });
+      toast({ title: "Tarefa bloqueada", description: "Bloqueada por preparação insuficiente — checklist incompleto." });
     }
 
     const order = orderOptions.find(o => o.orderId === taskForm.orderId);
     const itemInfo = itemOptions.find(i => i.itemId === taskForm.itemId);
     const res = resources.find(r => r.id === taskForm.resourceId);
     const mem = teamMembers.find(m => m.id === taskForm.responsibleId);
-    const [y, m, d] = taskForm.executionDate.split('-').map(Number);
+    const [y, mo, d] = taskForm.executionDate.split('-').map(Number);
+    const baseDate = new Date(y, mo - 1, d);
 
-    const payload: any = {
-      executionDate: Timestamp.fromDate(new Date(y, m - 1, d)),
+    const base = {
       orderId: taskForm.orderId,
       orderNumber: order?.orderNumber || '',
       customerName: order?.customerName || '',
       itemId: taskForm.itemId,
       itemDescription: itemInfo?.itemDescription || '',
       itemCode: itemInfo?.itemCode || '',
-      stageName: taskForm.stageName,
       resourceId: taskForm.resourceId,
       resourceName: res?.name || '',
       responsibleId: taskForm.responsibleId || '',
       responsibleName: mem?.name || '',
-      plannedQuantity: Number(taskForm.plannedQuantity) || 0,
-      plannedHours: Number(taskForm.plannedHours) || 0,
       priority: taskForm.priority,
-      checklist: taskForm.checklist,
-      blockReason: checklistOk ? '' : taskForm.blockReason.trim(),
-      status,
-      updatedAt: Timestamp.now(),
     };
 
     try {
       if (editingTask) {
-        await updateDoc(doc(db, "companies", "mecald", "dailyTasks", editingTask.id), payload);
+        await updateDoc(doc(db, "companies", "mecald", "dailyTasks", editingTask.id), {
+          ...base,
+          executionDate: Timestamp.fromDate(baseDate),
+          stageName: taskForm.stageName,
+          stageOrder: taskForm.stageOrder,
+          plannedQuantity: Number(taskForm.plannedQuantity) || 0,
+          plannedHours: Number(taskForm.plannedHours) || 0,
+          checklist: taskForm.checklist,
+          blockReason: checklistOk ? '' : taskForm.blockReason.trim(),
+          status,
+          updatedAt: Timestamp.now(),
+        });
+        toast({ title: "Tarefa atualizada!" });
+
+      } else if (taskForm.scheduleChain) {
+        const startIdx = taskForm.stageOrder;
+        const chainStages = stageOptions.slice(startIdx);
+        const durations = chainStages.map((s, i) => ({
+          estimatedHours: i === 0 ? (Number(taskForm.plannedHours) || s.estimatedHours || 0) : (s.estimatedHours || 0),
+        }));
+        const chain = predictChain(baseDate, durations);
+
+        await Promise.all(chainStages.map((s, i) => addDoc(
+          collection(db, "companies", "mecald", "dailyTasks"),
+          {
+            ...base,
+            executionDate: Timestamp.fromDate(chain[i].start),
+            stageName: s.stageName,
+            stageOrder: startIdx + i,
+            plannedQuantity: Number(taskForm.plannedQuantity) || 0,
+            plannedHours: durations[i].estimatedHours,
+            checklist: i === 0 ? taskForm.checklist : { ...EMPTY_CHECKLIST },
+            blockReason: i === 0 ? (checklistOk ? '' : taskForm.blockReason.trim()) : '',
+            status: i === 0 ? status : 'Programada',
+            executedHours: 0,
+            progress: 0,
+            createdAt: Timestamp.now(),
+            startedAt: null,
+            completedAt: null,
+            activeSince: null,
+            updatedAt: Timestamp.now(),
+          }
+        )));
+        toast({ title: "Produção programada!", description: `${chainStages.length} etapa(s) criada(s) em cadeia.` });
+
       } else {
         await addDoc(collection(db, "companies", "mecald", "dailyTasks"), {
-          ...payload,
+          ...base,
+          executionDate: Timestamp.fromDate(baseDate),
+          stageName: taskForm.stageName,
+          stageOrder: taskForm.stageOrder,
+          plannedQuantity: Number(taskForm.plannedQuantity) || 0,
+          plannedHours: Number(taskForm.plannedHours) || 0,
+          checklist: taskForm.checklist,
+          blockReason: checklistOk ? '' : taskForm.blockReason.trim(),
+          status,
           executedHours: 0,
           progress: 0,
           createdAt: Timestamp.now(),
           startedAt: null,
           completedAt: null,
           activeSince: null,
+          updatedAt: Timestamp.now(),
         });
+        toast({ title: "Tarefa criada!" });
       }
-      toast({ title: editingTask ? "Tarefa atualizada!" : "Tarefa criada!" });
+
       setIsTaskModalOpen(false);
       fetchDailyTasks();
     } catch (e) {
@@ -1146,6 +1330,104 @@ export default function TasksPage() {
         description: "Não foi possível gerar o arquivo PDF.",
       });
     }
+  };
+
+  const renderTaskCard = (t: DailyTask) => {
+    const exec = liveExecutedHours(t);
+    const ready = isChecklistComplete(t.checklist);
+    const isToday = isSameDay(t.executionDate, new Date());
+    const pred = taskPredictions.get(t.id);
+
+    return (
+      <Card
+        key={t.id}
+        className="p-3 border-l-4"
+        style={{
+          borderLeftColor:
+            t.status === 'Concluída' ? '#16a34a' :
+            t.status === 'Em execução' ? '#2563eb' :
+            t.status === 'Bloqueada' ? '#dc2626' :
+            t.status === 'Parcialmente concluída' ? '#f59e0b' :
+            t.status === 'Cancelada' ? '#9ca3af' : '#06b6d4'
+        }}
+      >
+        <div className="flex items-start justify-between mb-1 gap-2">
+          <div className="min-w-0">
+            <p className="font-semibold text-xs truncate">
+              Ped. {t.orderNumber} {t.itemCode && <span className="text-muted-foreground">| {t.itemCode}</span>}
+            </p>
+            <p className="text-[11px] text-muted-foreground truncate">{t.itemDescription}</p>
+          </div>
+          {getDailyStatusBadge(t.status)}
+        </div>
+
+        <div className="space-y-0.5 text-xs">
+          <p className="truncate"><span className="text-muted-foreground">Etapa:</span> <span className="font-medium">{t.stageName}</span></p>
+          <p className="truncate"><span className="text-muted-foreground">Recurso:</span> <span className="font-medium">{t.resourceName || '—'}</span></p>
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-muted-foreground">{isToday ? 'Hoje' : format(t.executionDate, 'dd/MM')}</span>
+            {getPriorityBadge(t.priority)}
+          </div>
+        </div>
+
+        {pred && t.status !== 'Concluída' && (
+          <p className="text-[11px] text-muted-foreground mt-1">
+            Previsão de término: <span className="font-medium text-foreground">{format(pred.finish, 'dd/MM/yyyy')}</span>
+          </p>
+        )}
+
+        <div className="mt-2">
+          <div className="flex items-center justify-between text-[11px] mb-1">
+            <span className="text-muted-foreground">IPP: {taskIPP(t)}%</span>
+            <span className="text-muted-foreground">{t.plannedHours}h / {exec.toFixed(1)}h</span>
+          </div>
+          <Progress value={taskIPP(t)} className="h-1.5" />
+        </div>
+
+        {!ready && t.status !== 'Concluída' && (
+          <div className="mt-1.5 flex items-center gap-1 text-[11px] text-red-600">
+            <Ban className="h-3 w-3 shrink-0" />
+            <span className="truncate">Prep. insuficiente{t.blockReason ? `: ${t.blockReason}` : ''}</span>
+          </div>
+        )}
+
+        <div className="flex flex-wrap gap-1 mt-2 pt-2 border-t">
+          {t.status === 'Programada' && (
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => handleReleaseTask(t)}>
+              <CheckSquare className="h-3 w-3 mr-1" /> Liberar
+            </Button>
+          )}
+          {(t.status === 'Liberada para execução' || t.status === 'Parcialmente concluída') && (
+            <Button size="sm" className="h-7 px-2 text-xs bg-blue-600" onClick={() => handleStartTask(t)}>
+              <Play className="h-3 w-3 mr-1" /> Iniciar
+            </Button>
+          )}
+          {t.status === 'Em execução' && (
+            <>
+              <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => handlePauseTask(t)}>
+                <Pause className="h-3 w-3 mr-1" /> Pausar
+              </Button>
+              <Button size="sm" className="h-7 px-2 text-xs bg-green-600" onClick={() => handleCompleteTask(t)}>
+                <CheckCircle className="h-3 w-3 mr-1" /> Concluir
+              </Button>
+            </>
+          )}
+          {['Liberada para execução', 'Em execução', 'Parcialmente concluída', 'Programada'].includes(t.status) && (
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-red-600" onClick={() => handleBlockTask(t)}>
+              <Ban className="h-3 w-3 mr-1" /> Bloquear
+            </Button>
+          )}
+          {t.status !== 'Cancelada' && t.status !== 'Concluída' && (
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => handleCancelTask(t)}>
+              Cancelar
+            </Button>
+          )}
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => openEditTaskModal(t)}>
+            <Edit className="h-3 w-3 mr-1" /> Editar
+          </Button>
+        </div>
+      </Card>
+    );
   };
 
   if (isLoading || authLoading) {
@@ -1451,24 +1733,73 @@ export default function TasksPage() {
 
 
         <TabsContent value="daily" className="space-y-4">
+          {productForecast.length > 0 && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Target className="h-5 w-5" /> Previsão de Conclusão por Produto
+                </CardTitle>
+                <CardDescription>Estimativa baseada na cadeia de etapas (dias úteis, {HOURS_PER_DAY}h/dia).</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
+                  {productForecast.map((p, i) => (
+                    <div key={i} className="flex items-center justify-between rounded-lg border p-3">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          Ped. {p.orderNumber} {p.itemCode && `| ${p.itemCode}`}
+                        </p>
+                        <p className="text-xs text-muted-foreground truncate">{p.itemDescription}</p>
+                        <p className="text-xs text-muted-foreground">{p.pending} de {p.total} etapa(s) pendentes</p>
+                      </div>
+                      <div className="text-right shrink-0 ml-3">
+                        <p className="text-xs text-muted-foreground">Término previsto</p>
+                        <p className="text-sm font-bold text-primary">{format(p.finish, 'dd/MM/yyyy')}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
                   <ListChecks className="h-5 w-5 text-muted-foreground" />
-                  <CardTitle>Tarefas do Dia</CardTitle>
+                  <CardTitle>Programação</CardTitle>
+                  <div className="flex items-center rounded-lg border p-1 ml-2">
+                    <Button size="sm" variant={scheduleViewMode === 'day' ? 'default' : 'ghost'} onClick={() => setScheduleViewMode('day')}>Dia</Button>
+                    <Button size="sm" variant={scheduleViewMode === 'week' ? 'default' : 'ghost'} onClick={() => setScheduleViewMode('week')}>Semana</Button>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
-                  <Input
-                    type="date"
-                    value={format(dailyFilterDate, 'yyyy-MM-dd')}
-                    onChange={(e) => {
-                      if (!e.target.value) return;
-                      const [y, m, d] = e.target.value.split('-').map(Number);
-                      setDailyFilterDate(new Date(y, m - 1, d));
-                    }}
-                    className="w-[170px]"
-                  />
+                  {scheduleViewMode === 'day' ? (
+                    <Input
+                      type="date"
+                      value={format(dailyFilterDate, 'yyyy-MM-dd')}
+                      onChange={(e) => {
+                        if (!e.target.value) return;
+                        const [y, m, d] = e.target.value.split('-').map(Number);
+                        setDailyFilterDate(new Date(y, m - 1, d));
+                      }}
+                      className="w-[160px]"
+                    />
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <Button variant="outline" size="sm" onClick={() => setWeekAnchor(p => subWeeks(p, 1))}>
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="text-sm font-medium min-w-[180px] text-center">
+                        {format(startOfWeek(weekAnchor, { locale: ptBR }), 'dd/MM')} – {format(endOfWeek(weekAnchor, { locale: ptBR }), 'dd/MM/yyyy')}
+                      </span>
+                      <Button variant="outline" size="sm" onClick={() => setWeekAnchor(p => addWeeks(p, 1))}>
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={() => setWeekAnchor(new Date())}>Hoje</Button>
+                    </div>
+                  )}
                   <Button onClick={openNewTaskModal}>
                     <Plus className="mr-2 h-4 w-4" /> Nova Tarefa
                   </Button>
@@ -1476,129 +1807,46 @@ export default function TasksPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
-                <div className="p-3 rounded-lg bg-muted text-center">
-                  <p className="text-2xl font-bold">{dailySummary.total}</p>
-                  <p className="text-xs text-muted-foreground">Tarefas</p>
-                </div>
-                <div className="p-3 rounded-lg bg-blue-50 text-center">
-                  <p className="text-2xl font-bold text-blue-600">{dailySummary.running}</p>
-                  <p className="text-xs text-muted-foreground">Em execução</p>
-                </div>
-                <div className="p-3 rounded-lg bg-red-50 text-center">
-                  <p className="text-2xl font-bold text-red-600">{dailySummary.blocked}</p>
-                  <p className="text-xs text-muted-foreground">Bloqueadas</p>
-                </div>
-                <div className="p-3 rounded-lg bg-green-50 text-center">
-                  <p className="text-2xl font-bold text-green-600">{dailySummary.done}</p>
-                  <p className="text-xs text-muted-foreground">Concluídas</p>
-                </div>
-                <div className="p-3 rounded-lg bg-secondary text-center">
-                  <p className="text-sm font-bold">
-                    {dailySummary.executedHours.toFixed(1)}h / {dailySummary.plannedHours.toFixed(1)}h
-                  </p>
-                  <p className="text-xs text-muted-foreground">Exec. / Planej.</p>
-                </div>
-              </div>
-
-              {dailyTasksForDate.length === 0 ? (
-                <div className="text-center py-12">
-                  <ListChecks className="mx-auto h-12 w-12 text-gray-400 mb-4" />
-                  <h3 className="text-lg font-medium mb-2">Nenhuma tarefa para esta data</h3>
-                  <p className="text-gray-600 mb-4">Clique em "Nova Tarefa" para programar a execução do dia.</p>
-                </div>
+              {scheduleViewMode === 'day' ? (
+                dailyTasksForDate.length === 0 ? (
+                  <div className="text-center py-12">
+                    <ListChecks className="mx-auto h-12 w-12 text-gray-400 mb-4" />
+                    <h3 className="text-lg font-medium mb-2">Nenhuma tarefa para esta data</h3>
+                    <p className="text-gray-600">Use "Nova Tarefa" para programar a execução.</p>
+                  </div>
+                ) : (
+                  <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+                    {dailyTasksForDate.map(t => renderTaskCard(t))}
+                  </div>
+                )
               ) : (
-                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                  {dailyTasksForDate.map(t => {
-                    const exec = liveExecutedHours(t);
-                    const ready = isChecklistComplete(t.checklist);
-                    const isToday = isSameDay(t.executionDate, new Date());
-                    return (
-                      <Card
-                        key={t.id}
-                        className="p-4 border-l-4"
-                        style={{
-                          borderLeftColor:
-                            t.status === 'Concluída' ? '#16a34a' :
-                            t.status === 'Em execução' ? '#2563eb' :
-                            t.status === 'Bloqueada' ? '#dc2626' :
-                            t.status === 'Parcialmente concluída' ? '#f59e0b' :
-                            t.status === 'Cancelada' ? '#9ca3af' : '#06b6d4'
-                        }}
-                      >
-                        <div className="flex items-start justify-between mb-2">
-                          <div className="min-w-0">
-                            <p className="font-semibold text-sm truncate">
-                              Pedido {t.orderNumber} {t.itemCode && <span className="text-muted-foreground">| Produto {t.itemCode}</span>}
-                            </p>
-                            <p className="text-xs text-muted-foreground truncate">{t.itemDescription}</p>
-                          </div>
-                          {getDailyStatusBadge(t.status)}
-                        </div>
+                <div className="overflow-x-auto">
+                  <div className="grid grid-cols-7 gap-3 min-w-[1100px]">
+                    {weekDays.map(day => {
+                      const key = format(day, 'yyyy-MM-dd');
+                      const list = tasksByDay.get(key) || [];
+                      const isWeekend = day.getDay() === 0 || day.getDay() === 6;
+                      const isToday = isSameDay(day, new Date());
+                      const dayHours = list.reduce((s, t) => s + (t.plannedHours || 0), 0);
 
-                        <div className="space-y-1 text-sm">
-                          <p><span className="text-muted-foreground">Etapa:</span> <span className="font-medium">{t.stageName}</span></p>
-                          <p><span className="text-muted-foreground">Recurso:</span> <span className="font-medium">{t.resourceName || 'Não alocado'}</span></p>
-                          {t.responsibleName && <p><span className="text-muted-foreground">Responsável:</span> {t.responsibleName}</p>}
-                          <div className="flex items-center justify-between">
-                            <span className="text-xs text-muted-foreground">Prazo: {isToday ? 'Hoje' : format(t.executionDate, 'dd/MM')}</span>
-                            {getPriorityBadge(t.priority)}
+                      return (
+                        <div key={key} className={`rounded-lg border ${isWeekend ? 'bg-muted/30' : ''} ${isToday ? 'ring-2 ring-primary' : ''}`}>
+                          <div className="p-2 border-b text-center">
+                            <p className="text-xs font-semibold capitalize">{format(day, 'EEE', { locale: ptBR })}</p>
+                            <p className="text-sm font-bold">{format(day, 'dd/MM')}</p>
+                            <p className="text-[10px] text-muted-foreground">{list.length} tarefa(s) · {dayHours}h</p>
+                          </div>
+                          <div className="p-2 space-y-2 min-h-[120px] max-h-[600px] overflow-y-auto">
+                            {list.length === 0 ? (
+                              <p className="text-[11px] text-center text-muted-foreground py-4">—</p>
+                            ) : (
+                              list.map(t => renderTaskCard(t))
+                            )}
                           </div>
                         </div>
-
-                        <div className="mt-2">
-                          <div className="flex items-center justify-between text-xs mb-1">
-                            <span className="text-muted-foreground">IPP: {taskIPP(t)}%</span>
-                            <span className="text-muted-foreground">{t.plannedHours}h planej. / {exec.toFixed(1)}h exec.</span>
-                          </div>
-                          <Progress value={taskIPP(t)} className="h-1.5" />
-                        </div>
-
-                        {!ready && (
-                          <div className="mt-2 flex items-center gap-1 text-xs text-red-600">
-                            <Ban className="h-3 w-3" />
-                            <span>Preparação insuficiente{t.blockReason ? `: ${t.blockReason}` : ''}</span>
-                          </div>
-                        )}
-
-                        <div className="flex flex-wrap gap-1 mt-3 pt-3 border-t">
-                          {t.status === 'Programada' && (
-                            <Button size="sm" variant="outline" onClick={() => handleReleaseTask(t)}>
-                              <CheckSquare className="h-3 w-3 mr-1" /> Liberar
-                            </Button>
-                          )}
-                          {(t.status === 'Liberada para execução' || t.status === 'Parcialmente concluída') && (
-                            <Button size="sm" className="bg-blue-600" onClick={() => handleStartTask(t)}>
-                              <Play className="h-3 w-3 mr-1" /> Iniciar
-                            </Button>
-                          )}
-                          {t.status === 'Em execução' && (
-                            <>
-                              <Button size="sm" variant="outline" onClick={() => handlePauseTask(t)}>
-                                <Pause className="h-3 w-3 mr-1" /> Pausar
-                              </Button>
-                              <Button size="sm" className="bg-green-600" onClick={() => handleCompleteTask(t)}>
-                                <CheckCircle className="h-3 w-3 mr-1" /> Concluir
-                              </Button>
-                            </>
-                          )}
-                          {['Liberada para execução', 'Em execução', 'Parcialmente concluída', 'Programada'].includes(t.status) && (
-                            <Button size="sm" variant="outline" className="text-red-600" onClick={() => handleBlockTask(t)}>
-                              <Ban className="h-3 w-3 mr-1" /> Bloquear
-                            </Button>
-                          )}
-                          {t.status !== 'Cancelada' && t.status !== 'Concluída' && (
-                            <Button size="sm" variant="ghost" className="text-muted-foreground" onClick={() => handleCancelTask(t)}>
-                              Cancelar
-                            </Button>
-                          )}
-                          <Button size="sm" variant="ghost" onClick={() => openEditTaskModal(t)}>
-                            <Edit className="h-3 w-3 mr-1" /> Editar
-                          </Button>
-                        </div>
-                      </Card>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -1698,7 +1946,7 @@ export default function TasksPage() {
               <Label>Pedido</Label>
               <Select
                 value={taskForm.orderId}
-                onValueChange={(v) => setTaskForm(p => ({ ...p, orderId: v, itemId: '', stageName: '' }))}
+                onValueChange={(v) => setTaskForm(p => ({ ...p, orderId: v, itemId: '', stageName: '', stageOrder: 0, scheduleChain: false }))}
               >
                 <SelectTrigger><SelectValue placeholder="Selecione o pedido" /></SelectTrigger>
                 <SelectContent>
@@ -1716,7 +1964,7 @@ export default function TasksPage() {
               <Select
                 value={taskForm.itemId}
                 disabled={!taskForm.orderId}
-                onValueChange={(v) => setTaskForm(p => ({ ...p, itemId: v, stageName: '' }))}
+                onValueChange={(v) => setTaskForm(p => ({ ...p, itemId: v, stageName: '', stageOrder: 0, scheduleChain: false }))}
               >
                 <SelectTrigger><SelectValue placeholder="Selecione o produto" /></SelectTrigger>
                 <SelectContent>
@@ -1735,8 +1983,14 @@ export default function TasksPage() {
                 value={taskForm.stageName}
                 disabled={!taskForm.itemId}
                 onValueChange={(v) => {
-                  const st = stageOptions.find(s => s.stageName === v);
-                  setTaskForm(p => ({ ...p, stageName: v, plannedHours: p.plannedHours || (st?.estimatedHours || 0) }));
+                  const idx = stageOptions.findIndex(s => s.stageName === v);
+                  const st = stageOptions[idx];
+                  setTaskForm(p => ({
+                    ...p,
+                    stageName: v,
+                    stageOrder: idx >= 0 ? idx : 0,
+                    plannedHours: p.plannedHours || (st?.estimatedHours || 0),
+                  }));
                 }}
               >
                 <SelectTrigger><SelectValue placeholder="Selecione a etapa" /></SelectTrigger>
@@ -1747,6 +2001,21 @@ export default function TasksPage() {
                 </SelectContent>
               </Select>
             </div>
+
+            {!editingTask && taskForm.stageName && (
+              <div className="flex items-center justify-between rounded-lg border p-3 bg-secondary/40">
+                <div className="pr-3">
+                  <Label className="font-normal cursor-pointer">Programar etapas seguintes em cadeia</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Cria automaticamente as próximas etapas deste produto, cada uma iniciando após a anterior, calculando a previsão de término.
+                  </p>
+                </div>
+                <Checkbox
+                  checked={taskForm.scheduleChain}
+                  onCheckedChange={(c) => setTaskForm(p => ({ ...p, scheduleChain: c === true }))}
+                />
+              </div>
+            )}
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
