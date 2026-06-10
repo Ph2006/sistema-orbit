@@ -393,7 +393,6 @@ export default function CompanyPage() {
       'Capacidade',
       'Localização',
       'Número de Série',
-      'Tarefa Diária Planejada',
       'Horário de Início',
       'Horário de Término',
       'Responsável',
@@ -414,7 +413,6 @@ export default function CompanyPage() {
       resource.capacity,
       resource.location || '',
       resource.serialNumber || '',
-      '', // Campo vazio para tarefa diária
       '', // Campo vazio para horário início
       '', // Campo vazio para horário término
       '', // Campo vazio para responsável
@@ -593,23 +591,18 @@ export default function CompanyPage() {
             color: #374151;
           }
           
-          .task-column {
-            width: 150px;
-            background-color: #fef9e7;
-          }
-          
           .time-column {
-            width: 80px;
+            width: 70px;
             background-color: #fef9e7;
           }
           
           .responsible-column {
-            width: 100px;
+            width: 120px;
             background-color: #fef9e7;
           }
           
           .observations-column {
-            width: 120px;
+            width: 300px;
             background-color: #fef9e7;
           }
           
@@ -725,7 +718,6 @@ export default function CompanyPage() {
         <div class="instructions">
           <h3>📋 Instruções para Preenchimento</h3>
           <ul>
-            <li><strong>Tarefa Diária:</strong> Descreva a atividade específica planejada para cada recurso</li>
             <li><strong>Horários:</strong> Defina início e término das atividades</li>
             <li><strong>Responsável:</strong> Indique quem será responsável pela execução</li>
             <li><strong>Observações:</strong> Anote informações relevantes, impedimentos ou observações</li>
@@ -741,7 +733,6 @@ export default function CompanyPage() {
                 <th style="width: 60px;">Status</th>
                 <th style="width: 40px;">Cap.</th>
                 <th style="width: 80px;">Localização</th>
-                <th class="task-column">Tarefa Diária Planejada</th>
                 <th class="time-column">Início</th>
                 <th class="time-column">Término</th>
                 <th class="responsible-column">Responsável</th>
@@ -766,7 +757,6 @@ export default function CompanyPage() {
                   </td>
                   <td style="text-align: center;">${resource.capacity}</td>
                   <td>${resource.location || '-'}</td>
-                  <td class="task-column" style="border-right: 2px solid #fbbf24;"></td>
                   <td class="time-column"></td>
                   <td class="time-column"></td>
                   <td class="responsible-column"></td>
