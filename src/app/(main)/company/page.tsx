@@ -53,6 +53,7 @@ const resourceSchema = z.object({
     id: z.string(),
     name: z.string().min(3, { message: "O nome do recurso é obrigatório." }),
     type: z.enum(["maquina", "equipamento", "veiculo", "ferramenta", "espaco", "mao_de_obra"], { required_error: "Selecione um tipo." }),
+    category: z.enum(["produtivo", "improdutivo", "administrativo"], { required_error: "Selecione uma categoria." }),
     description: z.string().optional(),
     capacity: z.number().min(1, { message: "A capacidade deve ser maior que 0." }),
     status: z.enum(["disponivel", "ocupado", "manutencao", "inativo", "ausente", "ferias"], { required_error: "Selecione um status." }),
@@ -154,6 +155,7 @@ export default function CompanyPage() {
         id: "",
         name: "",
         type: "maquina",
+        category: "produtivo",
         description: "",
         capacity: 1,
         status: "disponivel",
@@ -1293,6 +1295,7 @@ export default function CompanyPage() {
         id: "", 
         name: "", 
         type: "maquina", 
+        category: "produtivo",
         description: "", 
         capacity: 1, 
         status: "disponivel", 
@@ -1308,8 +1311,13 @@ export default function CompanyPage() {
   };
 
   const handleEditResourceClick = (resource: Resource) => {
-    setSelectedResource(resource);
-    resourceForm.reset(resource);
+    const resourceWithDefaults = {
+      ...resource,
+      category: resource.category || "produtivo",
+    };
+
+    setSelectedResource(resourceWithDefaults);
+    resourceForm.reset(resourceWithDefaults);
     setIsResourceFormOpen(true);
   };
 
@@ -1440,7 +1448,7 @@ export default function CompanyPage() {
           <TabsList>
             <TabsTrigger value="company">Dados da Empresa</TabsTrigger>
             <TabsTrigger value="team">Equipe</TabsTrigger>
-            <TabsTrigger value="resources">Recursos Produtivos</TabsTrigger>
+            <TabsTrigger value="resources">Funcionários</TabsTrigger>
             <TabsTrigger value="overtime">
               <Clock className="h-4 w-4 mr-2" />
               Horas Extras
@@ -1906,6 +1914,7 @@ export default function CompanyPage() {
                         <TableRow>
                           <TableHead>Nome</TableHead>
                           <TableHead>Tipo</TableHead>
+                          <TableHead>Categoria</TableHead>
                           <TableHead>Capacidade</TableHead>
                           <TableHead>Status</TableHead>
                           <TableHead>Localização</TableHead>
@@ -1921,6 +1930,7 @@ export default function CompanyPage() {
                               <TableCell className="capitalize">
                                 {resource.type === 'mao_de_obra' ? 'Mão de Obra' : resource.type}
                               </TableCell>
+                              <TableCell className="capitalize">{resource.category || "-"}</TableCell>
                               <TableCell>{resource.capacity}</TableCell>
                               <TableCell>{getStatusBadge(resource.status)}</TableCell>
                               <TableCell>{resource.location || "-"}</TableCell>
@@ -1946,7 +1956,7 @@ export default function CompanyPage() {
                           ))
                         ) : (
                           <TableRow>
-                            <TableCell colSpan={7} className="text-center h-24">Nenhum recurso cadastrado.</TableCell>
+                            <TableCell colSpan={8} className="text-center h-24">Nenhum recurso cadastrado.</TableCell>
                           </TableRow>
                         )}
                       </TableBody>
@@ -2229,6 +2239,24 @@ export default function CompanyPage() {
                   </FormItem>
                 )} />
               </div>
+              <FormField control={resourceForm.control} name="category" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Categoria</FormLabel>
+                  <Select onValueChange={field.onChange} defaultValue={field.value} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Selecione a categoria" />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="produtivo">Produtivo</SelectItem>
+                      <SelectItem value="improdutivo">Improdutivo</SelectItem>
+                      <SelectItem value="administrativo">Administrativo</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )} />
               <FormField control={resourceForm.control} name="description" render={({ field }) => (
                 <FormItem>
                   <FormLabel>Descrição</FormLabel>
