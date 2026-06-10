@@ -944,21 +944,27 @@ export default function ProductsPage() {
   }, [products, toast]);
 
   // Upload de imagens em uma tarefa
-  const handlePlanImageUpload = useCallback(async (taskIndex: number, files: FileList | null) => {
-    if (!files || files.length === 0) return;
-    try {
-      const newImages: PlanImage[] = [];
-      for (const file of Array.from(files)) {
-        if (!file.type.startsWith('image/')) continue;
+  const handlePlanImageUpload = useCallback(async (taskIndex: number, files: File[]) => {
+    if (!files.length) return;
+    const newImages: PlanImage[] = [];
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      try {
         const dataUrl = await compressImageToDataUrl(file);
         newImages.push({ dataUrl, caption: "" });
+      } catch (error) {
+        console.error("Erro ao processar imagem:", file.name, error);
+        toast({
+          variant: "destructive",
+          title: "Erro ao carregar imagem",
+          description: `${file.name}: ${error instanceof Error ? error.message : String(error)}`,
+        });
       }
+    }
+    if (newImages.length) {
       setPlanTasks(prev => prev.map((t, i) =>
         i === taskIndex ? { ...t, images: [...(t.images || []), ...newImages] } : t
       ));
-    } catch (error) {
-      console.error("Error uploading image:", error);
-      toast({ variant: "destructive", title: "Erro ao carregar imagem" });
     }
   }, [toast]);
 
@@ -3876,7 +3882,11 @@ export default function ProductsPage() {
                                                                     accept="image/*"
                                                                     multiple
                                                                     className="hidden"
-                                                                    onChange={(e) => { handlePlanImageUpload(index, e.target.files); e.target.value = ''; }}
+                                                                    onChange={(e) => {
+                                                                    const fileArr = Array.from(e.target.files || []);
+                                                                    e.target.value = '';
+                                                                    handlePlanImageUpload(index, fileArr);
+                                                                }}
                                                                 />
                                                             </label>
                                                         </Button>
@@ -4288,25 +4298,32 @@ export default function ProductsPage() {
 const compressImageToDataUrl = (file: File, maxWidth = 1000, quality = 0.7): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
+    reader.onerror = () => reject(new Error("Falha ao ler o arquivo"));
     reader.onload = (e) => {
-      const img = new Image();
+      const img = new window.Image(); // window.Image evita conflito com next/image
+      img.onerror = () => reject(new Error("Falha ao decodificar a imagem"));
       img.onload = () => {
-        const canvas = document.createElement('canvas');
-        let { width, height } = img;
-        if (width > maxWidth) {
-          height = (height * maxWidth) / width;
-          width = maxWidth;
+        try {
+          const canvas = document.createElement('canvas');
+          let { width, height } = img;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) return reject(new Error("Canvas não suportado neste navegador"));
+          ctx.fillStyle = '#ffffff'; // fundo branco p/ PNG transparente
+          ctx.fillRect(0, 0, width, height);
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', quality));
+        } catch (err) {
+          reject(err);
         }
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        ctx?.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
       };
-      img.onerror = reject;
       img.src = e.target?.result as string;
     };
-    reader.onerror = reject;
     reader.readAsDataURL(file);
   });
 };
