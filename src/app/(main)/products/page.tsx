@@ -7,7 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-    import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package } from "lucide-react";
+    import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package, BookOpen, ShieldAlert, Upload, User, Hash, Save, ImagePlus, X } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -56,6 +56,39 @@ const materialSchema = z.object({
   unit: z.string().default("kg"),
   specification: z.string().optional(),
 });
+
+const planTaskSchema = z.object({
+  stageName: z.string(),
+  instructions: z.string().optional(),
+  deadlineDays: z.coerce.number().min(0).optional(),
+  images: z.array(z.object({
+    dataUrl: z.string(),
+    caption: z.string().optional(),
+  })).optional(),
+});
+
+interface PlanImage {
+  dataUrl: string;
+  caption?: string;
+}
+
+interface PlanTask {
+  stageName: string;
+  instructions?: string;
+  deadlineDays?: number;
+  images?: PlanImage[];
+}
+
+interface ManufacturingPlan {
+  controlNumber: string;
+  drawingNumber: string;
+  productCode?: string;
+  productDescription?: string;
+  revision?: string;
+  createdBy?: string;
+  generalNotes?: string;
+  tasks: PlanTask[];
+}
 
 type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
 
@@ -486,6 +519,22 @@ export default function ProductsPage() {
     const [isMaterialDialogOpen, setIsMaterialDialogOpen] = useState(false);
     const [materialSearchQuery, setMaterialSearchQuery] = useState("");
 
+  // ─── Plano de Fabricação ───
+  const [selectedProductForPlan, setSelectedProductForPlan] = useState<Product | null>(null);
+  const [planProductSearch, setPlanProductSearch] = useState<string>("");
+  const [planDrawingNumber, setPlanDrawingNumber] = useState<string>("");
+  const [planControlNumber, setPlanControlNumber] = useState<string>("");
+  const [planRevision, setPlanRevision] = useState<string>("0");
+  const [planCreator, setPlanCreator] = useState<string>("");
+  const [planGeneralNotes, setPlanGeneralNotes] = useState<string>("");
+  const [planTasks, setPlanTasks] = useState<PlanTask[]>([]);
+  const [savedPlanDrawings, setSavedPlanDrawings] = useState<Set<string>>(new Set());
+  const [isSavingPlan, setIsSavingPlan] = useState(false);
+
+  // Lista de criadores (gerenciada em settings, como as etapas)
+  const [planCreators, setPlanCreators] = useState<string[]>([]);
+  const [newPlanCreator, setNewPlanCreator] = useState<string>("");
+
   // Combinar materiais padrão com personalizados
   const allMaterials = useMemo(() => {
     const deletedIds = customMaterials
@@ -803,14 +852,172 @@ export default function ProductsPage() {
     setIsMaterialDialogOpen(true);
   };
 
+
+  // Busca criadores cadastrados
+  const fetchPlanCreators = useCallback(async () => {
+    try {
+      const ref = doc(db, "companies", "mecald", "settings", "planCreators");
+      const snap = await getDoc(ref);
+      if (snap.exists() && Array.isArray(snap.data().creators)) {
+        setPlanCreators(snap.data().creators);
+      }
+    } catch (error) {
+      console.error("Error fetching plan creators:", error);
+    }
+  }, []);
+
+  // Adiciona um criador à lista
+  const addPlanCreator = useCallback(async () => {
+    const name = newPlanCreator.trim();
+    if (!name) return;
+    try {
+      const ref = doc(db, "companies", "mecald", "settings", "planCreators");
+      await setDoc(ref, { creators: arrayUnion(name) }, { merge: true });
+      setPlanCreators(prev => Array.from(new Set([...prev, name])));
+      setPlanCreator(name);
+      setNewPlanCreator("");
+      toast({ title: "Responsável adicionado!" });
+    } catch (error) {
+      console.error("Error adding creator:", error);
+      toast({ variant: "destructive", title: "Erro ao adicionar responsável" });
+    }
+  }, [newPlanCreator, toast]);
+
+  // Busca quais desenhos já têm plano salvo (para indicador visual)
+  const fetchSavedPlanDrawings = useCallback(async () => {
+    try {
+      const snap = await getDocs(collection(db, "companies", "mecald", "manufacturingPlans"));
+      setSavedPlanDrawings(new Set(snap.docs.map(d => d.id)));
+    } catch (error) {
+      console.error("Error fetching saved plans:", error);
+    }
+  }, []);
+
+  // Gera numeração de controle automática (PF-ANO-0001)
+  const generatePlanControlNumber = useCallback(async () => {
+    const year = new Date().getFullYear();
+    try {
+      const snap = await getDocs(collection(db, "companies", "mecald", "manufacturingPlans"));
+      const seq = snap.size + 1;
+      return `PF-${year}-${String(seq).padStart(4, '0')}`;
+    } catch {
+      return `PF-${year}-0001`;
+    }
+  }, []);
+
+  // Inicializa as tarefas a partir das etapas do produto selecionado
+  const initPlanTasksFromProduct = useCallback((product: Product) => {
+    const stages = product.productionPlanTemplate || [];
+    setPlanTasks(stages.map(s => ({
+      stageName: s.stageName,
+      instructions: "",
+      deadlineDays: s.durationDays || 0,
+      images: [],
+    })));
+  }, []);
+
+  // Carrega plano salvo a partir do número do desenho
+  const loadManufacturingPlan = useCallback(async (drawingNumber: string) => {
+    const id = drawingNumber.trim();
+    if (!id) return;
+    try {
+      const ref = doc(db, "companies", "mecald", "manufacturingPlans", id);
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data() as ManufacturingPlan;
+        setPlanControlNumber(data.controlNumber || "");
+        setPlanRevision(data.revision || "0");
+        setPlanCreator(data.createdBy || "");
+        setPlanGeneralNotes(data.generalNotes || "");
+        setPlanTasks(data.tasks || []);
+        if (data.productCode) {
+          const prod = products.find(p => p.code === data.productCode);
+          if (prod) setSelectedProductForPlan(prod);
+        }
+        toast({ title: "Plano carregado!", description: `Desenho ${id} recuperado.` });
+      } else {
+        toast({ title: "Novo plano", description: "Nenhum plano salvo para este desenho ainda." });
+      }
+    } catch (error) {
+      console.error("Error loading plan:", error);
+    }
+  }, [products, toast]);
+
+  // Upload de imagens em uma tarefa
+  const handlePlanImageUpload = useCallback(async (taskIndex: number, files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    try {
+      const newImages: PlanImage[] = [];
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith('image/')) continue;
+        const dataUrl = await compressImageToDataUrl(file);
+        newImages.push({ dataUrl, caption: "" });
+      }
+      setPlanTasks(prev => prev.map((t, i) =>
+        i === taskIndex ? { ...t, images: [...(t.images || []), ...newImages] } : t
+      ));
+    } catch (error) {
+      console.error("Error uploading image:", error);
+      toast({ variant: "destructive", title: "Erro ao carregar imagem" });
+    }
+  }, [toast]);
+
+  // Salva o plano (chave = número do desenho)
+  const saveManufacturingPlan = useCallback(async () => {
+    if (!planDrawingNumber.trim()) {
+      toast({ variant: "destructive", title: "Número do desenho obrigatório", description: "Informe o número do desenho para salvar." });
+      return;
+    }
+    if (planDrawingNumber.includes('/')) {
+      toast({ variant: "destructive", title: "Número inválido", description: "O número do desenho não pode conter '/'." });
+      return;
+    }
+    if (!planCreator) {
+      toast({ variant: "destructive", title: "Selecione o criador", description: "Informe quem está criando este plano." });
+      return;
+    }
+    setIsSavingPlan(true);
+    try {
+      const id = planDrawingNumber.trim();
+      let control = planControlNumber;
+      const isNew = !control;
+      if (isNew) {
+        control = await generatePlanControlNumber();
+        setPlanControlNumber(control);
+      }
+      const ref = doc(db, "companies", "mecald", "manufacturingPlans", id);
+      await setDoc(ref, {
+        controlNumber: control,
+        drawingNumber: id,
+        productCode: selectedProductForPlan?.code || "",
+        productDescription: selectedProductForPlan?.description || "",
+        revision: planRevision || "0",
+        createdBy: planCreator,
+        generalNotes: planGeneralNotes,
+        tasks: planTasks,
+        ...(isNew ? { createdAt: Timestamp.now() } : {}),
+        updatedAt: Timestamp.now(),
+      }, { merge: true });
+      setSavedPlanDrawings(prev => new Set([...prev, id]));
+      toast({ title: "Plano salvo!", description: `Controle ${control} • Desenho ${id}` });
+    } catch (error) {
+      console.error("Error saving plan:", error);
+      toast({ variant: "destructive", title: "Erro ao salvar plano" });
+    } finally {
+      setIsSavingPlan(false);
+    }
+  }, [planDrawingNumber, planControlNumber, planCreator, planRevision, planGeneralNotes, planTasks, selectedProductForPlan, generatePlanControlNumber, toast]);
+
   useEffect(() => {
     if (!authLoading && user) {
       fetchProducts();
       fetchStages();
       fetchCustomMaterials();
-      fetchSavedPricingCodes(); // ─── NOVO ───
+      fetchSavedPricingCodes();
+      fetchPlanCreators();
+      fetchSavedPlanDrawings();
     }
-  }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials, fetchSavedPricingCodes]);
+  }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials, fetchSavedPricingCodes, fetchPlanCreators, fetchSavedPlanDrawings]);
   
   const syncCatalog = useCallback(async () => {
     setIsSyncing(true);
@@ -1592,6 +1799,155 @@ export default function ProductsPage() {
         return null;
     }, []);
 
+
+  const exportManufacturingPlanPDF = useCallback(async () => {
+    if (planTasks.length === 0 || !planDrawingNumber.trim()) {
+      toast({ variant: "destructive", title: "Dados insuficientes", description: "Selecione o produto/etapas e informe o número do desenho." });
+      return;
+    }
+    const companyData = await fetchCompanyDataForPDF();
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+    const margin = 20;
+    const contentWidth = pageWidth - 2 * margin;
+    let y = margin;
+
+    const checkBreak = (need = 20) => {
+      if (y + need > pageHeight - 28) { doc.addPage(); y = margin; return true; }
+      return false;
+    };
+
+    // ── Cabeçalho da empresa ──
+    doc.setFillColor(37, 99, 235);
+    doc.rect(0, 0, pageWidth, 42, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFontSize(22); doc.setFont('helvetica', 'bold');
+    doc.text((companyData?.nomeFantasia || 'MECALD').toUpperCase(), margin, 18);
+    doc.setFontSize(14); doc.setFont('helvetica', 'normal');
+    doc.text('PLANO DE FABRICAÇÃO', margin, 28);
+    doc.setFontSize(9);
+    doc.text(`Emitido em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, margin, 36);
+
+    // Logo (mesmo padrão do relatório de precificação)
+    if (companyData?.logo?.preview) {
+      try {
+        let logoSrc = companyData.logo.preview;
+        if (!logoSrc.startsWith('data:')) logoSrc = `data:image/png;base64,${logoSrc}`;
+        const base64Data = logoSrc.split(',')[1] || logoSrc;
+        const imageType = logoSrc.match(/data:image\/(\w+)/)?.[1] || 'png';
+        doc.addImage(base64Data, imageType.toUpperCase(), pageWidth - margin - 40, 8, 38, 26, undefined, 'FAST');
+      } catch { /* ignora logo inválido */ }
+    }
+
+    y = 52;
+    doc.setTextColor(0, 0, 0);
+
+    // ── Caixa de identificação ──
+    doc.setFillColor(239, 246, 255);
+    doc.setDrawColor(59, 130, 246);
+    doc.roundedRect(margin, y, contentWidth, 34, 3, 3, 'FD');
+    doc.setFontSize(9); doc.setFont('helvetica', 'bold');
+    doc.setTextColor(30, 64, 175);
+    doc.text('IDENTIFICAÇÃO DO DOCUMENTO', margin + 4, y + 7);
+    doc.setTextColor(0, 0, 0); doc.setFont('helvetica', 'normal');
+    doc.text(`Nº de Controle: ${planControlNumber || '(gerado ao salvar)'}`, margin + 4, y + 15);
+    doc.text(`Nº do Desenho: ${planDrawingNumber}`, pageWidth / 2 + 6, y + 15);
+    doc.text(`Produto: ${(selectedProductForPlan?.code || '-') + ' ' + (selectedProductForPlan?.description || '')}`.substring(0, 60), margin + 4, y + 22);
+    doc.text(`Revisão: ${planRevision || '0'}`, pageWidth / 2 + 6, y + 22);
+    doc.text(`Elaborado por: ${planCreator || '-'}`, margin + 4, y + 29);
+    y += 42;
+
+    // ── Aviso de confidencialidade ──
+    checkBreak(40);
+    const empresa = (companyData?.nomeFantasia || companyData?.razaoSocial || 'MECALD').toUpperCase();
+    doc.setFillColor(254, 242, 242);
+    doc.setDrawColor(220, 38, 38);
+    const confText =
+      `DOCUMENTO CONFIDENCIAL — USO INTERNO RESTRITO. Este Plano de Fabricação e todo o seu conteúdo ` +
+      `(procedimentos, desenhos, imagens e especificações) constituem segredo de indústria e propriedade ` +
+      `intelectual de ${empresa}. Sua reprodução, divulgação, cópia ou utilização, total ou parcial, fora do ` +
+      `ambiente da empresa, sem autorização expressa e por escrito, é proibida. A violação sujeita o infrator ` +
+      `às sanções da Lei nº 9.279/1996 (Lei da Propriedade Industrial), em especial art. 195, incisos XI e XII ` +
+      `(crime de concorrência desleal), do art. 482, "g", da CLT (justa causa por violação de segredo da empresa) ` +
+      `e demais cominações civis e penais aplicáveis.`;
+    const confLines = doc.splitTextToSize(confText, contentWidth - 8);
+    const confBoxH = confLines.length * 4.5 + 8;
+    doc.roundedRect(margin, y, contentWidth, confBoxH, 2, 2, 'FD');
+    doc.setFontSize(7.5); doc.setFont('helvetica', 'normal');
+    doc.setTextColor(153, 27, 27);
+    doc.text(confLines, margin + 4, y + 6);
+    y += confBoxH + 8;
+    doc.setTextColor(0, 0, 0);
+
+    // ── Notas gerais ──
+    if (planGeneralNotes.trim()) {
+      checkBreak(20);
+      doc.setFontSize(11); doc.setFont('helvetica', 'bold');
+      doc.text('OBSERVAÇÕES GERAIS', margin, y); y += 6;
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+      const notes = doc.splitTextToSize(planGeneralNotes, contentWidth);
+      notes.forEach((ln: string) => { checkBreak(6); doc.text(ln, margin, y); y += 5; });
+      y += 4;
+    }
+
+    // ── Tarefas por etapa ──
+    for (let idx = 0; idx < planTasks.length; idx++) {
+      const task = planTasks[idx];
+      checkBreak(24);
+      doc.setFillColor(37, 99, 235);
+      doc.rect(margin, y - 5, contentWidth, 8, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(10); doc.setFont('helvetica', 'bold');
+      doc.text(`ETAPA ${idx + 1}: ${task.stageName}`, margin + 3, y);
+      doc.text(`Prazo: ${task.deadlineDays || 0} dia(s)`, pageWidth - margin - 3, y, { align: 'right' });
+      doc.setTextColor(0, 0, 0);
+      y += 9;
+
+      doc.setFontSize(9); doc.setFont('helvetica', 'normal');
+      const taskInstructions = task.instructions?.trim() ? task.instructions : 'Sem instruções cadastradas.';
+      const instrLines = doc.splitTextToSize(taskInstructions, contentWidth);
+      instrLines.forEach((ln: string) => { checkBreak(6); doc.text(ln, margin, y); y += 5; });
+      y += 2;
+
+      // Imagens
+      if (task.images && task.images.length > 0) {
+        for (const img of task.images) {
+          const dims = await getImageDimensions(img.dataUrl);
+          const targetW = 90;
+          const targetH = (dims.h / dims.w) * targetW;
+          checkBreak(targetH + (img.caption ? 8 : 4));
+          try {
+            doc.addImage(img.dataUrl, 'JPEG', margin, y, targetW, targetH, undefined, 'FAST');
+          } catch { /* ignora imagem inválida */ }
+          y += targetH + 2;
+          if (img.caption?.trim()) {
+            doc.setFontSize(8); doc.setFont('helvetica', 'italic');
+            doc.setTextColor(100, 100, 100);
+            doc.text(doc.splitTextToSize(img.caption, contentWidth), margin, y);
+            y += 5;
+            doc.setTextColor(0, 0, 0);
+          }
+          y += 2;
+        }
+      }
+      y += 4;
+    }
+
+    // ── Rodapé em todas as páginas ──
+    const totalPages = doc.internal.pages.length - 1;
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFontSize(7);
+      doc.setTextColor(150, 150, 150);
+      doc.text(`DOCUMENTO CONFIDENCIAL — ${empresa} • Controle ${planControlNumber || '-'} • Desenho ${planDrawingNumber}`, pageWidth / 2, pageHeight - 14, { align: 'center' });
+      doc.text(`Página ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 9, { align: 'center' });
+    }
+
+    doc.save(`plano-fabricacao-${planDrawingNumber}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`);
+    toast({ title: "PDF gerado!", description: "O plano de fabricação foi baixado." });
+  }, [planTasks, planDrawingNumber, planControlNumber, planRevision, planCreator, planGeneralNotes, selectedProductForPlan, fetchCompanyDataForPDF, toast]);
+
     const saveStageCosts = useCallback(async () => {
         try {
         const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
@@ -1694,6 +2050,10 @@ export default function ProductsPage() {
                     <TabsTrigger value="pricing">
                         <Calculator className="mr-2 h-4 w-4" />
                         Calculadora de Preços
+                    </TabsTrigger>
+                    <TabsTrigger value="manufacturingPlan">
+                        <BookOpen className="mr-2 h-4 w-4" />
+                        Plano de Fabricação
                     </TabsTrigger>
             </TabsList>
             <TabsContent value="catalog" className="mt-4">
@@ -3332,6 +3692,245 @@ export default function ProductsPage() {
                         </Card>
                     </div>
                 </TabsContent>
+            <TabsContent value="manufacturingPlan" className="mt-4">
+                <div className="grid gap-6">
+                    <Card>
+                        <CardHeader>
+                            <div className="flex items-center justify-between">
+                                <div>
+                                    <CardTitle>Plano de Fabricação</CardTitle>
+                                    <CardDescription>
+                                        Manual de "como fazer" cada peça, seguindo as etapas de fabricação do produto. Documento confidencial.
+                                    </CardDescription>
+                                </div>
+                                <div className="flex gap-2">
+                                    <Button onClick={saveManufacturingPlan} disabled={isSavingPlan}>
+                                        <Save className="mr-2 h-4 w-4" />
+                                        {isSavingPlan ? "Salvando..." : "Salvar Plano"}
+                                    </Button>
+                                    <Button variant="outline" onClick={exportManufacturingPlanPDF} disabled={planTasks.length === 0}>
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Exportar PDF
+                                    </Button>
+                                </div>
+                            </div>
+                        </CardHeader>
+                        <CardContent className="space-y-6">
+                            {/* Aviso de confidencialidade */}
+                            <div className="flex items-start gap-3 p-4 rounded-md border border-red-300 bg-red-50">
+                                <ShieldAlert className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
+                                <div className="text-xs text-red-700">
+                                    <strong>Documento confidencial — uso interno restrito.</strong> Reprodução ou utilização fora da
+                                    empresa é proibida (Lei nº 9.279/1996, art. 195, incisos XI e XII; art. 482, "g", da CLT).
+                                    O aviso completo é incluído automaticamente no PDF exportado.
+                                </div>
+                            </div>
+
+                            {/* Identificação */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                                <div className="lg:col-span-2 space-y-2">
+                                    <Label>Produto</Label>
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                                        <Input
+                                            placeholder="Buscar código ou nome..."
+                                            value={planProductSearch}
+                                            onChange={(e) => setPlanProductSearch(e.target.value)}
+                                            className="pl-9"
+                                        />
+                                    </div>
+                                    <Select
+                                        value={selectedProductForPlan?.id || ''}
+                                        onValueChange={(value) => {
+                                            const product = products.find(p => p.id === value) || null;
+                                            setSelectedProductForPlan(product);
+                                            if (product) initPlanTasksFromProduct(product);
+                                        }}
+                                    >
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione o produto" />
+                                        </SelectTrigger>
+                                        <SelectContent className="max-h-[350px]">
+                                            {products
+                                                .filter(p => {
+                                                    if (!planProductSearch) return true;
+                                                    const q = planProductSearch.toLowerCase();
+                                                    return p.code.toLowerCase().includes(q) || p.description.toLowerCase().includes(q);
+                                                })
+                                                .map(product => (
+                                                    <SelectItem key={product.id} value={product.id}>
+                                                        {product.code} - {product.description}
+                                                    </SelectItem>
+                                                ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label className="flex items-center gap-1"><Hash className="h-3.5 w-3.5" /> Nº do Desenho</Label>
+                                    <Input
+                                        placeholder="Ex: DES-1234"
+                                        value={planDrawingNumber}
+                                        onChange={(e) => setPlanDrawingNumber(e.target.value)}
+                                        onBlur={() => planDrawingNumber.trim() && loadManufacturingPlan(planDrawingNumber)}
+                                    />
+                                    {savedPlanDrawings.has(planDrawingNumber.trim()) ? (
+                                        <p className="text-xs text-green-600">Já existe plano salvo para este desenho.</p>
+                                    ) : (
+                                        <p className="text-xs text-muted-foreground">Usado como chave de salvamento.</p>
+                                    )}
+                                </div>
+
+                                <div className="space-y-2">
+                                    <Label>Nº de Controle</Label>
+                                    <Input value={planControlNumber} readOnly placeholder="Gerado ao salvar" className="bg-muted" />
+                                </div>
+                            </div>
+
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label className="flex items-center gap-1"><User className="h-3.5 w-3.5" /> Criado por</Label>
+                                    <Select value={planCreator} onValueChange={setPlanCreator}>
+                                        <SelectTrigger>
+                                            <SelectValue placeholder="Selecione o responsável" />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            {planCreators.map(name => (
+                                                <SelectItem key={name} value={name}>{name}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                    <div className="flex gap-2">
+                                        <Input
+                                            placeholder="Adicionar novo responsável..."
+                                            value={newPlanCreator}
+                                            onChange={(e) => setNewPlanCreator(e.target.value)}
+                                            onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addPlanCreator())}
+                                            className="h-8 text-sm"
+                                        />
+                                        <Button type="button" variant="outline" size="sm" onClick={addPlanCreator}>
+                                            <PlusCircle className="h-4 w-4" />
+                                        </Button>
+                                    </div>
+                                </div>
+                                <div className="space-y-2">
+                                    <Label>Revisão</Label>
+                                    <Input value={planRevision} onChange={(e) => setPlanRevision(e.target.value)} placeholder="0" />
+                                </div>
+                            </div>
+
+                            <div className="space-y-2">
+                                <Label>Observações Gerais</Label>
+                                <Textarea
+                                    placeholder="Informações gerais aplicáveis a toda a fabricação..."
+                                    value={planGeneralNotes}
+                                    onChange={(e) => setPlanGeneralNotes(e.target.value)}
+                                />
+                            </div>
+
+                            <Separator />
+
+                            {/* Tarefas por etapa */}
+                            {planTasks.length > 0 ? (
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-medium">Procedimentos por Etapa</h4>
+                                    {planTasks.map((task, index) => (
+                                        <Card key={`${task.stageName}-${index}`} className="border-l-4 border-l-primary">
+                                            <CardContent className="pt-4 space-y-3">
+                                                <div className="flex items-center justify-between">
+                                                    <div className="font-medium">{index + 1}. {task.stageName}</div>
+                                                    <div className="flex items-center gap-2">
+                                                        <Label className="text-xs whitespace-nowrap">Prazo (dias):</Label>
+                                                        <Input
+                                                            type="number"
+                                                            step="0.5"
+                                                            className="h-8 w-24"
+                                                            value={task.deadlineDays ?? 0}
+                                                            onChange={(e) => {
+                                                                const v = Number(e.target.value);
+                                                                setPlanTasks(prev => prev.map((t, i) => i === index ? { ...t, deadlineDays: v } : t));
+                                                            }}
+                                                        />
+                                                    </div>
+                                                </div>
+                                                <Textarea
+                                                    placeholder="Descreva COMO executar esta etapa: ferramentas, parâmetros, sequência, cuidados de qualidade e segurança..."
+                                                    value={task.instructions || ''}
+                                                    onChange={(e) => {
+                                                        const v = e.target.value;
+                                                        setPlanTasks(prev => prev.map((t, i) => i === index ? { ...t, instructions: v } : t));
+                                                    }}
+                                                    className="min-h-[90px]"
+                                                />
+
+                                                {/* Imagens */}
+                                                <div className="space-y-2">
+                                                    <div className="flex items-center justify-between">
+                                                        <Label className="text-xs">Fotos / Desenhos</Label>
+                                                        <Button asChild variant="outline" size="sm">
+                                                            <label className="cursor-pointer">
+                                                                <ImagePlus className="mr-2 h-3.5 w-3.5" />
+                                                                Adicionar imagem
+                                                                <input
+                                                                    type="file"
+                                                                    accept="image/*"
+                                                                    multiple
+                                                                    className="hidden"
+                                                                    onChange={(e) => { handlePlanImageUpload(index, e.target.files); e.target.value = ''; }}
+                                                                />
+                                                            </label>
+                                                        </Button>
+                                                    </div>
+                                                    {task.images && task.images.length > 0 && (
+                                                        <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                                                            {task.images.map((img, imgIdx) => (
+                                                                <div key={imgIdx} className="border rounded-md p-2 space-y-1 relative">
+                                                                    <Button
+                                                                        variant="ghost"
+                                                                        size="icon"
+                                                                        className="absolute top-1 right-1 h-6 w-6 bg-background/80"
+                                                                        onClick={() => setPlanTasks(prev => prev.map((t, i) =>
+                                                                            i === index ? { ...t, images: (t.images || []).filter((_, ii) => ii !== imgIdx) } : t
+                                                                        ))}
+                                                                    >
+                                                                        <X className="h-3.5 w-3.5 text-destructive" />
+                                                                    </Button>
+                                                                    <img src={img.dataUrl} alt="" className="w-full h-24 object-contain rounded" />
+                                                                    <Input
+                                                                        placeholder="Legenda..."
+                                                                        className="h-7 text-xs"
+                                                                        value={img.caption || ''}
+                                                                        onChange={(e) => {
+                                                                            const v = e.target.value;
+                                                                            setPlanTasks(prev => prev.map((t, i) =>
+                                                                                i === index ? {
+                                                                                    ...t,
+                                                                                    images: (t.images || []).map((im, ii) => ii === imgIdx ? { ...im, caption: v } : im)
+                                                                                } : t
+                                                                            ));
+                                                                        }}
+                                                                    />
+                                                                </div>
+                                                            ))}
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            </CardContent>
+                                        </Card>
+                                    ))}
+                                </div>
+                            ) : (
+                                <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-md">
+                                    <BookOpen className="mx-auto h-12 w-12 mb-3 opacity-40" />
+                                    <p className="font-medium">Selecione um produto para começar</p>
+                                    <p className="text-sm">As etapas de fabricação do produto serão carregadas automaticamente.</p>
+                                </div>
+                            )}
+                        </CardContent>
+                    </Card>
+                </div>
+            </TabsContent>
+
         </Tabs>
       </div>
 
@@ -3684,4 +4283,41 @@ export default function ProductsPage() {
       </Dialog>
     </>
   );
+
+// Comprime e converte imagem para base64 (reduz tamanho antes de salvar no Firestore)
+const compressImageToDataUrl = (file: File, maxWidth = 1000, quality = 0.7): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        if (width > maxWidth) {
+          height = (height * maxWidth) / width;
+          width = maxWidth;
+        }
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        ctx?.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.onerror = reject;
+      img.src = e.target?.result as string;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+};
+
+// Lê dimensões de um dataURL (usado para manter proporção das imagens no PDF)
+const getImageDimensions = (dataUrl: string): Promise<{ w: number; h: number }> =>
+  new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ w: img.width, h: img.height });
+    img.onerror = () => resolve({ w: 4, h: 3 });
+    img.src = dataUrl;
+  });
+
 }
