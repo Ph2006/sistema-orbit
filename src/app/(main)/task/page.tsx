@@ -12,6 +12,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { cn } from "@/lib/utils";
 import { useAuth } from "../layout";
 import { format, startOfWeek, endOfWeek, isWithinInterval, addWeeks, subWeeks, startOfMonth, endOfMonth, addMonths, subMonths, isSameDay, addDays } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -195,6 +196,7 @@ const priorityRank = (p: string) =>
   (({ urgente: 4, alta: 3, media: 2, baixa: 1 } as Record<string, number>)[p] || 0);
 
 const HOURS_PER_DAY = 8; // jornada usada para converter horas em dias
+const RESOURCE_DAILY_CAPACITY = HOURS_PER_DAY; // 8h por recurso/dia
 
 const isBusinessDay = (d: Date) => {
   const g = d.getDay();
@@ -309,6 +311,7 @@ export default function TasksPage() {
   const [dailyFilterDate, setDailyFilterDate] = useState<Date>(new Date());
   const [scheduleViewMode, setScheduleViewMode] = useState<'day' | 'week'>('day');
   const [weekAnchor, setWeekAnchor] = useState<Date>(new Date());
+  const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [, setTick] = useState(0);
 
   // Função simplificada para determinar prioridade
@@ -853,6 +856,59 @@ export default function TasksPage() {
     return m;
   }, [dailyTasks, weekDays]);
 
+  // Mapa: 'yyyy-MM-dd' -> resourceId -> { name, hours, tasks[] }
+  const resourceLoadByDay = useMemo(() => {
+    const map = new Map<string, Map<string, { name: string; hours: number; tasks: DailyTask[] }>>();
+
+    dailyTasks.forEach(t => {
+      if (t.status === 'Cancelada' || t.status === 'Concluída' || !t.resourceId) return;
+
+      const dayKey = format(t.executionDate, 'yyyy-MM-dd');
+      if (!map.has(dayKey)) map.set(dayKey, new Map());
+
+      const dayMap = map.get(dayKey)!;
+      if (!dayMap.has(t.resourceId)) {
+        dayMap.set(t.resourceId, { name: t.resourceName, hours: 0, tasks: [] });
+      }
+
+      const resourceLoad = dayMap.get(t.resourceId)!;
+      resourceLoad.hours += t.plannedHours || 0;
+      resourceLoad.tasks.push(t);
+    });
+
+    return map;
+  }, [dailyTasks]);
+
+  // Dias com pelo menos um recurso sobrecarregado
+  const overloadedDays = useMemo(() => {
+    const out = new Map<string, { resourceName: string; hours: number; count: number }[]>();
+
+    resourceLoadByDay.forEach((dayMap, dayKey) => {
+      const over: { resourceName: string; hours: number; count: number }[] = [];
+
+      dayMap.forEach(resourceLoad => {
+        if (resourceLoad.hours > RESOURCE_DAILY_CAPACITY) {
+          over.push({
+            resourceName: resourceLoad.name || '—',
+            hours: resourceLoad.hours,
+            count: resourceLoad.tasks.length,
+          });
+        }
+      });
+
+      if (over.length) out.set(dayKey, over);
+    });
+
+    return out;
+  }, [resourceLoadByDay]);
+
+  // Dias do mês para o mini-calendário (6 semanas)
+  const capacityCalendarDays = useMemo(() => {
+    const first = startOfMonth(calendarMonth);
+    const start = startOfWeek(first, { locale: ptBR });
+    return Array.from({ length: 42 }, (_, i) => addDays(start, i));
+  }, [calendarMonth]);
+
   const liveExecutedHours = (t: DailyTask): number => {
     let h = t.executedHours;
     if (t.status === 'Em execução' && t.activeSince) {
@@ -880,6 +936,188 @@ export default function TasksPage() {
       executedHours: executed,
     };
   }, [dailyTasksForDate]);
+
+  // Carrega dados da empresa para o cabeçalho do PDF
+  const loadCompanyForPdf = async (): Promise<CompanyData> => {
+    try {
+      const ref = doc(db, "companies", "mecald", "settings", "company");
+      const snap = await getDoc(ref);
+      return snap.exists() ? (snap.data() as CompanyData) : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const pdfHeader = (docPdf: jsPDF, company: CompanyData, title: string, subtitle: string) => {
+    const pageWidth = docPdf.internal.pageSize.width;
+    let yPos = 15;
+
+    if (company.logo?.preview) {
+      try {
+        docPdf.addImage(company.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
+      } catch {}
+    }
+
+    docPdf.setFontSize(16).setFont('helvetica', 'bold');
+    docPdf.text(company.nomeFantasia || 'Sua Empresa', 60, yPos + 6);
+    docPdf.setFontSize(8).setFont('helvetica', 'normal');
+    if (company.cnpj) docPdf.text(`CNPJ: ${company.cnpj}`, 60, yPos + 12);
+
+    yPos = 40;
+    docPdf.setFontSize(15).setFont('helvetica', 'bold');
+    docPdf.text(title, pageWidth / 2, yPos, { align: 'center' });
+    yPos += 8;
+    docPdf.setFontSize(11).setFont('helvetica', 'normal');
+    docPdf.text(subtitle, pageWidth / 2, yPos, { align: 'center' });
+
+    return yPos + 10;
+  };
+
+  const taskRow = (t: DailyTask) => ([
+    t.orderNumber,
+    t.itemCode || '-',
+    t.stageName.length > 22 ? `${t.stageName.substring(0, 22)}…` : t.stageName,
+    (t.resourceName || '—').substring(0, 18),
+    (t.responsibleName || '—').substring(0, 16),
+    `${t.plannedHours}h`,
+    `${taskIPP(t)}%`,
+    t.status,
+  ]);
+
+  const TASK_HEAD = [['Pedido', 'Produto', 'Etapa', 'Recurso', 'Responsável', 'Horas', 'IPP', 'Status']];
+
+  const exportDailyPDF = async () => {
+    const list = dailyTasksForDate;
+
+    if (list.length === 0) {
+      toast({ variant: "destructive", title: "Sem tarefas", description: "Não há tarefas para esta data." });
+      return;
+    }
+
+    toast({ title: "Gerando PDF...", description: "Por favor, aguarde." });
+
+    try {
+      const company = await loadCompanyForPdf();
+      const docPdf = new jsPDF({ orientation: 'landscape' });
+      const yPos = pdfHeader(
+        docPdf,
+        company,
+        'PROGRAMAÇÃO DIÁRIA DE TAREFAS',
+        format(dailyFilterDate, "EEEE, dd 'de' MMMM 'de' yyyy", { locale: ptBR })
+      );
+
+      autoTable(docPdf, {
+        startY: yPos,
+        head: TASK_HEAD,
+        body: list.map(taskRow),
+        styles: { fontSize: 8, cellPadding: 2 },
+        headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+      });
+
+      // Resumo de carga por recurso no dia
+      const dayKey = format(dailyFilterDate, 'yyyy-MM-dd');
+      const dayLoad = resourceLoadByDay.get(dayKey);
+
+      if (dayLoad && dayLoad.size > 0) {
+        let y = (docPdf as any).lastAutoTable.finalY + 8;
+
+        docPdf.setFontSize(11).setFont('helvetica', 'bold');
+        docPdf.text('CARGA POR RECURSO', 14, y);
+        y += 2;
+
+        const loadBody = Array.from(dayLoad.values()).map(resourceLoad => [
+          resourceLoad.name || '—',
+          `${resourceLoad.hours}h / ${RESOURCE_DAILY_CAPACITY}h`,
+          resourceLoad.tasks.length.toString(),
+          resourceLoad.hours > RESOURCE_DAILY_CAPACITY ? 'SOBRECARGA' : 'OK',
+        ]);
+
+        autoTable(docPdf, {
+          startY: y + 2,
+          head: [['Recurso', 'Carga', 'Tarefas', 'Situação']],
+          body: loadBody,
+          styles: { fontSize: 8, cellPadding: 2 },
+          headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
+          didParseCell: (data) => {
+            if (data.column.index === 3 && data.section === 'body' && data.cell.raw === 'SOBRECARGA') {
+              data.cell.styles.fillColor = [254, 226, 226];
+              data.cell.styles.textColor = [185, 28, 28];
+              data.cell.styles.fontStyle = 'bold';
+            }
+          },
+        });
+      }
+
+      docPdf.save(`Programacao_Diaria_${format(dailyFilterDate, 'ddMMyy')}.pdf`);
+      toast({ title: "PDF gerado!", description: "A programação diária foi baixada." });
+    } catch (e) {
+      console.error(e);
+      toast({ variant: "destructive", title: "Erro ao gerar PDF" });
+    }
+  };
+
+  const exportWeekPDF = async () => {
+    const weekStart = startOfWeek(weekAnchor, { locale: ptBR });
+    const weekEnd = endOfWeek(weekAnchor, { locale: ptBR });
+    const weekTasks = dailyTasks.filter(t =>
+      isWithinInterval(t.executionDate, { start: weekStart, end: weekEnd }) && t.status !== 'Cancelada'
+    );
+
+    if (weekTasks.length === 0) {
+      toast({ variant: "destructive", title: "Sem tarefas", description: "Não há tarefas nesta semana." });
+      return;
+    }
+
+    toast({ title: "Gerando PDF...", description: "Por favor, aguarde." });
+
+    try {
+      const company = await loadCompanyForPdf();
+      const docPdf = new jsPDF({ orientation: 'landscape' });
+      let yPos = pdfHeader(
+        docPdf,
+        company,
+        'PROGRAMAÇÃO SEMANAL DE TAREFAS',
+        `${format(weekStart, 'dd/MM/yyyy')} a ${format(weekEnd, 'dd/MM/yyyy')}`
+      );
+
+      // Uma seção por dia
+      weekDays.forEach(day => {
+        const key = format(day, 'yyyy-MM-dd');
+        const list = (tasksByDay.get(key) || []).filter(t => t.status !== 'Cancelada');
+
+        if (list.length === 0) return;
+
+        autoTable(docPdf, {
+          startY: yPos,
+          head: [[{
+            content: format(day, "EEEE, dd/MM", { locale: ptBR }).toUpperCase(),
+            colSpan: 8,
+            styles: { halign: 'left', fillColor: [30, 41, 59], textColor: 255, fontStyle: 'bold' },
+          }]],
+          body: [],
+          styles: { fontSize: 8 },
+          margin: { left: 14, right: 14 },
+        });
+
+        autoTable(docPdf, {
+          startY: (docPdf as any).lastAutoTable.finalY,
+          head: TASK_HEAD,
+          body: list.map(taskRow),
+          styles: { fontSize: 7.5, cellPadding: 1.5 },
+          headStyles: { fillColor: [37, 99, 235], fontSize: 8, textColor: 255 },
+          margin: { left: 14, right: 14 },
+        });
+
+        yPos = (docPdf as any).lastAutoTable.finalY + 6;
+      });
+
+      docPdf.save(`Programacao_Semanal_${format(weekStart, 'ddMMyy')}.pdf`);
+      toast({ title: "PDF gerado!", description: "A programação semanal foi baixada." });
+    } catch (e) {
+      console.error(e);
+      toast({ variant: "destructive", title: "Erro ao gerar PDF" });
+    }
+  };
 
   const persistTask = async (id: string, patch: any) => {
     try {
@@ -1763,6 +2001,113 @@ export default function TasksPage() {
             </Card>
           )}
 
+          {/* Calendário de capacidade / conflitos */}
+          <Card>
+            <CardHeader className="pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Calendar className="h-5 w-5" /> Mapa de Capacidade
+                  </CardTitle>
+                  <CardDescription>
+                    Dias em vermelho têm recurso acima de {RESOURCE_DAILY_CAPACITY}h. Clique no dia para abri-lo.
+                  </CardDescription>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button variant="outline" size="sm" onClick={() => setCalendarMonth(p => subMonths(p, 1))}>
+                    <ChevronLeft className="h-4 w-4" />
+                  </Button>
+                  <span className="text-sm font-medium min-w-[150px] text-center capitalize">
+                    {format(calendarMonth, "MMMM 'de' yyyy", { locale: ptBR })}
+                  </span>
+                  <Button variant="outline" size="sm" onClick={() => setCalendarMonth(p => addMonths(p, 1))}>
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => setCalendarMonth(new Date())}>Hoje</Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid grid-cols-7 gap-1 text-center text-xs font-medium text-muted-foreground mb-1">
+                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(dayName => <div key={dayName}>{dayName}</div>)}
+              </div>
+              <div className="grid grid-cols-7 gap-1">
+                {capacityCalendarDays.map((day, i) => {
+                  const key = format(day, 'yyyy-MM-dd');
+                  const isCurrentMonth = day.getMonth() === calendarMonth.getMonth();
+                  const isToday = isSameDay(day, new Date());
+                  const over = overloadedDays.get(key);
+                  const dayLoad = resourceLoadByDay.get(key);
+                  const taskCount = dayLoad
+                    ? Array.from(dayLoad.values()).reduce((sum, resourceLoad) => sum + resourceLoad.tasks.length, 0)
+                    : 0;
+
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setScheduleViewMode('day');
+                        setDailyFilterDate(new Date(day));
+                      }}
+                      className={cn(
+                        "min-h-[68px] rounded-md border p-1 text-left transition-colors hover:bg-muted/60",
+                        !isCurrentMonth && "opacity-40",
+                        isToday && "ring-2 ring-primary",
+                        over ? "bg-red-50 border-red-300" : taskCount > 0 ? "bg-blue-50 border-blue-200" : ""
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className={cn("text-xs font-medium", isToday && "text-primary font-bold")}>{day.getDate()}</span>
+                        {over && <AlertTriangle className="h-3 w-3 text-red-600" />}
+                      </div>
+
+                      {taskCount > 0 && (
+                        <p className="text-[10px] text-muted-foreground mt-0.5">{taskCount} tarefa(s)</p>
+                      )}
+
+                      {over && (
+                        <p
+                          className="text-[10px] text-red-700 font-medium truncate"
+                          title={over.map(o => `${o.resourceName}: ${o.hours}h`).join(' | ')}
+                        >
+                          {over.length} recurso(s) sobrec.
+                        </p>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Lista textual dos conflitos do mês visível */}
+              {Array.from(overloadedDays.entries())
+                .filter(([key]) => {
+                  const date = new Date(`${key}T00:00:00`);
+                  return date.getMonth() === calendarMonth.getMonth() && date.getFullYear() === calendarMonth.getFullYear();
+                }).length > 0 && (
+                <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <AlertTriangle className="h-4 w-4 text-red-600" />
+                    <p className="text-sm font-medium text-red-800">Conflitos de capacidade neste mês</p>
+                  </div>
+                  <div className="space-y-1">
+                    {Array.from(overloadedDays.entries())
+                      .filter(([key]) => {
+                        const date = new Date(`${key}T00:00:00`);
+                        return date.getMonth() === calendarMonth.getMonth() && date.getFullYear() === calendarMonth.getFullYear();
+                      })
+                      .sort(([a], [b]) => a.localeCompare(b))
+                      .map(([key, over]) => (
+                        <p key={key} className="text-xs text-red-700">
+                          <span className="font-medium">{format(new Date(`${key}T00:00:00`), 'dd/MM')}:</span>{' '}
+                          {over.map(o => `${o.resourceName} (${o.hours}h, ${o.count} tarefas)`).join(' · ')}
+                        </p>
+                      ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
           <Card>
             <CardHeader>
               <div className="flex flex-wrap items-center justify-between gap-4">
@@ -1800,6 +2145,10 @@ export default function TasksPage() {
                       <Button variant="outline" size="sm" onClick={() => setWeekAnchor(new Date())}>Hoje</Button>
                     </div>
                   )}
+                  <Button variant="outline" onClick={scheduleViewMode === 'week' ? exportWeekPDF : exportDailyPDF}>
+                    <Download className="mr-2 h-4 w-4" />
+                    Exportar {scheduleViewMode === 'week' ? 'Semana' : 'Dia'}
+                  </Button>
                   <Button onClick={openNewTaskModal}>
                     <Plus className="mr-2 h-4 w-4" /> Nova Tarefa
                   </Button>
