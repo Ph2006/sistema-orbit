@@ -5568,38 +5568,68 @@ return (
                         <Card>
                             <CardHeader>
                                 <CardTitle>Itens por setor</CardTitle>
-                                <CardDescription>Detalhamento dos itens que compõem a carga atual.</CardDescription>
+                                <CardDescription>
+                                    Selecione um setor para visualizar os itens que compõem sua carga atual.
+                                </CardDescription>
                             </CardHeader>
                             <CardContent>
-                                <Table>
-                                    <TableHeader>
-                                        <TableRow>
-                                            <TableHead>Setor / etapa</TableHead>
-                                            <TableHead>Pedido / OS</TableHead>
-                                            <TableHead>Item</TableHead>
-                                            <TableHead className="text-right">Peso</TableHead>
-                                        </TableRow>
-                                    </TableHeader>
-                                    <TableBody>
-                                        {occupationStats.sectors.flatMap(sector => sector.items.map(item => (
-                                            <TableRow key={`${item.orderId}-${sector.stageName}-${item.itemDescription}`}>
-                                                <TableCell><Badge variant="secondary">{sector.stageName}</Badge></TableCell>
-                                                <TableCell className="font-medium">{item.orderLabel}</TableCell>
-                                                <TableCell>{item.itemDescription}</TableCell>
-                                                <TableCell className="text-right font-medium">
-                                                    {item.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
-                                                </TableCell>
-                                            </TableRow>
-                                        )))}
-                                        {occupationStats.totalItems === 0 && (
-                                            <TableRow>
-                                                <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
-                                                    Nenhum item em fabricação.
-                                                </TableCell>
-                                            </TableRow>
-                                        )}
-                                    </TableBody>
-                                </Table>
+                                {occupationStats.sectors.length === 0 ? (
+                                    <div className="py-10 text-center text-muted-foreground">
+                                        Nenhum item em fabricação.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-3" aria-label="Setores de fabricação">
+                                        {occupationStats.sectors.map(sector => (
+                                            <details
+                                                key={sector.stageName}
+                                                className="group overflow-hidden rounded-lg border bg-card"
+                                            >
+                                                <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 transition-colors hover:bg-muted/50 [&::-webkit-details-marker]:hidden">
+                                                    <div className="flex min-w-0 items-center gap-3">
+                                                        <ChevronDown className="h-5 w-5 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+                                                        <div className="min-w-0">
+                                                            <p className="truncate font-semibold text-foreground">{sector.stageName}</p>
+                                                            <p className="text-sm text-muted-foreground">
+                                                                {sector.itemCount} {sector.itemCount === 1 ? 'item' : 'itens'} · {sector.orderCount} {sector.orderCount === 1 ? 'pedido' : 'pedidos'}
+                                                            </p>
+                                                        </div>
+                                                    </div>
+                                                    <div className="shrink-0 text-right">
+                                                        <p className="font-semibold text-foreground">
+                                                            {sector.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                                        </p>
+                                                        <p className="text-xs text-muted-foreground">
+                                                            {sector.percentage.toFixed(1)}% da carga
+                                                        </p>
+                                                    </div>
+                                                </summary>
+
+                                                <div className="border-t bg-muted/10 p-2 md:p-4">
+                                                    <Table>
+                                                        <TableHeader>
+                                                            <TableRow>
+                                                                <TableHead>Pedido / OS</TableHead>
+                                                                <TableHead>Item</TableHead>
+                                                                <TableHead className="text-right">Peso</TableHead>
+                                                            </TableRow>
+                                                        </TableHeader>
+                                                        <TableBody>
+                                                            {sector.items.map((item, itemIndex) => (
+                                                                <TableRow key={`${item.orderId}-${item.itemDescription}-${itemIndex}`}>
+                                                                    <TableCell className="font-medium">{item.orderLabel}</TableCell>
+                                                                    <TableCell>{item.itemDescription}</TableCell>
+                                                                    <TableCell className="text-right font-medium">
+                                                                        {item.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                                                    </TableCell>
+                                                                </TableRow>
+                                                            ))}
+                                                        </TableBody>
+                                                    </Table>
+                                                </div>
+                                            </details>
+                                        ))}
+                                    </div>
+                                )}
                             </CardContent>
                         </Card>
                     </div>
