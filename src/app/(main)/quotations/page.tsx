@@ -50,8 +50,6 @@ const itemSchema = z.object({
   icmsRate: z.coerce.number().min(0).max(100).optional(),
   pisRate: z.coerce.number().min(0).max(100).optional(),
   cofinsRate: z.coerce.number().min(0).max(100).optional(),
-  irpjRate: z.coerce.number().min(0).max(100).optional(),
-  csllRate: z.coerce.number().min(0).max(100).optional(),
   leadTimeDays: z.coerce.number().min(0).optional(),
   notes: z.string().optional(),
 });
@@ -99,8 +97,6 @@ type Product = {
     icmsRate?: number;
     pisRate?: number;
     cofinsRate?: number;
-    irpjRate?: number;
-    csllRate?: number;
     productionPlanTemplate?: Array<{
         stageName: string;
         durationDays?: number;
@@ -129,8 +125,6 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
         item.icmsRate,
         item.pisRate,
         item.cofinsRate,
-        item.irpjRate,
-        item.csllRate,
     ].some(value => value !== undefined && value !== null && value !== '');
 
     // Preserva exatamente o cálculo das cotações antigas.
@@ -147,8 +141,6 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
             icmsAmount: 0,
             pisAmount: 0,
             cofinsAmount: 0,
-            irpjAmount: 0,
-            csllAmount: 0,
             taxAmount,
             totalWithTax,
             isLegacyCalculation: true,
@@ -158,13 +150,9 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
     const icmsRate = (Number(item.icmsRate) || 0) / 100;
     const pisRate = (Number(item.pisRate) || 0) / 100;
     const cofinsRate = (Number(item.cofinsRate) || 0) / 100;
-    const irpjRate = (Number(item.irpjRate) || 0) / 100;
-    const csllRate = (Number(item.csllRate) || 0) / 100;
-
-    // IRPJ e CSLL compõem internamente o preço bruto, mas não são
-    // discriminados na proposta comercial ao cliente.
-    const denominator =
-        (1 - icmsRate) * (1 - pisRate - cofinsRate) - irpjRate - csllRate;
+    // O preço do produto já contém IRPJ e CSLL. Nesta etapa entram somente
+    // ICMS, PIS e COFINS, evitando a cobrança duplicada dos tributos internos.
+    const denominator = (1 - icmsRate) * (1 - pisRate - cofinsRate);
 
     if (denominator <= 0) {
         throw new Error('As alíquotas informadas resultam em um preço inválido.');
@@ -175,9 +163,7 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
     const pisCofinsBase = totalWithTax - icmsAmount;
     const pisAmount = pisCofinsBase * pisRate;
     const cofinsAmount = pisCofinsBase * cofinsRate;
-    const irpjAmount = totalWithTax * irpjRate;
-    const csllAmount = totalWithTax * csllRate;
-    const taxAmount = icmsAmount + pisAmount + cofinsAmount + irpjAmount + csllAmount;
+    const taxAmount = icmsAmount + pisAmount + cofinsAmount;
 
     return {
         totalPrice,
@@ -186,8 +172,6 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
         icmsAmount,
         pisAmount,
         cofinsAmount,
-        irpjAmount,
-        csllAmount,
         taxAmount,
         totalWithTax,
         isLegacyCalculation: false,
@@ -242,8 +226,6 @@ const normalizeItemValues = (item: any): Item => {
         icmsRate: item.icmsRate !== undefined ? Number(item.icmsRate) || 0 : undefined,
         pisRate: item.pisRate !== undefined ? Number(item.pisRate) || 0 : undefined,
         cofinsRate: item.cofinsRate !== undefined ? Number(item.cofinsRate) || 0 : undefined,
-        irpjRate: item.irpjRate !== undefined ? Number(item.irpjRate) || 0 : undefined,
-        csllRate: item.csllRate !== undefined ? Number(item.csllRate) || 0 : undefined,
         leadTimeDays: item.leadTimeDays ? Number(item.leadTimeDays) || 0 : undefined,
         code: item.code || '',
         description: item.description || '',
@@ -284,8 +266,6 @@ export default function QuotationsPage() {
         icmsRate: 18,
         pisRate: 0.65,
         cofinsRate: 3,
-        irpjRate: 4.8,
-        csllRate: 2.88,
         notes: ''
     };
     const [currentItem, setCurrentItem] = useState<Item>(emptyItem);
@@ -460,8 +440,6 @@ export default function QuotationsPage() {
                     icmsRate: item.icmsRate,
                     pisRate: item.pisRate,
                     cofinsRate: item.cofinsRate,
-                    irpjRate: item.irpjRate,
-                    csllRate: item.csllRate,
                     leadTimeDays: item.leadTimeDays || undefined,
                     notes: item.notes || '',
                 }));
@@ -472,7 +450,7 @@ export default function QuotationsPage() {
                         quantity: 1,
                         unitPrice: 0,
                         code: '', unitWeight: 0, icmsRate: 18, pisRate: 0.65,
-                        cofinsRate: 3, irpjRate: 4.8, csllRate: 2.88, notes: ''
+                        cofinsRate: 3, notes: ''
                     }));
                 }
 
@@ -620,8 +598,6 @@ export default function QuotationsPage() {
                     ...(item.icmsRate !== undefined ? { icmsRate: item.icmsRate } : {}),
                     ...(item.pisRate !== undefined ? { pisRate: item.pisRate } : {}),
                     ...(item.cofinsRate !== undefined ? { cofinsRate: item.cofinsRate } : {}),
-                    ...(item.irpjRate !== undefined ? { irpjRate: item.irpjRate } : {}),
-                    ...(item.csllRate !== undefined ? { csllRate: item.csllRate } : {}),
                     leadTimeDays: item.leadTimeDays || 0,
                     notes: item.notes || '',
                     // Calculated fields
@@ -630,8 +606,6 @@ export default function QuotationsPage() {
                     icmsAmount: totals.icmsAmount,
                     pisAmount: totals.pisAmount,
                     cofinsAmount: totals.cofinsAmount,
-                    irpjAmount: totals.irpjAmount,
-                    csllAmount: totals.csllAmount,
                     taxAmount: totals.taxAmount,
                     totalWithTax: totals.totalWithTax,
                     totalWeight: (item.quantity || 0) * (item.unitWeight || 0)
@@ -678,8 +652,6 @@ export default function QuotationsPage() {
                         icmsRate: item.icmsRate ?? 18,
                         pisRate: item.pisRate ?? 0.65,
                         cofinsRate: item.cofinsRate ?? 3,
-                        irpjRate: item.irpjRate ?? 4.8,
-                        csllRate: item.csllRate ?? 2.88,
                         updatedAt: Timestamp.now(),
                     };
                     await setDoc(productRef, productData, { merge: true });
@@ -700,7 +672,7 @@ export default function QuotationsPage() {
         let processedValue = value;
         
         // Converter campos numéricos para number se necessário
-        if (['quantity', 'unitPrice', 'unitWeight', 'taxRate', 'icmsRate', 'pisRate', 'cofinsRate', 'irpjRate', 'csllRate', 'leadTimeDays'].includes(field)) {
+        if (['quantity', 'unitPrice', 'unitWeight', 'taxRate', 'icmsRate', 'pisRate', 'cofinsRate', 'leadTimeDays'].includes(field)) {
             // Se o valor é uma string vazia, manter como vazio para o input
             if (value === '') {
                 processedValue = '';
@@ -726,8 +698,6 @@ export default function QuotationsPage() {
             icmsRate: product.icmsRate ?? 18,
             pisRate: product.pisRate ?? 0.65,
             cofinsRate: product.cofinsRate ?? 3,
-            irpjRate: product.irpjRate ?? 4.8,
-            csllRate: product.csllRate ?? 2.88,
             leadTimeDays: leadTime > 0 ? leadTime : undefined,
             notes: ''
         });
@@ -1128,7 +1098,7 @@ export default function QuotationsPage() {
                     return acc + itemWeight;
                 }, 0);
 
-                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'Preço Unit. s/ Imp.', 'ICMS/PIS/COFINS (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.']];
+                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'Preço Unit. s/ ICMS/PIS/COFINS', 'ICMS/PIS/COFINS (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.']];
                 const body = items.map(item => {
                     const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
                     const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
@@ -1278,7 +1248,7 @@ export default function QuotationsPage() {
                     [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
                     ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
                     [],
-                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ Imp.', 'ICMS/PIS/COFINS (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.'],
+                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ ICMS/PIS/COFINS', 'ICMS/PIS/COFINS (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.'],
                     ...items.map(item => {
                         const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
                         const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
@@ -1764,7 +1734,7 @@ export default function QuotationsPage() {
                                                     />
                                                 </div>
                                                 <div>
-                                                    <FormLabel>Preço Unitário s/ Imposto (R$)</FormLabel>
+                                                    <FormLabel>Preço Unitário s/ ICMS/PIS/COFINS (R$)</FormLabel>
                                                     <Input 
                                                         type="number" 
                                                         step="0.01" 
@@ -1787,16 +1757,6 @@ export default function QuotationsPage() {
                                                     <FormLabel>COFINS (%)</FormLabel>
                                                     <Input type="number" step="0.01" value={currentItem.cofinsRate ?? ''}
                                                         onChange={e => handleCurrentItemChange('cofinsRate', e.target.value)} />
-                                                </div>
-                                                <div>
-                                                    <FormLabel>IRPJ interno (%)</FormLabel>
-                                                    <Input type="number" step="0.01" value={currentItem.irpjRate ?? ''}
-                                                        onChange={e => handleCurrentItemChange('irpjRate', e.target.value)} />
-                                                </div>
-                                                <div>
-                                                    <FormLabel>CSLL interna (%)</FormLabel>
-                                                    <Input type="number" step="0.01" value={currentItem.csllRate ?? ''}
-                                                        onChange={e => handleCurrentItemChange('csllRate', e.target.value)} />
                                                 </div>
                                                 <div>
                                                     <FormLabel>Peso Unit. (kg)</FormLabel>
@@ -1868,7 +1828,7 @@ export default function QuotationsPage() {
                                                             <TableHead className="min-w-[400px]">Descrição</TableHead>
                                                             <TableHead className="w-[100px]">Qtd.</TableHead>
                                                             <TableHead className="w-[120px]">Peso Unit.</TableHead>
-                                                            <TableHead className="w-[160px]">Preço Unit. s/ Imp.</TableHead>
+                                                            <TableHead className="w-[180px]">Preço Unit. s/ ICMS/PIS/COFINS</TableHead>
                                                             <TableHead className="w-[190px] text-center">ICMS / PIS / COFINS</TableHead>
                                                             <TableHead className="w-[140px]">Lead Time</TableHead>
                                                             <TableHead className="w-[180px]">Total c/ Imp.</TableHead>
