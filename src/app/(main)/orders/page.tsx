@@ -47,6 +47,10 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import { Progress } from "@/components/ui/progress";
 
+type OrdersViewMode = 'list' | 'calendar' | 'kanban' | 'occupation';
+const ORDERS_VIEW_MODE_KEY = 'sistema-orbit:orders:last-view-mode';
+const VALID_ORDERS_VIEW_MODES: OrdersViewMode[] = ['list', 'calendar', 'kanban', 'occupation'];
+
 const productionStageSchema = z.object({
     stageName: z.string(),
     status: z.string(),
@@ -628,8 +632,36 @@ export default function OrdersPage() {
     const [monthFilter, setMonthFilter] = useState<string>("all");
     
     // Modos de visualização, incluindo a análise de ocupação por setor
-    const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban' | 'occupation'>('list');
+    const [viewMode, setViewMode] = useState<OrdersViewMode>('list');
+    const [isViewModeRestored, setIsViewModeRestored] = useState(false);
     const [calendarDate, setCalendarDate] = useState(new Date());
+
+    // Recupera após F5 a última visualização somente no navegador, evitando conflito
+    // com a renderização inicial do Next.js.
+    useEffect(() => {
+        try {
+            const savedViewMode = window.localStorage.getItem(ORDERS_VIEW_MODE_KEY);
+            if (savedViewMode && VALID_ORDERS_VIEW_MODES.includes(savedViewMode as OrdersViewMode)) {
+                setViewMode(savedViewMode as OrdersViewMode);
+            }
+        } catch (error) {
+            console.warn('Não foi possível recuperar a última visualização de pedidos:', error);
+        } finally {
+            setIsViewModeRestored(true);
+        }
+    }, []);
+
+    // Salva cada mudança feita pelo usuário. A trava impede que o valor salvo
+    // seja substituído por "list" antes de a restauração inicial terminar.
+    useEffect(() => {
+        if (!isViewModeRestored) return;
+
+        try {
+            window.localStorage.setItem(ORDERS_VIEW_MODE_KEY, viewMode);
+        } catch (error) {
+            console.warn('Não foi possível salvar a visualização de pedidos:', error);
+        }
+    }, [viewMode, isViewModeRestored]);
 
     // Estados para controlar posição do scroll no Kanban
     const kanbanScrollRef = useRef<HTMLDivElement>(null);
