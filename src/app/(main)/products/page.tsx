@@ -156,6 +156,11 @@ const getLeadTimeBadge = (leadTime: number) => {
     totalCost: number;
     profitMargin: number;
     profitValue: number;
+    priceBeforeIncomeTaxes: number;
+    irpjRate: number;
+    irpjAmount: number;
+    csllRate: number;
+    csllAmount: number;
     finalPrice: number;
     pricePerKg: number;
     createdAt: Date;
@@ -509,6 +514,8 @@ export default function ProductsPage() {
     const [pricingCalculation, setPricingCalculation] = useState<PricingCalculation | null>(null);
     const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
     const [profitMargin, setProfitMargin] = useState<number>(30);
+    const [irpjRate, setIrpjRate] = useState<number>(4.8);
+    const [csllRate, setCsllRate] = useState<number>(2.88);
     const [machiningHours, setMachiningHours] = useState<number>(0);
     const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
     
@@ -717,6 +724,19 @@ export default function ProductsPage() {
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
       }, { merge: true });
+
+      // O preço final salvo no cadastro do produto já inclui IRPJ e CSLL.
+      const productRef = doc(db, "companies", "mecald", "products", calculation.productId);
+      await setDoc(productRef, {
+        unitPrice: calculation.finalPrice,
+        updatedAt: Timestamp.now(),
+      }, { merge: true });
+
+      setProducts(prev => prev.map(product =>
+        product.id === calculation.productId
+          ? { ...product, unitPrice: calculation.finalPrice }
+          : product
+      ));
       setSavedPricingCodes(prev => new Set([...prev, calculation.productCode]));
       toast({ title: "Precificação salva!", description: "Os dados foram armazenados e serão carregados automaticamente." });
     } catch (error) {
@@ -736,6 +756,8 @@ export default function ProductsPage() {
         setMaterialComposition(composition);
         setPricingCalculation(data as PricingCalculation);
         setProfitMargin(data.profitMargin ?? 30);
+        setIrpjRate(data.irpjRate ?? 4.8);
+        setCsllRate(data.csllRate ?? 2.88);
         setMachiningHours(data.machiningHours ?? 0);
         toast({
           title: "Precificação carregada!",
@@ -745,6 +767,8 @@ export default function ProductsPage() {
         setMaterialComposition([]);
         setPricingCalculation(null);
         setMachiningHours(0);
+        setIrpjRate(4.8);
+        setCsllRate(2.88);
       }
     } catch (error) {
       console.error("Error loading saved pricing:", error);
@@ -2591,6 +2615,36 @@ export default function ProductsPage() {
                                         </p>
                                     </div>
                                     <div>
+                                        <Label>IRPJ (%)</Label>
+                                        <Input
+                                            type="number"
+                                            min="0"
+                                            max="99.99"
+                                            step="0.01"
+                                            value={irpjRate}
+                                            onChange={(e) => setIrpjRate(Number(e.target.value))}
+                                            placeholder="4.80"
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Calculado por dentro sobre o preço bruto
+                                        </p>
+                                    </div>
+                                    <div>
+                                        <Label>CSLL (%)</Label>
+                                        <Input
+                                            type="number"
+                                            min="0"
+                                            max="99.99"
+                                            step="0.01"
+                                            value={csllRate}
+                                            onChange={(e) => setCsllRate(Number(e.target.value))}
+                                            placeholder="2.88"
+                                        />
+                                        <p className="text-xs text-muted-foreground mt-1">
+                                            Calculada por dentro sobre o preço bruto
+                                        </p>
+                                    </div>
+                                    <div>
                                         <Label>Custo de Insumos por Kg (R$/kg)</Label>
                                         <Input
                                             type="number"
@@ -3045,7 +3099,24 @@ export default function ProductsPage() {
                                                     const consumablesCost = consumablesCostPerKg * productWeight;
                                                     const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesCost;
                                                     const profitValue = totalCost * (profitMargin / 100);
-                                                    const finalPrice = totalCost + profitValue;
+                                                    const priceBeforeIncomeTaxes = totalCost + profitValue;
+                                                    const irpjDecimal = irpjRate / 100;
+                                                    const csllDecimal = csllRate / 100;
+                                                    const incomeTaxDenominator = 1 - irpjDecimal - csllDecimal;
+
+                                                    if (irpjRate < 0 || csllRate < 0 || incomeTaxDenominator <= 0) {
+                                                        toast({
+                                                            variant: "destructive",
+                                                            title: "Alíquotas inválidas",
+                                                            description: "IRPJ e CSLL devem ser positivos e a soma precisa ser menor que 100%."
+                                                        });
+                                                        return;
+                                                    }
+
+                                                    // Gross-up: IRPJ e CSLL incidem sobre o próprio preço bruto.
+                                                    const finalPrice = priceBeforeIncomeTaxes / incomeTaxDenominator;
+                                                    const irpjAmount = finalPrice * irpjDecimal;
+                                                    const csllAmount = finalPrice * csllDecimal;
                                                     const pricePerKg = finalPrice / productWeight;
 
                                                     const calculation: PricingCalculation = {
@@ -3060,6 +3131,11 @@ export default function ProductsPage() {
                                                         totalCost,
                                                         profitMargin,
                                                         profitValue,
+                                                        priceBeforeIncomeTaxes,
+                                                        irpjRate,
+                                                        irpjAmount,
+                                                        csllRate,
+                                                        csllAmount,
                                                         finalPrice,
                                                         pricePerKg,
                                                         createdAt: new Date()
@@ -3397,6 +3473,9 @@ export default function ProductsPage() {
                                                     
                                                     checkPageBreak(40);
                                                     addSection('RESUMO FINANCEIRO');
+                                                    addText(`Preço antes de IRPJ e CSLL: R$ ${(pricingCalculation.priceBeforeIncomeTaxes ?? (pricingCalculation.totalCost + pricingCalculation.profitValue)).toFixed(2)}`, 9);
+                                                    addText(`IRPJ (${pricingCalculation.irpjRate ?? 0}%): R$ ${(pricingCalculation.irpjAmount ?? 0).toFixed(2)}`, 9);
+                                                    addText(`CSLL (${pricingCalculation.csllRate ?? 0}%): R$ ${(pricingCalculation.csllAmount ?? 0).toFixed(2)}`, 9);
                                                     
                                                     yPosition += 3;
                                                     const boxY = yPosition;
@@ -3448,7 +3527,9 @@ export default function ProductsPage() {
                                                         { label: 'Etapas de Produção', value: stageTotal2, color: [16, 185, 129] },
                                                         { label: 'Usinagem', value: pricingCalculation.machiningCost, color: [245, 158, 11] },
                                                         { label: 'Insumos', value: pricingCalculation.consumablesCost, color: [139, 92, 246] },
-                                                        { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] }
+                                                        { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] },
+                                                        { label: 'IRPJ', value: pricingCalculation.irpjAmount ?? 0, color: [234, 88, 12] },
+                                                        { label: 'CSLL', value: pricingCalculation.csllAmount ?? 0, color: [202, 138, 4] }
                                                     ].filter(item => item.value > 0);
                                                     
                                                     percentages.forEach((item, index) => {
@@ -3584,6 +3665,20 @@ export default function ProductsPage() {
                                                     <span className="font-medium">Lucro ({pricingCalculation.profitMargin}%)</span>
                                                     <span className="font-mono font-medium">R$ {pricingCalculation.profitValue.toFixed(2)}</span>
                                                 </div>
+                                                <div className="flex justify-between text-sm pt-1 border-t">
+                                                    <span className="font-medium">Preço antes de IRPJ e CSLL</span>
+                                                    <span className="font-mono font-medium">
+                                                        R$ {(pricingCalculation.priceBeforeIncomeTaxes ?? (pricingCalculation.totalCost + pricingCalculation.profitValue)).toFixed(2)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex justify-between text-sm text-amber-600">
+                                                    <span className="font-medium">IRPJ ({pricingCalculation.irpjRate ?? 0}%)</span>
+                                                    <span className="font-mono font-medium">R$ {(pricingCalculation.irpjAmount ?? 0).toFixed(2)}</span>
+                                                </div>
+                                                <div className="flex justify-between text-sm text-amber-600">
+                                                    <span className="font-medium">CSLL ({pricingCalculation.csllRate ?? 0}%)</span>
+                                                    <span className="font-mono font-medium">R$ {(pricingCalculation.csllAmount ?? 0).toFixed(2)}</span>
+                                                </div>
                                             </div>
 
                                             <Separator />
@@ -3606,8 +3701,8 @@ export default function ProductsPage() {
                                             </div>
 
                                             <div className="text-xs text-muted-foreground p-3 bg-muted rounded-md">
-                                                💡 <strong>Dica:</strong> Este é o preço sem impostos. Lembre-se de adicionar 
-                                                os impostos aplicáveis (ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.
+                                                💡 <strong>Dica:</strong> O preço final já contém IRPJ e CSLL. ICMS, PIS e COFINS
+                                                continuam sendo tratados na cotação comercial.
                                             </div>
                                         </div>
                                     ) : (
