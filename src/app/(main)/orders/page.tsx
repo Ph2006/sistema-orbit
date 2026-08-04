@@ -288,6 +288,70 @@ const BusinessDayInfo = ({ startDate, endDate, expectedDuration }: BusinessDayIn
   );
 };
 
+interface ScheduleDateInputProps {
+  date: Date | null | undefined;
+  onCommit: (date: Date | null) => void;
+  className?: string;
+}
+
+// Campo de data confirmado somente ao sair: evita recalcular o cronograma
+// enquanto o usuário ainda está preenchendo os quatro dígitos do ano.
+const ScheduleDateInput = ({ date, onCommit, className }: ScheduleDateInputProps) => {
+  const formattedDate = date instanceof Date && !isNaN(date.getTime())
+    ? format(date, "yyyy-MM-dd")
+    : "";
+
+  const commitDate = (input: HTMLInputElement) => {
+    const value = input.value;
+
+    if (!value) {
+      onCommit(null);
+      return;
+    }
+
+    const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+    if (!match) {
+      input.value = formattedDate;
+      return;
+    }
+
+    const year = Number(match[1]);
+    const month = Number(match[2]);
+    const day = Number(match[3]);
+    const parsedDate = new Date(year, month - 1, day);
+    const isValidDate = year >= 2000 && year <= 2100 &&
+      parsedDate.getFullYear() === year &&
+      parsedDate.getMonth() === month - 1 &&
+      parsedDate.getDate() === day;
+
+    if (!isValidDate) {
+      // Não propaga anos parciais como 1906 para as tarefas sucessoras.
+      input.value = formattedDate;
+      return;
+    }
+
+    onCommit(parsedDate);
+  };
+
+  return (
+    <Input
+      type="date"
+      defaultValue={formattedDate}
+      min="2000-01-01"
+      max="2100-12-31"
+      onBlur={(event) => commitDate(event.currentTarget)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') event.currentTarget.blur();
+        if (event.key === 'Escape') {
+          event.currentTarget.value = formattedDate;
+          event.currentTarget.blur();
+        }
+      }}
+      className={className}
+    />
+  );
+};
+
 const calculateTotalWeight = (items: OrderItem[]): number => {
     if (!items || !Array.isArray(items)) return 0;
     return items.reduce((acc, item) => {
@@ -4237,41 +4301,6 @@ export default function OrdersPage() {
         })));
     };
 
-    // FUNÇÃO AUXILIAR para criação segura de datas
-    const createSafeDate = (dateString: string): Date | null => {
-        if (!dateString) return null;
-        
-        try {
-            // Para strings no formato YYYY-MM-DD, cria data local
-            if (dateString.includes('-')) {
-                const [year, month, day] = dateString.split('-').map(Number);
-                const date = new Date(year, month - 1, day); // month - 1 porque Date usa 0-11
-                
-                if (!isNaN(date.getTime())) {
-                    console.log('📅 [createSafeDate] Criada data local:', {
-                        input: dateString,
-                        output: date,
-                        formatted: format(date, 'dd/MM/yyyy')
-                    });
-                    return date;
-                }
-            }
-            
-            // Fallback para outros formatos
-            const date = new Date(dateString);
-            if (!isNaN(date.getTime())) {
-                console.log('📅 [createSafeDate] Criada data fallback:', { input: dateString, output: date });
-                return date;
-            }
-            
-            console.warn('📅 [createSafeDate] Data inválida:', dateString);
-            return null;
-        } catch (error) {
-            console.error('📅 [createSafeDate] Erro ao criar data:', { dateString, error });
-            return null;
-        }
-    };
-
     // CORREÇÃO 1: CÁLCULO CORRETO DE DIAS DE ATRASO
     // CORREÇÃO: Função analyzeItemDelivery com cálculo correto de dias de diferença
     const analyzeItemDelivery = (item: OrderItem, orderDeliveryDate?: Date) => {
@@ -6643,13 +6672,10 @@ return (
                                 {stage.startDate ? format(stage.startDate, "dd/MM") : '-'}
                               </div>
                             ) : (
-                              <Input
-                                type="date"
-                                value={stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : ""}
-                                onChange={(e) => {
-                                  const newDate = e.target.value ? createSafeDate(e.target.value) : null;
-                                  handlePlanChange(index, 'startDate', newDate);
-                                }}
+                              <ScheduleDateInput
+                                key={`start-${index}-${stage.startDate ? format(stage.startDate, "yyyy-MM-dd") : 'empty'}`}
+                                date={stage.startDate}
+                                onCommit={(newDate) => handlePlanChange(index, 'startDate', newDate)}
                                 className="h-8"
                               />
                             )}
@@ -6660,13 +6686,10 @@ return (
                                 {stage.completedDate ? format(stage.completedDate, "dd/MM") : '-'}
                               </div>
                             ) : (
-                              <Input
-                                type="date"
-                                value={stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : ""}
-                                onChange={(e) => {
-                                  const newDate = e.target.value ? createSafeDate(e.target.value) : null;
-                                  handlePlanChange(index, 'completedDate', newDate);
-                                }}
+                              <ScheduleDateInput
+                                key={`end-${index}-${stage.completedDate ? format(stage.completedDate, "yyyy-MM-dd") : 'empty'}`}
+                                date={stage.completedDate}
+                                onCommit={(newDate) => handlePlanChange(index, 'completedDate', newDate)}
                                 className="h-8"
                               />
                             )}
