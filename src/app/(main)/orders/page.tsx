@@ -563,8 +563,8 @@ export default function OrdersPage() {
     const [dataBookFilter, setDataBookFilter] = useState<string>("all");
     const [monthFilter, setMonthFilter] = useState<string>("all");
     
-    // View states
-    const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban'>('list');
+    // Modos de visualização, incluindo a análise de ocupação por setor
+    const [viewMode, setViewMode] = useState<'list' | 'calendar' | 'kanban' | 'occupation'>('list');
     const [calendarDate, setCalendarDate] = useState(new Date());
 
     // Estados para controlar posição do scroll no Kanban
@@ -1362,6 +1362,136 @@ export default function OrdersPage() {
             completedPercentage: totalWeight > 0 ? (completedWeight / totalWeight) * 100 : 0
         };
     }, [orders, monthFilter]);
+
+    // Carga atual de fabricação: cada item é contabilizado integralmente no
+    // setor cuja etapa está marcada como "Em Andamento".
+    const occupationStats = useMemo(() => {
+        type OccupationItem = {
+            orderId: string;
+            orderLabel: string;
+            itemDescription: string;
+            stageName: string;
+            weight: number;
+        };
+
+        const itemsInProduction: OccupationItem[] = [];
+        let waitingWeight = 0;
+        let waitingItems = 0;
+
+        filteredOrders.forEach(order => {
+            if (order.status === 'Concluído' || order.status === 'Cancelado') return;
+
+            order.items.forEach(item => {
+                const weight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                if (weight <= 0) return;
+
+                const plan = item.productionPlan || [];
+                const activeStage = plan.find(stage => stage.status === 'Em Andamento');
+
+                if (!activeStage) {
+                    const isFinished = plan.length > 0 && plan.every(stage => stage.status === 'Concluído');
+                    if (!isFinished) {
+                        waitingWeight += weight;
+                        waitingItems += 1;
+                    }
+                    return;
+                }
+
+                itemsInProduction.push({
+                    orderId: order.id,
+                    orderLabel: order.internalOS || `Pedido ${order.id}`,
+                    itemDescription: item.description,
+                    stageName: activeStage.stageName?.trim() || 'Etapa não identificada',
+                    weight,
+                });
+            });
+        });
+
+        const sectorMap = new Map<string, {
+            stageName: string;
+            weight: number;
+            itemCount: number;
+            orderIds: Set<string>;
+            items: OccupationItem[];
+        }>();
+
+        itemsInProduction.forEach(item => {
+            const key = item.stageName.toLocaleLowerCase('pt-BR');
+            const current = sectorMap.get(key) || {
+                stageName: item.stageName,
+                weight: 0,
+                itemCount: 0,
+                orderIds: new Set<string>(),
+                items: [],
+            };
+            current.weight += item.weight;
+            current.itemCount += 1;
+            current.orderIds.add(item.orderId);
+            current.items.push(item);
+            sectorMap.set(key, current);
+        });
+
+        const totalInProduction = itemsInProduction.reduce((sum, item) => sum + item.weight, 0);
+        const sectors = Array.from(sectorMap.values())
+            .map(sector => ({
+                ...sector,
+                orderCount: sector.orderIds.size,
+                percentage: totalInProduction > 0 ? (sector.weight / totalInProduction) * 100 : 0,
+            }))
+            .sort((a, b) => b.weight - a.weight);
+
+        return {
+            sectors,
+            totalInProduction,
+            totalItems: itemsInProduction.length,
+            totalOrders: new Set(itemsInProduction.map(item => item.orderId)).size,
+            waitingWeight,
+            waitingItems,
+        };
+    }, [filteredOrders]);
+
+    // Média fixa dos últimos 12 meses. Um item entra no mês em que sua última
+    // etapa foi concluída; para dados antigos, usa a conclusão do pedido.
+    const monthlyProductionStats = useMemo(() => {
+        const now = new Date();
+        const firstMonth = new Date(now.getFullYear(), now.getMonth() - 11, 1);
+        const months = Array.from({ length: 12 }, (_, index) => {
+            const date = new Date(firstMonth.getFullYear(), firstMonth.getMonth() + index, 1);
+            return {
+                key: format(date, 'yyyy-MM'),
+                label: date.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }),
+                weight: 0,
+            };
+        });
+        const monthMap = new Map(months.map(month => [month.key, month]));
+
+        orders.forEach(order => {
+            order.items.forEach(item => {
+                if (calculateItemProgress(item) < 100) return;
+
+                const completedDates = (item.productionPlan || [])
+                    .map(stage => stage.completedDate)
+                    .filter((date): date is Date => date instanceof Date && !isNaN(date.getTime()));
+                const itemCompletedAt = completedDates.length > 0
+                    ? new Date(Math.max(...completedDates.map(date => date.getTime())))
+                    : order.completedAt;
+
+                if (!(itemCompletedAt instanceof Date) || isNaN(itemCompletedAt.getTime())) return;
+                const month = monthMap.get(format(itemCompletedAt, 'yyyy-MM'));
+                if (!month) return;
+
+                month.weight += (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+            });
+        });
+
+        const total = months.reduce((sum, month) => sum + month.weight, 0);
+        return {
+            months,
+            total,
+            average: total / 12,
+            bestMonth: months.reduce((best, month) => month.weight > best.weight ? month : best, months[0]),
+        };
+    }, [orders]);
     
     const watchedItems = form.watch("items");
     const currentTotalWeight = useMemo(() => calculateTotalWeight(watchedItems || []), [watchedItems]);
@@ -4917,6 +5047,17 @@ return (
                                 <CalendarDays className="mr-2 h-4 w-4" />
                                 Calendário
                             </Button>
+                            <Button
+                                size="sm"
+                                onClick={() => setViewMode('occupation')}
+                                className={`h-8 font-medium ${viewMode === 'occupation'
+                                    ? 'bg-primary text-primary-foreground shadow-sm'
+                                    : 'bg-transparent text-muted-foreground hover:text-foreground hover:bg-muted'
+                                }`}
+                            >
+                                <Weight className="mr-2 h-4 w-4" />
+                                Ocupação
+                            </Button>
                         </div>
                         
                         {/* Campo de busca */}
@@ -5222,6 +5363,163 @@ return (
                             )}
                         </CardContent>
                     </Card>
+                ) : viewMode === 'occupation' ? (
+                    <div className="space-y-4">
+                        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <CardDescription>Peso em fabricação</CardDescription>
+                                    <CardTitle className="text-2xl text-primary">
+                                        {occupationStats.totalInProduction.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="text-sm text-muted-foreground">
+                                    {occupationStats.totalItems} itens de {occupationStats.totalOrders} pedidos
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <CardDescription>Setores ocupados</CardDescription>
+                                    <CardTitle className="text-2xl">{occupationStats.sectors.length}</CardTitle>
+                                </CardHeader>
+                                <CardContent className="text-sm text-muted-foreground">
+                                    Etapas atualmente em andamento
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <CardDescription>Aguardando início de etapa</CardDescription>
+                                    <CardTitle className="text-2xl text-orange-500">
+                                        {occupationStats.waitingWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="text-sm text-muted-foreground">
+                                    {occupationStats.waitingItems} itens sem etapa em andamento
+                                </CardContent>
+                            </Card>
+                            <Card>
+                                <CardHeader className="pb-2">
+                                    <CardDescription>Fabricação média mensal</CardDescription>
+                                    <CardTitle className="text-2xl text-green-500">
+                                        {monthlyProductionStats.average.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg/mês
+                                    </CardTitle>
+                                </CardHeader>
+                                <CardContent className="text-sm text-muted-foreground">
+                                    Média dos últimos 12 meses
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        <div className="grid gap-4 xl:grid-cols-3">
+                            <Card className="xl:col-span-2">
+                                <CardHeader>
+                                    <CardTitle>Carga atual por setor</CardTitle>
+                                    <CardDescription>
+                                        O peso integral de cada item é atribuído à etapa marcada como Em Andamento.
+                                    </CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    {occupationStats.sectors.length === 0 ? (
+                                        <div className="py-12 text-center text-muted-foreground">
+                                            <Weight className="mx-auto mb-3 h-10 w-10" />
+                                            Nenhum item possui etapa em andamento nos pedidos exibidos.
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-5">
+                                            {occupationStats.sectors.map(sector => (
+                                                <div key={sector.stageName} className="space-y-2">
+                                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                                        <div>
+                                                            <p className="font-semibold text-foreground">{sector.stageName}</p>
+                                                            <p className="text-xs text-muted-foreground">
+                                                                {sector.itemCount} itens · {sector.orderCount} pedidos
+                                                            </p>
+                                                        </div>
+                                                        <div className="text-right">
+                                                            <p className="font-semibold">
+                                                                {sector.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                                            </p>
+                                                            <p className="text-xs text-muted-foreground">{sector.percentage.toFixed(1)}% da carga em fabricação</p>
+                                                        </div>
+                                                    </div>
+                                                    <Progress value={sector.percentage} className="h-3" />
+                                                </div>
+                                            ))}
+                                        </div>
+                                    )}
+                                </CardContent>
+                            </Card>
+
+                            <Card>
+                                <CardHeader>
+                                    <CardTitle>Produção concluída</CardTitle>
+                                    <CardDescription>Histórico mensal em kg dos últimos 12 meses.</CardDescription>
+                                </CardHeader>
+                                <CardContent>
+                                    <div className="space-y-3">
+                                        {monthlyProductionStats.months.map(month => {
+                                            const maxWeight = Math.max(...monthlyProductionStats.months.map(item => item.weight), 1);
+                                            const percentage = (month.weight / maxWeight) * 100;
+                                            return (
+                                                <div key={month.key} className="grid grid-cols-[70px_1fr_100px] items-center gap-2 text-sm">
+                                                    <span className="capitalize text-muted-foreground">{month.label}</span>
+                                                    <Progress value={percentage} className="h-2" />
+                                                    <span className="text-right font-medium">
+                                                        {month.weight.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <Separator className="my-4" />
+                                    <div className="flex justify-between text-sm">
+                                        <span className="text-muted-foreground">Total no período</span>
+                                        <span className="font-semibold">
+                                            {monthlyProductionStats.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                        </span>
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        </div>
+
+                        <Card>
+                            <CardHeader>
+                                <CardTitle>Itens por setor</CardTitle>
+                                <CardDescription>Detalhamento dos itens que compõem a carga atual.</CardDescription>
+                            </CardHeader>
+                            <CardContent>
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead>Setor / etapa</TableHead>
+                                            <TableHead>Pedido / OS</TableHead>
+                                            <TableHead>Item</TableHead>
+                                            <TableHead className="text-right">Peso</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
+                                    <TableBody>
+                                        {occupationStats.sectors.flatMap(sector => sector.items.map(item => (
+                                            <TableRow key={`${item.orderId}-${sector.stageName}-${item.itemDescription}`}>
+                                                <TableCell><Badge variant="secondary">{sector.stageName}</Badge></TableCell>
+                                                <TableCell className="font-medium">{item.orderLabel}</TableCell>
+                                                <TableCell>{item.itemDescription}</TableCell>
+                                                <TableCell className="text-right font-medium">
+                                                    {item.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                                </TableCell>
+                                            </TableRow>
+                                        )))}
+                                        {occupationStats.totalItems === 0 && (
+                                            <TableRow>
+                                                <TableCell colSpan={4} className="h-24 text-center text-muted-foreground">
+                                                    Nenhum item em fabricação.
+                                                </TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </CardContent>
+                        </Card>
+                    </div>
                 ) : (
                     <Card>
                         <CardHeader>
