@@ -3629,6 +3629,7 @@ export default function QualityPage() {
     }
   };
 
+  // Exportação UT sincronizada com os campos atuais do formulário e do Firestore.
   const handleUltrasoundReportPDF = async (report: UltrasoundReport) => {
     toast({ title: "Gerando PDF..." });
     try {
@@ -3637,6 +3638,48 @@ export default function QualityPage() {
         const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
         const orderInfo = orders.find(o => o.id === report.orderId);
         const itemInfo = orderInfo?.items.find(i => i.id === report.itemId);
+
+        // Sempre exportar a versão mais recente persistida no Firestore.
+        // Isso evita gerar o PDF com o objeto antigo que ainda estava na listagem
+        // logo após a edição do relatório.
+        const reportRef = doc(db, "companies", "mecald", "ultrasoundReports", report.id);
+        const reportSnap = await getDoc(reportRef);
+        const storedReport = reportSnap.exists() ? reportSnap.data() : {};
+
+        const toValidDate = (value: any): Date | null => {
+            if (!value) return null;
+            if (typeof value.toDate === 'function') return value.toDate();
+            if (value instanceof Date && !isNaN(value.getTime())) return value;
+            const parsed = new Date(value);
+            return isNaN(parsed.getTime()) ? null : parsed;
+        };
+
+        // Compatibilidade entre relatórios antigos e o formulário atual.
+        // Os campos persistidos mais recentes têm prioridade sobre o objeto da tela.
+        const mergedReport: any = { ...report, ...storedReport, id: report.id };
+        const pdfReport: UltrasoundReport = {
+            ...mergedReport,
+            inspectionDate: toValidDate(mergedReport.inspectionDate) || new Date(),
+            equipmentCalibrationValidity: toValidDate(mergedReport.equipmentCalibrationValidity),
+            calibrationBlockValidity: toValidDate(mergedReport.calibrationBlockValidity),
+            baseMaterial: mergedReport.baseMaterial || mergedReport.material || "",
+            material: mergedReport.material || mergedReport.baseMaterial || "",
+            weldTypeAndThickness: mergedReport.weldTypeAndThickness ||
+                [mergedReport.jointType, mergedReport.thickness].filter(Boolean).join(" / "),
+            executionStandardFull: mergedReport.executionStandardFull || mergedReport.executionStandard || "",
+            executionStandard: mergedReport.executionStandard || mergedReport.executionStandardFull || "",
+            acceptanceCriteria: mergedReport.acceptanceCriteria || mergedReport.acceptanceTable || "",
+            acceptanceTable: mergedReport.acceptanceTable || mergedReport.acceptanceCriteria || "",
+            rangeScale: mergedReport.rangeScale ?? mergedReport.range,
+            range: mergedReport.range ?? mergedReport.rangeScale,
+            results: Array.isArray(mergedReport.results) ? mergedReport.results : [],
+            photos: Array.isArray(mergedReport.photos) ? mergedReport.photos : [],
+        } as UltrasoundReport;
+
+        // Pedido e item também são resolvidos novamente caso os identificadores
+        // tenham sido alterados na última edição.
+        const currentOrderInfo = orders.find(o => o.id === pdfReport.orderId) || orderInfo;
+        const currentItemInfo = currentOrderInfo?.items.find(i => i.id === pdfReport.itemId) || itemInfo;
 
         const docPdf = new jsPDF();
         const pageWidth = docPdf.internal.pageSize.width;
@@ -3648,7 +3691,7 @@ export default function QualityPage() {
         docPdf.setFontSize(14).setFont(undefined, 'bold');
         docPdf.text(`Relatório de Ensaio por Ultrassom (UT)`, pageWidth / 2, y + 5, { align: 'center' });
         docPdf.setFontSize(12).setFont(undefined, 'normal');
-        docPdf.text(`Nº ${report.reportNumber || 'N/A'}`, pageWidth / 2, y + 12, { align: 'center' });
+        docPdf.text(`Nº ${pdfReport.reportNumber || 'N/A'}`, pageWidth / 2, y + 12, { align: 'center' });
         y += 25;
 
         const addSection = (title: string, data: (string | number | null | undefined)[][]) => {
@@ -3667,61 +3710,90 @@ export default function QualityPage() {
         };
 
         addSection('1. Dados do Relatório', [
-            ['Nº do Relatório', report.reportNumber],
-            ['Data de Emissão', format(report.inspectionDate, 'dd/MM/yyyy')],
-            ['Pedido / OS', orderInfo?.number],
-            ['Projeto / Cliente', orderInfo?.customerName],
-            ['Código do Desenho', itemInfo?.code],
-            ['Inspetor Responsável', report.inspectedBy],
-            ['Nível de Qualificação', report.qualificationLevel],
+            ['Nº do Relatório', pdfReport.reportNumber],
+            ['Data de Emissão', format(pdfReport.inspectionDate, 'dd/MM/yyyy')],
+            ['Pedido / OS', currentOrderInfo?.number],
+            ['Projeto / Cliente', currentOrderInfo?.customerName],
+            ['Código do Desenho', currentItemInfo?.code],
+            ['Número da Peça', pdfReport.partNumber],
+            ['Inspetor Responsável', pdfReport.inspectedBy],
+            ['Nível de Qualificação', pdfReport.qualificationLevel],
         ]);
 
         addSection('2. Identificação do Componente', [
-            ['Nome da Peça', itemInfo?.description],
-            ['Material Base', report.baseMaterial || report.material],
-            ['Tratamento Térmico', report.heatTreatment],
-            ['Tipo e Espessura da Solda', report.weldTypeAndThickness ||
-              [report.jointType, report.thickness].filter(Boolean).join(' / ')],
-            ['Área Examinada', report.examinedAreaDescription],
-            ['Quantidade de Peças', report.quantityInspected],
-            ['Local do Ensaio', report.testLocation],
+            ['Nome da Peça', currentItemInfo?.description],
+            ['Material Base', pdfReport.baseMaterial],
+            ['Espessura do Material', pdfReport.thickness],
+            ['Tratamento Térmico', pdfReport.heatTreatment],
+            ['Processo de Soldagem', pdfReport.weldingProcess],
+            ['Tipo de Junta', pdfReport.jointType],
+            ['Tipo e Espessura da Solda', pdfReport.weldTypeAndThickness],
+            ['Categoria AWS', pdfReport.awsCategory],
+            ['Comprimento Inspecionado (mm)', pdfReport.inspectedLength],
+            ['Área Examinada', pdfReport.examinedAreaDescription],
+            ['Quantidade de Peças', pdfReport.quantityInspected],
+            ['Local do Ensaio', pdfReport.testLocation],
         ]);
         
         addSection('3. Normas e Critérios Aplicados', [
-            ['Norma de Execução', report.executionStandard],
-            ['Critério de Aceitação', report.acceptanceCriteria || report.acceptanceTable],
-            ['Tipo de Exame', report.examinationType],
-            ['Extensão do Ensaio', report.testExtent],
+            ['Norma de Execução', pdfReport.executionStandardFull],
+            ['Método de Avaliação', pdfReport.evaluationMethod],
+            ['Critério de Aceitação', pdfReport.acceptanceCriteria],
+            ['Tabela de Aceitação', pdfReport.acceptanceTable],
+            ['Tipo de Exame', pdfReport.examinationType],
+            ['Extensão do Ensaio', pdfReport.testExtent],
         ]);
 
         addSection('4. Equipamentos e Acessórios Utilizados', [
-            ['Equipamento (Marca/Modelo)', report.equipment],
-            ['Nº de Série', report.equipmentSerial],
-            ['Calibração (Cert.+Val.)', report.equipmentCalibration],
-            ['Tipo de Cabeçote', report.headType],
-            ['Frequência (MHz)', report.frequency],
-            ['Ângulo (°)', report.incidentAngle],
-            ['Acoplante', report.couplant],
-            ['Bloco Padrão de Referência', report.referenceBlock],
+            ['Equipamento / Marca', pdfReport.equipment],
+            ['Modelo', pdfReport.equipmentModel],
+            ['Fabricante', pdfReport.equipmentManufacturer],
+            ['Nº de Série', pdfReport.equipmentSerial],
+            ['Certificado de Calibração', pdfReport.equipmentCalibrationCert || pdfReport.equipmentCalibration],
+            ['Validade da Calibração', pdfReport.equipmentCalibrationValidity
+                ? format(pdfReport.equipmentCalibrationValidity, 'dd/MM/yyyy') : null],
+            ['Faixa de Frequência', pdfReport.equipmentFrequencyRange],
+            ['Tipo de Cabeçote', pdfReport.headType],
+            ['Frequência (MHz)', pdfReport.frequency],
+            ['Ângulo Nominal (°)', pdfReport.incidentAngle ?? pdfReport.probeAngle],
+            ['Dimensão do Cristal', pdfReport.probeCrystalSize],
+            ['Fabricante do Cabeçote', pdfReport.probeManufacturer],
+            ['Acoplante', pdfReport.couplant],
+            ['Bloco Padrão de Referência', pdfReport.referenceBlock],
+            ['Tipo do Bloco', pdfReport.calibrationBlockType],
+            ['Identificação do Bloco', pdfReport.calibrationBlockId],
+            ['Certificado do Bloco', pdfReport.calibrationBlockCert],
+            ['Validade do Bloco', pdfReport.calibrationBlockValidity
+                ? format(pdfReport.calibrationBlockValidity, 'dd/MM/yyyy') : null],
         ]);
 
         addSection('5. Parâmetros do Ensaio', [
-            ['Modo de Pulso', report.pulseMode],
-            ['Alcance (mm)', report.range],
-            ['Ganho (dB)', report.gain],
-            ['Correção de Distância', report.distanceCorrection],
-            ['Taxa de Varredura (mm/s)', report.scanRate],
-            ['Resolução Mínima (mm)', report.minResolution],
+            ['Modo de Pulso', pdfReport.pulseMode],
+            ['Alcance / Escala (mm)', pdfReport.rangeScale],
+            ['Zero / Offset', pdfReport.zeroOffset],
+            ['Velocidade do Som (m/s)', pdfReport.soundVelocity],
+            ['Ganho de Referência (dB)', pdfReport.referenceGain],
+            ['Ganho de Varredura (dB)', pdfReport.gain],
+            ['Ganho de Avaliação', pdfReport.evaluationGain],
+            ['Correção de Distância', pdfReport.distanceCorrection],
+            ['Fator de Transferência', pdfReport.transferFactor],
+            ['Correção Superficial', pdfReport.surfaceCorrection],
+            ['Atenuação Aplicada', pdfReport.attenuationApplied],
+            ['DAC Aplicável', pdfReport.dacApplicable === true ? 'Sim' : pdfReport.dacApplicable === false ? 'Não' : null],
+            ['TCG Aplicável', pdfReport.tcgApplicable === true ? 'Sim' : pdfReport.tcgApplicable === false ? 'Não' : null],
+            ['Taxa de Varredura (mm/s)', pdfReport.scanRate],
+            ['Ganho / Varredura', pdfReport.gainSweep],
+            ['Resolução Mínima (mm)', pdfReport.minResolution],
         ]);
 
-        if (report.results && report.results.length > 0) {
+        if (pdfReport.results && pdfReport.results.length > 0) {
             if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
             docPdf.setFontSize(12).setFont(undefined, 'bold').text('6. Resultados Detalhados', 15, y);
             y += 7;
             autoTable(docPdf, {
                 startY: y,
                 head: [['Junta', 'Tipo de Indicação', 'Localização', 'Prof. (mm)', 'Extensão (mm)', 'Amplitude', 'Resultado']],
-                body: report.results.map(r => [
+                body: pdfReport.results.map(r => [
                     r.jointCode, r.defectType, r.location, r.depth, r.extension, r.amplitude, r.evaluationResult
                 ]),
                 styles: { fontSize: 8 },
@@ -3731,12 +3803,15 @@ export default function QualityPage() {
         }
 
         addSection('7. Conclusão', [
-            ['Resultado Final', report.finalResult],
-            ['Critério de Rejeição', report.rejectionCriteria],
-            ['Observações Finais', report.finalNotes],
+            ['Resultado Final', pdfReport.finalResult],
+            ['Classificação AWS', pdfReport.awsIndicationClass],
+            ['Resultado AWS', pdfReport.awsResult],
+            ['Critério de Rejeição', pdfReport.rejectionCriteria],
+            ['Conclusão', pdfReport.conclusionText],
+            ['Observações Finais', pdfReport.finalNotes],
         ]);
 
-        if (report.photos && report.photos.length > 0) {
+        if (pdfReport.photos && pdfReport.photos.length > 0) {
             if (y > pageHeight - 60) { docPdf.addPage(); y = 20; }
             docPdf.setFontSize(12).setFont(undefined, 'bold');
             docPdf.text('8. Anexos Fotográficos', 15, y);
@@ -3744,7 +3819,7 @@ export default function QualityPage() {
             const photoWidth = (pageWidth - 45) / 2;
             const photoHeight = photoWidth * (3/4);
             let x = 15;
-            for (const photoDataUri of report.photos) {
+            for (const photoDataUri of pdfReport.photos) {
                 if (y + photoHeight > pageHeight - 45) { docPdf.addPage(); y = 20; x = 15; }
                 try { docPdf.addImage(photoDataUri, 'JPEG', x, y, photoWidth, photoHeight); } 
                 catch(e) { docPdf.text("Erro ao carregar imagem", x, y + 10); }
@@ -3761,7 +3836,7 @@ export default function QualityPage() {
                 docPdf.setFontSize(10).setFont(undefined, 'normal');
                 const enterpriseInspectorX = 15;
                 docPdf.line(enterpriseInspectorX, signatureY, enterpriseInspectorX + 85, signatureY);
-                docPdf.text(report.inspectedBy, enterpriseInspectorX, signatureY + 5);
+                docPdf.text(pdfReport.inspectedBy, enterpriseInspectorX, signatureY + 5);
                 docPdf.text('Inspetor Responsável', enterpriseInspectorX, signatureY + 10);
             }
             docPdf.setFontSize(8).setFont(undefined, 'normal');
@@ -3769,7 +3844,7 @@ export default function QualityPage() {
             docPdf.text(`Página ${i} de ${pageCount}`, pageWidth - 15, pageHeight - 10, { align: 'right' });
         }
 
-        docPdf.save(`Relatorio_UT_${report.reportNumber || report.id}.pdf`);
+        docPdf.save(`Relatorio_UT_${pdfReport.reportNumber || pdfReport.id}.pdf`);
     } catch (error) {
         console.error("Error exporting UT PDF:", error);
         toast({ variant: "destructive", title: "Erro ao gerar PDF." });
