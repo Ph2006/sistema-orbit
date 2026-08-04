@@ -1386,6 +1386,13 @@ export default function QualityPage() {
           return {
               id: doc.id,
               ...data,
+              // Normaliza nomes antigos e novos para manter compatibilidade.
+              baseMaterial: data.baseMaterial || data.material || "",
+              material: data.material || data.baseMaterial || "",
+              weldTypeAndThickness: data.weldTypeAndThickness ||
+                [data.jointType, data.thickness].filter(Boolean).join(" / "),
+              acceptanceCriteria: data.acceptanceCriteria || data.acceptanceTable || "",
+              acceptanceTable: data.acceptanceTable || data.acceptanceCriteria || "",
               inspectionDate,
               equipmentCalibrationValidity,
               calibrationBlockValidity,
@@ -1915,24 +1922,25 @@ export default function QualityPage() {
         wpsApplicable: originalReport.wpsApplicable || "",
         weldJointId: originalReport.weldJointId || "",
         qualificationLevel: originalReport.qualificationLevel || "",
-        baseMaterial: originalReport.baseMaterial || "",
+        baseMaterial: originalReport.baseMaterial || originalReport.material || "",
         heatTreatment: originalReport.heatTreatment || "",
-        material: originalReport.material || "",
+        material: originalReport.material || originalReport.baseMaterial || "",
         thickness: originalReport.thickness || "",
         weldingProcess: originalReport.weldingProcess || "",
         jointType: originalReport.jointType || "",
         awsCategory: originalReport.awsCategory || "",
         inspectedLength: originalReport.inspectedLength ?? undefined,
         partNumber: originalReport.partNumber || "",
-        weldTypeAndThickness: originalReport.weldTypeAndThickness || "",
+        weldTypeAndThickness: originalReport.weldTypeAndThickness ||
+          [originalReport.jointType, originalReport.thickness].filter(Boolean).join(" / "),
         examinedAreaDescription: originalReport.examinedAreaDescription || "",
         quantityInspected: originalReport.quantityInspected ?? undefined,
         testLocation: originalReport.testLocation || "",
         executionStandard: originalReport.executionStandard || "AWS D1.1:2020",
         executionStandardFull: originalReport.executionStandardFull || "AWS D1.1:2020",
         evaluationMethod: originalReport.evaluationMethod || "Capítulo 6 – Ultrasonic Testing",
-        acceptanceTable: originalReport.acceptanceTable || "Tabela 6.2",
-        acceptanceCriteria: originalReport.acceptanceCriteria || "",
+        acceptanceTable: originalReport.acceptanceTable || originalReport.acceptanceCriteria || "Tabela 6.2",
+        acceptanceCriteria: originalReport.acceptanceCriteria || originalReport.acceptanceTable || "",
         examinationType: originalReport.examinationType || undefined,
         testExtent: originalReport.testExtent || "100%",
         equipment: originalReport.equipment || "",
@@ -2391,6 +2399,11 @@ export default function QualityPage() {
       console.log("Dados recebidos:", values);
       console.log("Fotos recebidas:", values.photos?.length || 0);
 
+      const normalizedBaseMaterial = values.baseMaterial || values.material || "";
+      const normalizedWeldTypeAndThickness = values.weldTypeAndThickness ||
+        [values.jointType, values.thickness].filter(Boolean).join(" / ");
+      const normalizedAcceptanceCriteria = values.acceptanceCriteria || values.acceptanceTable || "";
+
       const dataToSave = removeUndefined({
         ...values,
         inspectionDate: Timestamp.fromDate(values.inspectionDate),
@@ -2401,24 +2414,24 @@ export default function QualityPage() {
         results: values.results || [],
         photos: values.photos || [],
         qualificationLevel: values.qualificationLevel || null,
-        baseMaterial: values.baseMaterial || null,
+        baseMaterial: normalizedBaseMaterial || null,
         heatTreatment: values.heatTreatment || null,
-        material: values.material || null,
+        material: normalizedBaseMaterial || null,
         thickness: values.thickness || null,
         weldingProcess: values.weldingProcess || null,
         jointType: values.jointType || null,
         awsCategory: values.awsCategory || null,
         inspectedLength: values.inspectedLength ?? null,
         partNumber: values.partNumber || null,
-        weldTypeAndThickness: values.weldTypeAndThickness || null,
+        weldTypeAndThickness: normalizedWeldTypeAndThickness || null,
         examinedAreaDescription: values.examinedAreaDescription || null,
         quantityInspected: values.quantityInspected ?? null,
         testLocation: values.testLocation || null,
         executionStandard: values.executionStandard || null,
         executionStandardFull: values.executionStandardFull || null,
         evaluationMethod: values.evaluationMethod || null,
-        acceptanceTable: values.acceptanceTable || null,
-        acceptanceCriteria: values.acceptanceCriteria || null,
+        acceptanceTable: values.acceptanceTable || normalizedAcceptanceCriteria || null,
+        acceptanceCriteria: normalizedAcceptanceCriteria || null,
         examinationType: values.examinationType || null,
         testExtent: values.testExtent || null,
         equipment: values.equipment || null,
@@ -2850,24 +2863,25 @@ export default function QualityPage() {
         wpsApplicable: report.wpsApplicable || "",
         weldJointId: report.weldJointId || "",
         qualificationLevel: report.qualificationLevel || "",
-        baseMaterial: report.baseMaterial || "",
+        baseMaterial: report.baseMaterial || report.material || "",
         heatTreatment: report.heatTreatment || "",
-        material: report.material || "",
+        material: report.material || report.baseMaterial || "",
         thickness: report.thickness || "",
         weldingProcess: report.weldingProcess || "",
         jointType: report.jointType || "",
         awsCategory: report.awsCategory || "",
         inspectedLength: report.inspectedLength ?? undefined,
         partNumber: report.partNumber || "",
-        weldTypeAndThickness: report.weldTypeAndThickness || "",
+        weldTypeAndThickness: report.weldTypeAndThickness ||
+          [report.jointType, report.thickness].filter(Boolean).join(" / "),
         examinedAreaDescription: report.examinedAreaDescription || "",
         quantityInspected: report.quantityInspected ?? undefined,
         testLocation: report.testLocation || "",
         executionStandard: report.executionStandard || "AWS D1.1:2020",
         executionStandardFull: report.executionStandardFull || "AWS D1.1:2020",
         evaluationMethod: report.evaluationMethod || "Capítulo 6 – Ultrasonic Testing",
-        acceptanceTable: report.acceptanceTable || "Tabela 6.2",
-        acceptanceCriteria: report.acceptanceCriteria || "",
+        acceptanceTable: report.acceptanceTable || report.acceptanceCriteria || "Tabela 6.2",
+        acceptanceCriteria: report.acceptanceCriteria || report.acceptanceTable || "",
         examinationType: report.examinationType || undefined,
         testExtent: report.testExtent || "100%",
         equipment: report.equipment || "",
@@ -3664,9 +3678,10 @@ export default function QualityPage() {
 
         addSection('2. Identificação do Componente', [
             ['Nome da Peça', itemInfo?.description],
-            ['Material Base', report.baseMaterial],
+            ['Material Base', report.baseMaterial || report.material],
             ['Tratamento Térmico', report.heatTreatment],
-            ['Tipo e Espessura da Solda', report.weldTypeAndThickness],
+            ['Tipo e Espessura da Solda', report.weldTypeAndThickness ||
+              [report.jointType, report.thickness].filter(Boolean).join(' / ')],
             ['Área Examinada', report.examinedAreaDescription],
             ['Quantidade de Peças', report.quantityInspected],
             ['Local do Ensaio', report.testLocation],
@@ -3674,7 +3689,7 @@ export default function QualityPage() {
         
         addSection('3. Normas e Critérios Aplicados', [
             ['Norma de Execução', report.executionStandard],
-            ['Critério de Aceitação', report.acceptanceCriteria],
+            ['Critério de Aceitação', report.acceptanceCriteria || report.acceptanceTable],
             ['Tipo de Exame', report.examinationType],
             ['Extensão do Ensaio', report.testExtent],
         ]);
@@ -6153,8 +6168,8 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                             <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: 101030-101172-17" /></FormControl>
                         <FormMessage /></FormItem>
                     )} />
-                    <FormField control={form.control} name="material" render={({ field }) => (
-                        <FormItem><FormLabel>Material</FormLabel>
+                    <FormField control={form.control} name="baseMaterial" render={({ field }) => (
+                        <FormItem><FormLabel>Material Base</FormLabel>
                             <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: ASTM A36" /></FormControl>
                         <FormMessage /></FormItem>
                     )} />
@@ -6173,9 +6188,14 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                             <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Chanfro V" /></FormControl>
                         <FormMessage /></FormItem>
                     )} />
+                    <FormField control={form.control} name="weldTypeAndThickness" render={({ field }) => (
+                        <FormItem><FormLabel>Tipo e Espessura da Solda</FormLabel>
+                            <FormControl><Input {...field} value={field.value ?? ''} placeholder="Ex: Solda de topo / 12 mm" /></FormControl>
+                        <FormMessage /></FormItem>
+                    )} />
                     <FormField control={form.control} name="awsCategory" render={({ field }) => (
                         <FormItem><FormLabel>Categoria AWS</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                            <Select onValueChange={field.onChange} value={field.value || ""}><FormControl>
                                 <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -6228,7 +6248,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                     )} />
                     <FormField control={form.control} name="acceptanceTable" render={({ field }) => (
                         <FormItem><FormLabel>Critério de Aceitação (Tabela)</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                            <Select onValueChange={field.onChange} value={field.value || ""}><FormControl>
                                 <SelectTrigger><SelectValue placeholder="Selecione a tabela" /></SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -6240,7 +6260,7 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                     )} />
                     <FormField control={form.control} name="examinationType" render={({ field }) => (
                         <FormItem><FormLabel>Tipo de Exame</FormLabel>
-                            <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
+                            <Select onValueChange={field.onChange} value={field.value || ""}><FormControl>
                                 <SelectTrigger><SelectValue placeholder="Selecione o tipo" /></SelectTrigger>
                             </FormControl>
                             <SelectContent>
@@ -6460,7 +6480,8 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                     )} />
                     <FormField control={form.control} name="scanRate" render={({ field }) => (
                         <FormItem><FormLabel>Taxa de Varredura (mm/s)</FormLabel>
-                            <FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormControl><Input type="number" value={field.value ?? ''}
+                                onChange={(event) => field.onChange(event.target.value === '' ? undefined : Number(event.target.value))} /></FormControl>
                         <FormMessage /></FormItem>
                     )} />
                     <FormField control={form.control} name="gainSweep" render={({ field }) => (
@@ -6470,7 +6491,8 @@ function UltrasoundReportForm({ form, orders, teamMembers, calibrations, toast, 
                     )} />
                     <FormField control={form.control} name="minResolution" render={({ field }) => (
                         <FormItem><FormLabel>Resolução Mínima (mm)</FormLabel>
-                            <FormControl><Input type="number" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormControl><Input type="number" value={field.value ?? ''}
+                                onChange={(event) => field.onChange(event.target.value === '' ? undefined : Number(event.target.value))} /></FormControl>
                         <FormMessage /></FormItem>
                     )} />
                     <div className="flex flex-col gap-3 md:col-span-2">
