@@ -121,6 +121,9 @@ const requisitionSchema = z.object({
   requestedBy: z.string().min(1, "Selecione o responsável"),
   department: z.string().optional(),
   orderId: z.string().optional(),
+  // Snapshot legível da OS: preserva o vínculo entre Materiais e Custos.
+  orderNumber: z.string().optional(),
+  internalOS: z.string().optional(),
   customer: z.object({
     id: z.string().optional(),
     name: z.string().optional(),
@@ -268,6 +271,7 @@ export default function MaterialsPage() {
     const { fields: reqItems, append: appendReqItem, remove: removeReqItem, update: updateReqItem } = useFieldArray({ control: requisitionForm.control, name: "items" });
     const { fields: cutItems, append: appendCutItem, remove: removeCutItem, update: updateCutItem } = useFieldArray({ control: cuttingPlanForm.control, name: "items" });
     const watchedCutPlanOrderId = cuttingPlanForm.watch("orderId");
+    const watchedRequisitionOrderId = requisitionForm.watch("orderId");
 
     const filteredOrders = useMemo(() => {
         if (!searchOS.trim()) return orders;
@@ -585,6 +589,27 @@ export default function MaterialsPage() {
         }
     }, [watchedCutPlanOrderId, orders, setCuttingPlanValue]);
 
+    // Mantém na requisição tanto o ID técnico quanto o número legível da OS.
+    // O número funciona como chave de recuperação caso documentos sejam migrados.
+    useEffect(() => {
+        if (!watchedRequisitionOrderId) {
+            requisitionForm.setValue('orderNumber', undefined);
+            requisitionForm.setValue('internalOS', undefined);
+            requisitionForm.setValue('customer', undefined);
+            return;
+        }
+
+        const selectedOrder = orders.find(order => order.id === watchedRequisitionOrderId);
+        if (!selectedOrder) return;
+
+        requisitionForm.setValue('orderNumber', selectedOrder.internalOS, { shouldDirty: true });
+        requisitionForm.setValue('internalOS', selectedOrder.internalOS, { shouldDirty: true });
+        requisitionForm.setValue('customer', {
+            id: selectedOrder.customerId,
+            name: selectedOrder.customerName,
+        }, { shouldDirty: true });
+    }, [watchedRequisitionOrderId, orders, requisitionForm]);
+
     // 6. VERIFICAÇÃO ADICIONAL - Adicione este useEffect para debug
     useEffect(() => {
         if (isRequisitionFormOpen && selectedRequisition) {
@@ -849,7 +874,10 @@ export default function MaterialsPage() {
                 baseData.department = data.department.trim();
             }
             if (data.orderId && data.orderId.trim()) {
+                const selectedOrder = orders.find(order => order.id === data.orderId.trim());
                 baseData.orderId = data.orderId.trim();
+                baseData.orderNumber = selectedOrder?.internalOS || data.orderNumber || data.internalOS || null;
+                baseData.internalOS = selectedOrder?.internalOS || data.internalOS || data.orderNumber || null;
             }
             if (data.generalNotes && data.generalNotes.trim()) {
                 baseData.generalNotes = data.generalNotes.trim();
