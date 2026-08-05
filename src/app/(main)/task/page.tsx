@@ -1,4 +1,3 @@
-// IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
