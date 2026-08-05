@@ -1,3 +1,4 @@
+// IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
@@ -57,7 +58,7 @@ const productionStageSchema = z.object({
     startDate: z.date().nullable().optional(),
     completedDate: z.date().nullable().optional(),
     durationDays: z.coerce.number().min(0).optional(),
-    useBusinessDays: z.boolean().optional().default(true), // true = dias Ãºteis, false = dias corridos
+    useBusinessDays: z.boolean().optional().default(true), // true = dias úteis, false = dias corridos
     workSchedule: z.enum(['normal', 'especial']).default('normal'),
 });
 
@@ -65,10 +66,10 @@ const orderItemSchema = z.object({
     id: z.string().optional(),
     code: z.string().optional(),
     product_code: z.string().optional(),
-    description: z.string().min(1, "A descriÃ§Ã£o Ã© obrigatÃ³ria."),
-    quantity: z.coerce.number().min(0, "A quantidade nÃ£o pode ser negativa."),
-    unitWeight: z.coerce.number().min(0, "O peso nÃ£o pode ser negativo.").optional(),
-    itemNumber: z.string().optional(), // NÃºmero do item no pedido de compra
+    description: z.string().min(1, "A descrição é obrigatória."),
+    quantity: z.coerce.number().min(0, "A quantidade não pode ser negativa."),
+    unitWeight: z.coerce.number().min(0, "O peso não pode ser negativo.").optional(),
+    itemNumber: z.string().optional(), // Número do item no pedido de compra
     productionPlan: z.array(productionStageSchema).optional(),
     itemDeliveryDate: z.date().nullable().optional(),
     shippingList: z.string().optional(),
@@ -77,10 +78,10 @@ const orderItemSchema = z.object({
 });
 
 const orderStatusEnum = z.enum([
-    "Aguardando ProduÃ§Ã£o",
-    "Em ProduÃ§Ã£o",
+    "Aguardando Produção",
+    "Em Produção",
     "Pronto para Entrega",
-    "ConcluÃ­do",
+    "Concluído",
     "Cancelado",
     "Atrasado",
 ]);
@@ -102,7 +103,7 @@ const orderSchema = z.object({
   dataBookSent: z.boolean().default(false),
   dataBookSentAt: z.date().nullable().optional(),
   items: z.array(orderItemSchema).min(1, "O pedido deve ter pelo menos um item"),
-  driveLink: z.string().url({ message: "Por favor, insira uma URL vÃ¡lida." }).optional().or(z.literal('')),
+  driveLink: z.string().url({ message: "Por favor, insira uma URL válida." }).optional().or(z.literal('')),
   documents: z.object({
     drawings: z.boolean().default(false),
     inspectionTestPlan: z.boolean().default(false),
@@ -179,32 +180,32 @@ const brazilianHolidays = [
   // 2024
   new Date(2024, 0, 1),   // Ano Novo
   new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
-  new Date(2024, 1, 13),  // Carnaval (TerÃ§a-feira)  
+  new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
   new Date(2024, 2, 29),  // Sexta-feira Santa
   new Date(2024, 3, 21),  // Tiradentes
   new Date(2024, 4, 1),   // Dia do Trabalho
   new Date(2024, 4, 30),  // Corpus Christi
-  new Date(2024, 8, 7),   // IndependÃªncia do Brasil
+  new Date(2024, 8, 7),   // Independência do Brasil
   new Date(2024, 9, 12),  // Nossa Senhora Aparecida
   new Date(2024, 10, 2),  // Finados
-  new Date(2024, 10, 15), // ProclamaÃ§Ã£o da RepÃºblica
+  new Date(2024, 10, 15), // Proclamação da República
   new Date(2024, 11, 25), // Natal
   // 2025
   new Date(2025, 0, 1),   // Ano Novo
   new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
-  new Date(2025, 2, 4),   // Carnaval (TerÃ§a-feira)
+  new Date(2025, 2, 4),   // Carnaval (Terça-feira)
   new Date(2025, 3, 18),  // Sexta-feira Santa
   new Date(2025, 3, 21),  // Tiradentes
   new Date(2025, 4, 1),   // Dia do Trabalho
   new Date(2025, 5, 19),  // Corpus Christi
-  new Date(2025, 8, 7),   // IndependÃªncia do Brasil
+  new Date(2025, 8, 7),   // Independência do Brasil
   new Date(2025, 9, 12),  // Nossa Senhora Aparecida
   new Date(2025, 10, 2),  // Finados
-  new Date(2025, 10, 15), // ProclamaÃ§Ã£o da RepÃºblica
+  new Date(2025, 10, 15), // Proclamação da República
   new Date(2025, 11, 25), // Natal
 ];
 
-// FunÃ§Ãµes utilitÃ¡rias para cÃ¡lculo de dias Ãºteis
+// Funções utilitárias para cálculo de dias úteis
 const isHoliday = (date: Date): boolean => {
   return brazilianHolidays.some(holiday => isSameDay(holiday, date));
 };
@@ -213,7 +214,7 @@ const isBusinessDay = (date: Date): boolean => {
   return !isWeekend(date) && !isHoliday(date);
 };
 
-// 3. FUNÃ‡ÃƒO AUXILIAR CORRIGIDA - Adicionar dias Ãºteis (corrigida para nÃ£o pular um dia extra)
+// 3. FUNÇÃO AUXILIAR CORRIGIDA - Adicionar dias úteis (corrigida para não pular um dia extra)
 const addBusinessDays = (startDate: Date, days: number): Date => {
   if (days === 0) return new Date(startDate);
   
@@ -244,7 +245,7 @@ const countBusinessDaysBetween = (startDate: Date, endDate: Date): number => {
   return count;
 };
 
-// FunÃ§Ã£o para obter o prÃ³ximo dia Ãºtil
+// Função para obter o próximo dia útil
 const getNextBusinessDay = (date: Date): Date => {
   let nextDay = addDays(date, 1);
   while (!isBusinessDay(nextDay)) {
@@ -253,7 +254,7 @@ const getNextBusinessDay = (date: Date): Date => {
   return nextDay;
 };
 
-// FunÃ§Ã£o para obter o dia Ãºtil anterior
+// Função para obter o dia útil anterior
 const getPreviousBusinessDay = (date: Date): Date => {
   let prevDay = addDays(date, -1);
   while (!isBusinessDay(prevDay)) {
@@ -262,56 +263,56 @@ const getPreviousBusinessDay = (date: Date): Date => {
   return prevDay;
 };
 
-// Componente para exibir informaÃ§Ãµes de dias Ãºteis
+// Componente para exibir informações de dias úteis
 interface BusinessDayInfoProps {
   startDate: Date | null;
   endDate: Date | null;
   expectedDuration: number;
 }
 
-// 4. COMPONENTE ATUALIZADO - InformaÃ§Ãµes de dias Ãºteis com lÃ³gica corrigida
+// 4. COMPONENTE ATUALIZADO - Informações de dias úteis com lógica corrigida
 const BusinessDayInfo = ({ startDate, endDate, expectedDuration }: BusinessDayInfoProps) => {
   if (!startDate || !endDate) return null;
   
   const expectedDurationNum = Number(expectedDuration) || 0;
   const isSameDate = isSameDay(startDate, endDate);
   
-  // CORREÃ‡ÃƒO: Para duraÃ§Ã£o maior que 1, a tarefa deve terminar apÃ³s os dias especificados
+  // CORREÇÃO: Para duração maior que 1, a tarefa deve terminar após os dias especificados
   const actualDaysDifference = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
   
   return (
     <div className="text-xs mt-2 p-2 rounded bg-blue-50 text-blue-700 border border-blue-200">
       <div className="flex items-center gap-2">
-        <span className="font-medium">DuraÃ§Ã£o:</span>
+        <span className="font-medium">Duração:</span>
         <span>{expectedDurationNum} dia(s)</span>
       </div>
       
       {isSameDate && expectedDurationNum <= 1 && (
         <p className="text-blue-600 mt-1">
-          âœ“ Tarefa executada no mesmo dia (duraÃ§Ã£o â‰¤ 1 dia)
+          ✓ Tarefa executada no mesmo dia (duração ≤ 1 dia)
         </p>
       )}
       
       {!isSameDate && expectedDurationNum > 1 && (
         <p className="text-green-600 mt-1">
-          âœ“ Cronograma sequencial: prÃ³xima tarefa inicia em {format(endDate, 'dd/MM/yyyy')}
+          ✓ Cronograma sequencial: próxima tarefa inicia em {format(endDate, 'dd/MM/yyyy')}
         </p>
       )}
       
       {!isBusinessDay(startDate) && (
         <p className="text-orange-600 mt-1">
-          âš ï¸ Data de inÃ­cio serÃ¡ ajustada para prÃ³ximo dia Ãºtil
+          ⚠️ Data de início será ajustada para próximo dia útil
         </p>
       )}
       
       {!isBusinessDay(endDate) && (
         <p className="text-orange-600 mt-1">
-          âš ï¸ Data de fim serÃ¡ ajustada para dia Ãºtil
+          ⚠️ Data de fim será ajustada para dia útil
         </p>
       )}
       
       <p className="text-blue-600 mt-1 text-xs">
-        ðŸ’¡ Tarefas sÃ£o executadas sequencialmente: a prÃ³xima sempre inicia no mesmo dia que a anterior termina
+        💡 Tarefas são executadas sequencialmente: a próxima sempre inicia no mesmo dia que a anterior termina
       </p>
     </div>
   );
@@ -324,7 +325,7 @@ interface ScheduleDateInputProps {
 }
 
 // Campo de data confirmado somente ao sair: evita recalcular o cronograma
-// enquanto o usuÃ¡rio ainda estÃ¡ preenchendo os quatro dÃ­gitos do ano.
+// enquanto o usuário ainda está preenchendo os quatro dígitos do ano.
 const ScheduleDateInput = ({ date, onCommit, className }: ScheduleDateInputProps) => {
   const formattedDate = date instanceof Date && !isNaN(date.getTime())
     ? format(date, "yyyy-MM-dd")
@@ -354,7 +355,7 @@ const ScheduleDateInput = ({ date, onCommit, className }: ScheduleDateInputProps
       parsedDate.getDate() === day;
 
     if (!isValidDate) {
-      // NÃ£o propaga anos parciais como 1906 para as tarefas sucessoras.
+      // Não propaga anos parciais como 1906 para as tarefas sucessoras.
       input.value = formattedDate;
       return;
     }
@@ -392,7 +393,7 @@ const calculateTotalWeight = (items: OrderItem[]): number => {
 
 const calculateItemProgress = (item: OrderItem): number => {
     if (item.productionPlan && item.productionPlan.length > 0) {
-        const completedStages = item.productionPlan.filter(p => p.status === 'ConcluÃ­do').length;
+        const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
         return (completedStages / item.productionPlan.length) * 100;
     }
 
@@ -412,21 +413,21 @@ const calculateOrderProgress = (order: Order): number => {
 };
 
 const mapOrderStatus = (status?: string): string => {
-    if (!status) return "NÃ£o definido";
+    if (!status) return "Não definido";
     const lowerStatus = status.toLowerCase().trim();
     
     const statusMap: { [key: string]: string } = {
-        'in production': 'Em ProduÃ§Ã£o',
-        'em produÃ§Ã£o': 'Em ProduÃ§Ã£o',
-        'in progress': 'Em ProduÃ§Ã£o',
-        'in-progress': 'Em ProduÃ§Ã£o',
-        'em progresso': 'Em ProduÃ§Ã£o',
-        'awaiting production': 'Aguardando ProduÃ§Ã£o',
-        'aguardando produÃ§Ã£o': 'Aguardando ProduÃ§Ã£o',
-        'pending': 'Aguardando ProduÃ§Ã£o',
-        'completed': 'ConcluÃ­do',
-        'concluÃ­do': 'ConcluÃ­do',
-        'finished': 'ConcluÃ­do',
+        'in production': 'Em Produção',
+        'em produção': 'Em Produção',
+        'in progress': 'Em Produção',
+        'in-progress': 'Em Produção',
+        'em progresso': 'Em Produção',
+        'awaiting production': 'Aguardando Produção',
+        'aguardando produção': 'Aguardando Produção',
+        'pending': 'Aguardando Produção',
+        'completed': 'Concluído',
+        'concluído': 'Concluído',
+        'finished': 'Concluído',
         'cancelled': 'Cancelado',
         'cancelado': 'Cancelado',
         'ready': 'Pronto para Entrega',
@@ -438,12 +439,12 @@ const mapOrderStatus = (status?: string): string => {
 
 const getStatusProps = (status: string): { variant: "default" | "secondary" | "destructive" | "outline", icon: React.ElementType, label: string, colorClass: string } => {
     switch (status) {
-        case "Em ProduÃ§Ã£o":
-            return { variant: "default", icon: PlayCircle, label: "Em ProduÃ§Ã£o", colorClass: "" };
-        case "Aguardando ProduÃ§Ã£o":
-            return { variant: "secondary", icon: Hourglass, label: "Aguardando ProduÃ§Ã£o", colorClass: "" };
-        case "ConcluÃ­do":
-            return { variant: "default", icon: CheckCircle, label: "ConcluÃ­do", colorClass: "bg-green-600 hover:bg-green-600/90" };
+        case "Em Produção":
+            return { variant: "default", icon: PlayCircle, label: "Em Produção", colorClass: "" };
+        case "Aguardando Produção":
+            return { variant: "secondary", icon: Hourglass, label: "Aguardando Produção", colorClass: "" };
+        case "Concluído":
+            return { variant: "default", icon: CheckCircle, label: "Concluído", colorClass: "bg-green-600 hover:bg-green-600/90" };
         case "Pronto para Entrega":
             return { variant: "default", icon: Truck, label: "Pronto para Entrega", colorClass: "bg-blue-500 hover:bg-blue-500/90" };
         case "Cancelado":
@@ -451,7 +452,7 @@ const getStatusProps = (status: string): { variant: "default" | "secondary" | "d
         case "Atrasado":
             return { variant: "destructive", icon: AlertTriangle, label: "Atrasado", colorClass: "bg-orange-500 hover:bg-orange-500/90 border-transparent text-destructive-foreground" };
         default:
-            return { variant: "outline", icon: Package, label: status || "NÃ£o definido", colorClass: "" };
+            return { variant: "outline", icon: Package, label: status || "Não definido", colorClass: "" };
     }
 };
 
@@ -476,7 +477,7 @@ function DocumentStatusIcons({ documents }: { documents?: Order['documents'] }) 
                         <button className="focus:outline-none"><ClipboardCheck className={iconClass(documents.inspectionTestPlan)} /></button>
                     </TooltipTrigger>
                     <TooltipContent>
-                        <p>Plano de InspeÃ§Ã£o {documents.inspectionTestPlan ? '(OK)' : '(Pendente)'}</p>
+                        <p>Plano de Inspeção {documents.inspectionTestPlan ? '(OK)' : '(Pendente)'}</p>
                     </TooltipContent>
                 </Tooltip>
                 <Tooltip>
@@ -509,13 +510,13 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
         <Table>
             <TableHeader>
                 <TableRow>
-                    <TableHead className="w-[100px]">NÂº Pedido</TableHead>
+                    <TableHead className="w-[100px]">Nº Pedido</TableHead>
                     <TableHead className="w-[120px]">OS Interna</TableHead>
                     <TableHead>Projeto Cliente</TableHead>
                     <TableHead>Cliente</TableHead>
                     <TableHead className="w-[100px] text-center">Docs</TableHead>
                     <TableHead className="w-[120px]">Data Entrega</TableHead>
-                    <TableHead className="w-[120px]">Data ConclusÃ£o</TableHead>
+                    <TableHead className="w-[120px]">Data Conclusão</TableHead>
                     <TableHead className="w-[120px]">Data Book</TableHead>
                     <TableHead className="w-[120px] text-right">Peso Total</TableHead>
                     <TableHead className="w-[150px]">Progresso</TableHead>
@@ -531,7 +532,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                             <TableCell className="font-medium">{order.quotationNumber || 'N/A'}</TableCell>
                             <TableCell className="font-medium">{order.internalOS || 'N/A'}</TableCell>
                             <TableCell>{order.projectName || 'N/A'}</TableCell>
-                            <TableCell>{order.customer?.name || 'Cliente nÃ£o informado'}</TableCell>
+                            <TableCell>{order.customer?.name || 'Cliente não informado'}</TableCell>
                             <TableCell>
                                 <DocumentStatusIcons documents={order.documents} />
                             </TableCell>
@@ -540,7 +541,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                                 {order.completedAt ? format(order.completedAt, "dd/MM/yyyy") : '-'}
                             </TableCell>
                             <TableCell>
-                                {order.status === 'ConcluÃ­do' ? (
+                                {order.status === 'Concluído' ? (
                                     order.dataBookSent ? (
                                         <div className="flex items-center gap-1">
                                             <CheckCircle className="h-4 w-4 text-green-600" />
@@ -566,7 +567,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                                     <Progress value={orderProgress} className="h-2" />
                                     <span className="text-xs font-medium text-muted-foreground">{Math.round(orderProgress)}%</span>
                                     {(() => {
-                                        // Verifica se hÃ¡ itens concluÃ­dos com atraso no embarque
+                                        // Verifica se há itens concluídos com atraso no embarque
                                         const hasDelayedShipping = order.items.some(item => {
                                             const itemProgress = calculateItemProgress(item);
                                             return itemProgress === 100 && 
@@ -585,7 +586,7 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
                                                             </div>
                                                         </TooltipTrigger>
                                                         <TooltipContent>
-                                                            <p>HÃ¡ itens com atraso no embarque</p>
+                                                            <p>Há itens com atraso no embarque</p>
                                                         </TooltipContent>
                                                     </Tooltip>
                                                 </TooltipProvider>
@@ -659,13 +660,13 @@ export default function OrdersPage() {
     const [dataBookFilter, setDataBookFilter] = useState<string>("all");
     const [monthFilter, setMonthFilter] = useState<string>("all");
     
-    // Modos de visualizaÃ§Ã£o, incluindo a anÃ¡lise de ocupaÃ§Ã£o por setor
+    // Modos de visualização, incluindo a análise de ocupação por setor
     const [viewMode, setViewMode] = useState<OrdersViewMode>('list');
     const [isViewModeRestored, setIsViewModeRestored] = useState(false);
     const [calendarDate, setCalendarDate] = useState(new Date());
 
-    // Recupera apÃ³s F5 a Ãºltima visualizaÃ§Ã£o somente no navegador, evitando conflito
-    // com a renderizaÃ§Ã£o inicial do Next.js.
+    // Recupera após F5 a última visualização somente no navegador, evitando conflito
+    // com a renderização inicial do Next.js.
     useEffect(() => {
         try {
             const savedViewMode = window.localStorage.getItem(ORDERS_VIEW_MODE_KEY);
@@ -673,25 +674,25 @@ export default function OrdersPage() {
                 setViewMode(savedViewMode as OrdersViewMode);
             }
         } catch (error) {
-            console.warn('NÃ£o foi possÃ­vel recuperar a Ãºltima visualizaÃ§Ã£o de pedidos:', error);
+            console.warn('Não foi possível recuperar a última visualização de pedidos:', error);
         } finally {
             setIsViewModeRestored(true);
         }
     }, []);
 
-    // Salva cada mudanÃ§a feita pelo usuÃ¡rio. A trava impede que o valor salvo
-    // seja substituÃ­do por "list" antes de a restauraÃ§Ã£o inicial terminar.
+    // Salva cada mudança feita pelo usuário. A trava impede que o valor salvo
+    // seja substituído por "list" antes de a restauração inicial terminar.
     useEffect(() => {
         if (!isViewModeRestored) return;
 
         try {
             window.localStorage.setItem(ORDERS_VIEW_MODE_KEY, viewMode);
         } catch (error) {
-            console.warn('NÃ£o foi possÃ­vel salvar a visualizaÃ§Ã£o de pedidos:', error);
+            console.warn('Não foi possível salvar a visualização de pedidos:', error);
         }
     }, [viewMode, isViewModeRestored]);
 
-    // Estados para controlar posiÃ§Ã£o do scroll no Kanban
+    // Estados para controlar posição do scroll no Kanban
     const kanbanScrollRef = useRef<HTMLDivElement>(null);
     const scrollPositionRef = useRef<number>(0);
     // ADICIONAR ESTE NOVO:
@@ -723,16 +724,16 @@ export default function OrdersPage() {
         }
     };
     
-    // FunÃ§Ã£o helper para converter timestamps do Firestore de forma segura
+    // Função helper para converter timestamps do Firestore de forma segura
     const safeToDate = (timestamp: any): Date | null => {
         if (!timestamp) return null;
         
-        // Se jÃ¡ Ã© uma data JavaScript vÃ¡lida
+        // Se já é uma data JavaScript válida
         if (timestamp instanceof Date) {
             return isNaN(timestamp.getTime()) ? null : timestamp;
         }
         
-        // Se Ã© um timestamp do Firestore com mÃ©todo toDate
+        // Se é um timestamp do Firestore com método toDate
         if (timestamp && typeof timestamp.toDate === 'function') {
             try {
                 const date = timestamp.toDate();
@@ -743,7 +744,7 @@ export default function OrdersPage() {
             }
         }
         
-        // Se Ã© um objeto com propriedades seconds e nanoseconds (formato Firestore)
+        // Se é um objeto com propriedades seconds e nanoseconds (formato Firestore)
         if (timestamp && typeof timestamp === 'object' && 'seconds' in timestamp) {
             try {
                 const date = new Date(timestamp.seconds * 1000);
@@ -765,7 +766,7 @@ export default function OrdersPage() {
             }
         }
         
-        console.warn("Tipo de timestamp nÃ£o reconhecido:", typeof timestamp, timestamp);
+        console.warn("Tipo de timestamp não reconhecido:", typeof timestamp, timestamp);
         return null;
     };
 
@@ -792,8 +793,8 @@ export default function OrdersPage() {
                 try {
                     const data = doc.data();
 
-                    // LOG TEMPORÃRIO - REMOVER DEPOIS
-                    console.log('ðŸ“‹ DOC:', doc.id, '| quotationNumber:', data.quotationNumber, '| items tipo:', typeof data.items, '| isArray:', Array.isArray(data.items));
+                    // LOG TEMPORÁRIO - REMOVER DEPOIS
+                    console.log('📋 DOC:', doc.id, '| quotationNumber:', data.quotationNumber, '| items tipo:', typeof data.items, '| isArray:', Array.isArray(data.items));
                     const createdAtDate = safeToDate(data.createdAt) || new Date();
                     const deliveryDate = safeToDate(data.deliveryDate);
                 
@@ -803,12 +804,12 @@ export default function OrdersPage() {
                 if (Array.isArray(rawItems)) {
                     itemsArray = rawItems;
                 } else if (rawItems && typeof rawItems === 'object') {
-                    // ReconstrÃ³i preservando todos os campos aninhados
+                    // Reconstrói preservando todos os campos aninhados
                     itemsArray = Object.keys(rawItems)
-                        .sort((a, b) => Number(a) - Number(b)) // mantÃ©m ordem original
+                        .sort((a, b) => Number(a) - Number(b)) // mantém ordem original
                         .map(key => {
                             const item = rawItems[key];
-                            // Garante que Ã© um objeto vÃ¡lido com campos esperados
+                            // Garante que é um objeto válido com campos esperados
                             if (typeof item === 'object' && item !== null) {
                                 return {
                                     description: '',
@@ -828,7 +829,7 @@ export default function OrdersPage() {
                         ...item, 
                         id: item.id || `${doc.id}-${index}`,
                         code: itemCode,
-                        itemNumber: item.itemNumber || '', // Preserva o nÃºmero do item no pedido de compra
+                        itemNumber: item.itemNumber || '', // Preserva o número do item no pedido de compra
                     };
                     delete enrichedItem.product_code;
 
@@ -874,11 +875,11 @@ export default function OrdersPage() {
                 const today = new Date();
                 today.setHours(0, 0, 0, 0);
 
-                if (deliveryDate && deliveryDate < today && !['ConcluÃ­do', 'Cancelado'].includes(finalStatus)) {
+                if (deliveryDate && deliveryDate < today && !['Concluído', 'Cancelado'].includes(finalStatus)) {
                     finalStatus = 'Atrasado';
                 }
                 
-                let customerInfo: CustomerInfo = { id: '', name: 'Cliente nÃ£o informado' };
+                let customerInfo: CustomerInfo = { id: '', name: 'Cliente não informado' };
                 if (data.customer && typeof data.customer === 'object' && data.customer.name) {
                     customerInfo = { id: data.customer.id || '', name: data.customer.name };
                 } else if (typeof data.customerName === 'string') {
@@ -889,7 +890,7 @@ export default function OrdersPage() {
 
                 const orderNum = (data.orderNumber || data.quotationNumber || 'N/A').toString();
                 
-                console.log('ðŸ“Š [DEBUG] Processando pedido:', {
+                console.log('📊 [DEBUG] Processando pedido:', {
                     docId: doc.id,
                     orderNumber: data.orderNumber,
                     quotationNumber: data.quotationNumber,
@@ -917,7 +918,7 @@ export default function OrdersPage() {
                 } as Order;
                 } catch (error) {
                     console.error("Erro ao processar pedido:", doc.id, error);
-                    // Retorna um pedido com dados mÃ­nimos em caso de erro
+                    // Retorna um pedido com dados mínimos em caso de erro
                     return {
                         id: doc.id,
                         quotationId: '',
@@ -962,7 +963,7 @@ export default function OrdersPage() {
         }
     }, [user, authLoading]);
 
-    // Efeito para limpar estados quando mudar de modo de visualizaÃ§Ã£o
+    // Efeito para limpar estados quando mudar de modo de visualização
     useEffect(() => {
         if (viewMode !== 'kanban') {
             scrollPositionRef.current = 0;
@@ -970,9 +971,9 @@ export default function OrdersPage() {
         }
     }, [viewMode]);
 
-    // Debug dos componentes para verificar se estÃ£o carregados corretamente
+    // Debug dos componentes para verificar se estão carregados corretamente
     useEffect(() => {
-        console.log('ðŸ” Verificando componentes:', {
+        console.log('🔍 Verificando componentes:', {
             Popover: typeof Popover,
             Calendar: typeof Calendar,
             PopoverTrigger: typeof PopoverTrigger,
@@ -985,7 +986,7 @@ export default function OrdersPage() {
       const [inputValue, setInputValue] = useState("");
       const fieldValue = form.watch(`items.${index}.itemDeliveryDate`);
 
-      // Sincronizar valor do input com o valor do formulÃ¡rio
+      // Sincronizar valor do input com o valor do formulário
       useEffect(() => {
         if (fieldValue) {
           try {
@@ -1006,7 +1007,7 @@ export default function OrdersPage() {
 
       const handleDateChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const newValue = e.target.value;
-        console.log('ðŸ“… [CUSTOM] Valor do input:', newValue);
+        console.log('📅 [CUSTOM] Valor do input:', newValue);
         
         setInputValue(newValue);
         
@@ -1016,16 +1017,16 @@ export default function OrdersPage() {
             const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
             
             if (!isNaN(newDate.getTime())) {
-              console.log('ðŸ“… [CUSTOM] Data vÃ¡lida criada:', newDate);
+              console.log('📅 [CUSTOM] Data válida criada:', newDate);
               form.setValue(`items.${index}.itemDeliveryDate`, newDate);
             } else {
-              console.warn('ðŸ“… [CUSTOM] Data invÃ¡lida:', newValue);
+              console.warn('📅 [CUSTOM] Data inválida:', newValue);
             }
           } catch (error) {
-            console.error('ðŸ“… [CUSTOM] Erro ao processar data:', error);
+            console.error('📅 [CUSTOM] Erro ao processar data:', error);
           }
         } else {
-          console.log('ðŸ“… [CUSTOM] Data limpa');
+          console.log('📅 [CUSTOM] Data limpa');
           form.setValue(`items.${index}.itemDeliveryDate`, null);
         }
       };
@@ -1044,21 +1045,21 @@ export default function OrdersPage() {
           </FormControl>
           <FormMessage />
           <FormDescription className="text-xs text-muted-foreground">
-            Data especÃ­fica de entrega deste item (opcional)
+            Data específica de entrega deste item (opcional)
           </FormDescription>
         </FormItem>
       );
     };
 
     const handleViewOrder = (order: Order) => {
-        // Salvar posiÃ§Ã£o do scroll horizontal do Kanban
+        // Salvar posição do scroll horizontal do Kanban
         if (viewMode === 'kanban' && kanbanScrollRef.current) {
             scrollPositionRef.current = kanbanScrollRef.current.scrollLeft;
             sessionStorage.setItem('kanbanScrollPosition', scrollPositionRef.current.toString());
-            console.log('ðŸ’¾ Salvando posiÃ§Ã£o horizontal:', scrollPositionRef.current);
+            console.log('💾 Salvando posição horizontal:', scrollPositionRef.current);
         }
         
-        // NOVO: Salvar posiÃ§Ã£o do scroll vertical de cada coluna
+        // NOVO: Salvar posição do scroll vertical de cada coluna
         if (viewMode === 'kanban') {
             const columns = document.querySelectorAll('[data-column-scroll]');
             columns.forEach((column) => {
@@ -1066,12 +1067,12 @@ export default function OrdersPage() {
                 if (columnId) {
                     const scrollTop = column.scrollTop;
                     columnScrollPositions.current.set(columnId, scrollTop);
-                    console.log(`ðŸ’¾ Salvando scroll da coluna ${columnId}:`, scrollTop);
+                    console.log(`💾 Salvando scroll da coluna ${columnId}:`, scrollTop);
                 }
             });
         }
         
-        console.log('ðŸ” [DEBUG] Inicializando formulÃ¡rio com:', {
+        console.log('🔍 [DEBUG] Inicializando formulário com:', {
             quotationNumber: order.quotationNumber,
             orderId: order.id
         });
@@ -1088,7 +1089,7 @@ export default function OrdersPage() {
         setIsSheetOpen(true);
     };
 
-        // FunÃ§Ã£o helper para remover campos undefined (Firestore nÃ£o aceita undefined)
+        // Função helper para remover campos undefined (Firestore não aceita undefined)
     const removeUndefinedFields = (obj: any): any => {
         if (obj === null || obj === undefined) {
             return null;
@@ -1114,23 +1115,23 @@ export default function OrdersPage() {
 
     const onOrderSubmit = async (values: z.infer<typeof orderSchema>) => {
         if (!selectedOrder) {
-            console.error('âŒ [DEBUG] selectedOrder nÃ£o encontrado');
+            console.error('❌ [DEBUG] selectedOrder não encontrado');
             return;
         }
 
-        console.log('ðŸš€ [DEBUG] Iniciando salvamento robusto:', {
+        console.log('🚀 [DEBUG] Iniciando salvamento robusto:', {
             orderId: selectedOrder.id,
             quotationNumberAntigo: selectedOrder.quotationNumber,
             quotationNumberNovo: values.quotationNumber
         });
 
-        console.log('ðŸ” [DEBUG] Iniciando salvamento:', {
+        console.log('🔍 [DEBUG] Iniciando salvamento:', {
             orderId: selectedOrder.id,
             quotationNumber: values.quotationNumber,
             originalQuotationNumber: selectedOrder.quotationNumber
         });
 
-        console.log('ðŸ’¾ [SUBMIT] Valores do formulÃ¡rio:', values);
+        console.log('💾 [SUBMIT] Valores do formulário:', values);
 
         try {
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
@@ -1138,16 +1139,16 @@ export default function OrdersPage() {
             // Primeiro, verificar se o documento existe
             const currentDoc = await getDoc(orderRef);
             if (!currentDoc.exists()) {
-                throw new Error(`Documento ${selectedOrder.id} nÃ£o encontrado no Firestore`);
+                throw new Error(`Documento ${selectedOrder.id} não encontrado no Firestore`);
             }
             
-            console.log('âœ… [DEBUG] Documento encontrado, dados atuais:', {
+            console.log('✅ [DEBUG] Documento encontrado, dados atuais:', {
                 quotationNumber: currentDoc.data().quotationNumber
             });
             
-            // CORREÃ‡ÃƒO: Processamento mais cuidadoso das datas dos itens
+            // CORREÇÃO: Processamento mais cuidadoso das datas dos itens
             const itemsToSave = values.items.map((formItem, itemIndex) => {
-              console.log(`ðŸ’¾ [SUBMIT] Processando item ${itemIndex + 1}:`, formItem);
+              console.log(`💾 [SUBMIT] Processando item ${itemIndex + 1}:`, formItem);
               
               const originalItem = selectedOrder.items.find(i => i.id === formItem.id);
               const planToSave = originalItem?.productionPlan?.map(p => ({
@@ -1159,7 +1160,7 @@ export default function OrdersPage() {
                 durationDays: p.durationDays || 0,
               })) || [];
 
-              // CORREÃ‡ÃƒO: ConversÃ£o cuidadosa das datas do item
+              // CORREÇÃO: Conversão cuidadosa das datas do item
               let itemDeliveryTimestamp = null;
               let shippingTimestamp = null;
 
@@ -1171,10 +1172,10 @@ export default function OrdersPage() {
                   
                   if (!isNaN(deliveryDate.getTime())) {
                     itemDeliveryTimestamp = Timestamp.fromDate(deliveryDate);
-                    console.log('âœ… [SUBMIT] Data de entrega convertida:', deliveryDate.toISOString());
+                    console.log('✅ [SUBMIT] Data de entrega convertida:', deliveryDate.toISOString());
                   }
                 } catch (error) {
-                  console.warn('âš ï¸ [SUBMIT] Erro ao converter data de entrega:', error);
+                  console.warn('⚠️ [SUBMIT] Erro ao converter data de entrega:', error);
                 }
               }
 
@@ -1186,10 +1187,10 @@ export default function OrdersPage() {
                   
                   if (!isNaN(shippingDate.getTime())) {
                     shippingTimestamp = Timestamp.fromDate(shippingDate);
-                    console.log('âœ… [SUBMIT] Data de embarque convertida:', shippingDate.toISOString());
+                    console.log('✅ [SUBMIT] Data de embarque convertida:', shippingDate.toISOString());
                   }
                 } catch (error) {
-                  console.warn('âš ï¸ [SUBMIT] Erro ao converter data de embarque:', error);
+                  console.warn('⚠️ [SUBMIT] Erro ao converter data de embarque:', error);
                 }
               }
 
@@ -1210,7 +1211,7 @@ export default function OrdersPage() {
               };
             });
 
-            console.log('ðŸ’¾ [SUBMIT] Itens processados para salvamento:', itemsToSave);
+            console.log('💾 [SUBMIT] Itens processados para salvamento:', itemsToSave);
 
             const totalWeight = calculateTotalWeight(itemsToSave);
             
@@ -1219,7 +1220,7 @@ export default function OrdersPage() {
             
             if (values.quotationNumber !== selectedOrder.quotationNumber) {
                 updateData.quotationNumber = values.quotationNumber || null;
-                console.log('ðŸ“ [DEBUG] Atualizando quotationNumber:', values.quotationNumber);
+                console.log('📝 [DEBUG] Atualizando quotationNumber:', values.quotationNumber);
             }
             
             if (values.customer?.id !== selectedOrder.customer?.id) {
@@ -1242,7 +1243,7 @@ export default function OrdersPage() {
             updateData.totalWeight = totalWeight || 0;
             updateData.lastUpdate = Timestamp.now();
             
-            console.log('ðŸ“¦ [DEBUG] Dados que serÃ£o enviados para o Firestore:', updateData);
+            console.log('📦 [DEBUG] Dados que serão enviados para o Firestore:', updateData);
             
             const dataToSave = {
                 customer: values.customer || null,
@@ -1259,28 +1260,28 @@ export default function OrdersPage() {
                 totalWeight: totalWeight || 0,
             };
 
-            console.log('ðŸ’¾ [SUBMIT] Dados finais para Firestore:', dataToSave);
+            console.log('💾 [SUBMIT] Dados finais para Firestore:', dataToSave);
 
             // Remove campos undefined antes de enviar para o Firestore
             const cleanedData = removeUndefinedFields(dataToSave);
 
             // Salvar no Firestore usando updateData (mais eficiente)
             await updateDoc(orderRef, updateData);
-            console.log('âœ… [DEBUG] updateDoc executado com sucesso');
+            console.log('✅ [DEBUG] updateDoc executado com sucesso');
 
             // Verificar se foi salvo corretamente
             const verificationDoc = await getDoc(orderRef);
             if (verificationDoc.exists()) {
                 const savedData = verificationDoc.data();
-                console.log('ðŸ” [DEBUG] VerificaÃ§Ã£o - dados salvos:', {
+                console.log('🔍 [DEBUG] Verificação - dados salvos:', {
                     quotationNumber: savedData.quotationNumber,
                     lastUpdate: savedData.lastUpdate
                 });
                 
                 if (savedData.quotationNumber === values.quotationNumber) {
-                    console.log('âœ… [DEBUG] Confirmado: quotationNumber foi salvo corretamente');
+                    console.log('✅ [DEBUG] Confirmado: quotationNumber foi salvo corretamente');
                 } else {
-                    console.error('âŒ [DEBUG] Erro: quotationNumber nÃ£o foi salvo corretamente', {
+                    console.error('❌ [DEBUG] Erro: quotationNumber não foi salvo corretamente', {
                         esperado: values.quotationNumber,
                         salvo: savedData.quotationNumber
                     });
@@ -1292,7 +1293,7 @@ export default function OrdersPage() {
                 description: "Os dados do pedido foram salvos com sucesso.",
             });
 
-            console.log('ðŸ”„ [DEBUG] Recarregando dados do servidor...');
+            console.log('🔄 [DEBUG] Recarregando dados do servidor...');
 
             // Aguardar um pouco para garantir que o Firestore processou
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -1301,7 +1302,7 @@ export default function OrdersPage() {
             const updatedOrderDoc = await getDoc(orderRef);
             if (updatedOrderDoc.exists()) {
                 const updatedData = updatedOrderDoc.data();
-                console.log('âœ… [DEBUG] Dados atualizados do servidor:', {
+                console.log('✅ [DEBUG] Dados atualizados do servidor:', {
                     quotationNumber: updatedData.quotationNumber,
                     orderId: updatedOrderDoc.id
                 });
@@ -1311,7 +1312,7 @@ export default function OrdersPage() {
                 const updatedOrderInList = allOrders.find(o => o.id === selectedOrder.id);
                 
                 if (updatedOrderInList) {
-                    console.log('âœ… [DEBUG] Pedido encontrado na lista atualizada:', {
+                    console.log('✅ [DEBUG] Pedido encontrado na lista atualizada:', {
                         quotationNumber: updatedOrderInList.quotationNumber
                     });
                     
@@ -1321,15 +1322,15 @@ export default function OrdersPage() {
                         status: updatedOrderInList.status as any,
                     });
                 } else {
-                    console.warn('âš ï¸ [DEBUG] Pedido nÃ£o encontrado na lista apÃ³s recarregamento');
+                    console.warn('⚠️ [DEBUG] Pedido não encontrado na lista após recarregamento');
                 }
             } else {
-                console.error('âŒ [DEBUG] Documento nÃ£o encontrado apÃ³s salvamento');
+                console.error('❌ [DEBUG] Documento não encontrado após salvamento');
             }
 
             setIsEditing(false);
         } catch (error) {
-            console.error("âŒ [DEBUG] Erro detalhado no salvamento:", {
+            console.error("❌ [DEBUG] Erro detalhado no salvamento:", {
                 error: error.message,
                 stack: error.stack,
                 orderId: selectedOrder.id
@@ -1338,7 +1339,7 @@ export default function OrdersPage() {
             toast({
                 variant: "destructive",
                 title: "Erro ao salvar",
-                description: `NÃ£o foi possÃ­vel atualizar o pedido: ${error.message}`,
+                description: `Não foi possível atualizar o pedido: ${error.message}`,
             });
         }
     };
@@ -1360,7 +1361,7 @@ export default function OrdersPage() {
         return Array.from(statuses);
     }, [orders]);
 
-    // Adicione esta funÃ§Ã£o para gerar lista de meses disponÃ­veis
+    // Adicione esta função para gerar lista de meses disponíveis
     const availableMonths = useMemo(() => {
         const months = new Set<string>();
         orders.forEach(order => {
@@ -1400,7 +1401,7 @@ export default function OrdersPage() {
             const customerMatch = customerFilter === 'all' || order.customer.id === customerFilter;
             const dateMatch = !dateFilter || (order.deliveryDate && isSameDay(order.deliveryDate, dateFilter));
             
-            // NOVO FILTRO DE MÃŠS
+            // NOVO FILTRO DE MÊS
             let monthMatch = true;
             if (monthFilter !== 'all') {
                 if (order.deliveryDate) {
@@ -1414,7 +1415,7 @@ export default function OrdersPage() {
             // NOVO FILTRO DE DATA BOOK
             let dataBookMatch = true;
             if (dataBookFilter === 'pendente') {
-                dataBookMatch = order.status === 'ConcluÃ­do' && !order.dataBookSent;
+                dataBookMatch = order.status === 'Concluído' && !order.dataBookSent;
             } else if (dataBookFilter === 'enviado') {
                 dataBookMatch = order.dataBookSent === true;
             }
@@ -1423,8 +1424,8 @@ export default function OrdersPage() {
         });
 
         return filtered.sort((a, b) => {
-            const aIsCompleted = a.status === 'ConcluÃ­do';
-            const bIsCompleted = b.status === 'ConcluÃ­do';
+            const aIsCompleted = a.status === 'Concluído';
+            const bIsCompleted = b.status === 'Concluído';
 
             if (aIsCompleted && !bIsCompleted) return 1;
             if (!aIsCompleted && bIsCompleted) return -1;
@@ -1443,7 +1444,7 @@ export default function OrdersPage() {
         });
     }, [orders, searchQuery, statusFilter, customerFilter, dateFilter, monthFilter, dataBookFilter]);
     
-    // Adicione esta funÃ§Ã£o para calcular o peso total do mÃªs filtrado
+    // Adicione esta função para calcular o peso total do mês filtrado
     const monthWeightStats = useMemo(() => {
         if (monthFilter === 'all') {
             return null;
@@ -1487,8 +1488,8 @@ export default function OrdersPage() {
         };
     }, [orders, monthFilter]);
 
-    // Carga atual de fabricaÃ§Ã£o: cada item Ã© contabilizado integralmente no
-    // setor cuja etapa estÃ¡ marcada como "Em Andamento".
+    // Carga atual de fabricação: cada item é contabilizado integralmente no
+    // setor cuja etapa está marcada como "Em Andamento".
     const occupationStats = useMemo(() => {
         type OccupationItem = {
             orderId: string;
@@ -1503,7 +1504,7 @@ export default function OrdersPage() {
         let waitingItems = 0;
 
         filteredOrders.forEach(order => {
-            if (order.status === 'ConcluÃ­do' || order.status === 'Cancelado') return;
+            if (order.status === 'Concluído' || order.status === 'Cancelado') return;
 
             order.items.forEach(item => {
                 const weight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
@@ -1513,7 +1514,7 @@ export default function OrdersPage() {
                 const activeStage = plan.find(stage => stage.status === 'Em Andamento');
 
                 if (!activeStage) {
-                    const isFinished = plan.length > 0 && plan.every(stage => stage.status === 'ConcluÃ­do');
+                    const isFinished = plan.length > 0 && plan.every(stage => stage.status === 'Concluído');
                     if (!isFinished) {
                         waitingWeight += weight;
                         waitingItems += 1;
@@ -1525,7 +1526,7 @@ export default function OrdersPage() {
                     orderId: order.id,
                     orderLabel: order.internalOS || `Pedido ${order.id}`,
                     itemDescription: item.description,
-                    stageName: activeStage.stageName?.trim() || 'Etapa nÃ£o identificada',
+                    stageName: activeStage.stageName?.trim() || 'Etapa não identificada',
                     weight,
                 });
             });
@@ -1574,8 +1575,8 @@ export default function OrdersPage() {
         };
     }, [filteredOrders]);
 
-    // MÃ©dia fixa dos Ãºltimos 12 meses. Um item entra no mÃªs em que sua Ãºltima
-    // etapa foi concluÃ­da; para dados antigos, usa a conclusÃ£o do pedido.
+    // Média fixa dos últimos 12 meses. Um item entra no mês em que sua última
+    // etapa foi concluída; para dados antigos, usa a conclusão do pedido.
     const monthlyProductionStats = useMemo(() => {
         const now = new Date();
         const firstMonth = new Date(now.getFullYear(), now.getMonth() - 11, 1);
@@ -1631,7 +1632,7 @@ export default function OrdersPage() {
 
     const hasActiveFilters = searchQuery || statusFilter !== 'all' || customerFilter !== 'all' || dateFilter || dataBookFilter !== 'all' || monthFilter !== 'all';
 
-    // Organiza os pedidos por data de entrega para visualizaÃ§Ã£o em calendÃ¡rio
+    // Organiza os pedidos por data de entrega para visualização em calendário
     const ordersByDate = useMemo(() => {
         const grouped = new Map<string, Order[]>();
         
@@ -1648,7 +1649,7 @@ export default function OrdersPage() {
         return grouped;
     }, [filteredOrders]);
 
-    // Organiza os pedidos por mÃªs para visualizaÃ§Ã£o Kanban - CORRIGIDO
+    // Organiza os pedidos por mês para visualização Kanban - CORRIGIDO
     const ordersByMonth = useMemo(() => {
         const grouped = new Map<string, {
             orders: Order[];
@@ -1656,20 +1657,20 @@ export default function OrdersPage() {
             itemsByOrder: Map<string, OrderItem[]>;
         }>();
         
-        // NOVO: Agrupar concluÃ­dos por ano
+        // NOVO: Agrupar concluídos por ano
         const completedByYear = new Map<string, {
             orders: Order[];
             totalWeight: number;
         }>();
 
         filteredOrders.forEach(order => {
-            if (order.status === 'ConcluÃ­do') {
+            if (order.status === 'Concluído') {
                 let completionYear: string;
                 
                 if (order.completedAt) {
-                    // Prioridade 1: Data de conclusÃ£o oficial
+                    // Prioridade 1: Data de conclusão oficial
                     completionYear = format(new Date(order.completedAt), 'yyyy');
-                    console.log('ðŸ“… Usando completedAt:', order.quotationNumber, completionYear);
+                    console.log('📅 Usando completedAt:', order.quotationNumber, completionYear);
                 } else {
                     // Prioridade 2: Data de embarque mais recente dos itens
                     const shippingDates = order.items
@@ -1681,14 +1682,14 @@ export default function OrdersPage() {
                         // Pegar a data de embarque mais recente
                         const latestShipping = new Date(Math.max(...shippingDates.map(d => d.getTime())));
                         completionYear = format(latestShipping, 'yyyy');
-                        console.log('ðŸ“¦ Usando shippingDate:', order.quotationNumber, completionYear);
+                        console.log('📦 Usando shippingDate:', order.quotationNumber, completionYear);
                     } else if (order.createdAt) {
-                        // Prioridade 3: Data de criaÃ§Ã£o do pedido
+                        // Prioridade 3: Data de criação do pedido
                         completionYear = format(new Date(order.createdAt), 'yyyy');
-                        console.log('ðŸ“ Usando createdAt:', order.quotationNumber, completionYear);
+                        console.log('📝 Usando createdAt:', order.quotationNumber, completionYear);
                     } else {
                         completionYear = 'Sem Data';
-                        console.log('âŒ Sem data:', order.quotationNumber);
+                        console.log('❌ Sem data:', order.quotationNumber);
                     }
                 }
                 
@@ -1705,7 +1706,7 @@ export default function OrdersPage() {
                 return;
             }
 
-            // CORREÃ‡ÃƒO: Usar apenas a data de entrega do pedido, nÃ£o dos itens
+            // CORREÇÃO: Usar apenas a data de entrega do pedido, não dos itens
             if (!order.deliveryDate) return;
 
             const monthKey = format(order.deliveryDate, 'yyyy-MM');
@@ -1748,7 +1749,7 @@ export default function OrdersPage() {
         };
     }, [filteredOrders]);
 
-    // Gera os dias do mÃªs atual para o calendÃ¡rio
+    // Gera os dias do mês atual para o calendário
     const generateCalendarDays = (date: Date): { days: Date[], firstDay: Date, lastDay: Date } => {
         const year = date.getFullYear();
         const month = date.getMonth();
@@ -1756,12 +1757,12 @@ export default function OrdersPage() {
         const firstDay = new Date(year, month, 1);
         const lastDay = new Date(year, month + 1, 0);
         const startDate = new Date(firstDay);
-        startDate.setDate(startDate.getDate() - firstDay.getDay()); // ComeÃ§a no domingo
+        startDate.setDate(startDate.getDate() - firstDay.getDay()); // Começa no domingo
         
         const days: Date[] = [];
         const current = new Date(startDate);
         
-        // Gera 42 dias (6 semanas) para preencher o calendÃ¡rio
+        // Gera 42 dias (6 semanas) para preencher o calendário
         for (let i = 0; i < 42; i++) {
             days.push(new Date(current));
             current.setDate(current.getDate() + 1);
@@ -1772,11 +1773,11 @@ export default function OrdersPage() {
 
     const { days: calendarDays, firstDay, lastDay } = generateCalendarDays(calendarDate);
 
-    // Componente Kanban - SEÃ‡ÃƒO CORRIGIDA
+    // Componente Kanban - SEÇÃO CORRIGIDA
     const KanbanView = () => {
         const allColumns = [
             ...ordersByMonth.monthColumns,
-            // NOVO: Adicionar colunas de anos concluÃ­dos
+            // NOVO: Adicionar colunas de anos concluídos
             ...ordersByMonth.completedByYear.map(([year, data]) => [
                 `completed-${year}`,
                 {
@@ -1801,7 +1802,7 @@ export default function OrdersPage() {
                         setTimeout(() => {
                             if (kanbanScrollRef.current) {
                                 kanbanScrollRef.current.scrollLeft = savedPosition;
-                                console.log('ðŸ”„ PosiÃ§Ã£o horizontal restaurada:', savedPosition);
+                                console.log('🔄 Posição horizontal restaurada:', savedPosition);
                             }
                         }, 50);
                     }
@@ -1816,7 +1817,7 @@ export default function OrdersPage() {
                             const savedScroll = columnScrollPositions.current.get(columnId);
                             if (savedScroll !== undefined) {
                                 column.scrollTop = savedScroll;
-                                console.log(`ðŸ”„ Scroll da coluna ${columnId} restaurado:`, savedScroll);
+                                console.log(`🔄 Scroll da coluna ${columnId} restaurado:`, savedScroll);
                             }
                         }
                     });
@@ -1830,10 +1831,10 @@ export default function OrdersPage() {
                     <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                     <h3 className="text-lg font-medium mb-2 text-foreground">Nenhum pedido para exibir no Kanban</h3>
                     <p className="text-foreground/70">
-                        Os pedidos aparecerÃ£o aqui quando tiverem data de entrega definida ou estiverem concluÃ­dos.
+                        Os pedidos aparecerão aqui quando tiverem data de entrega definida ou estiverem concluídos.
                         {hasActiveFilters && (
                             <span className="block mt-2 text-sm">
-                                Verifique se os filtros aplicados nÃ£o estÃ£o ocultando os pedidos.
+                                Verifique se os filtros aplicados não estão ocultando os pedidos.
                             </span>
                         )}
                     </p>
@@ -1857,13 +1858,13 @@ export default function OrdersPage() {
                         {allColumns.map(([monthKey, monthData]) => {
                             const isCompletedYear = monthKey.startsWith('completed-');
                             
-                            // CORREÃ‡ÃƒO PRINCIPAL: FormataÃ§Ã£o correta do nome do mÃªs
+                            // CORREÇÃO PRINCIPAL: Formatação correta do nome do mês
                             let monthLabel = '';
                             if (isCompletedYear) {
                                 const year = monthKey.replace('completed-', '');
-                                monthLabel = `ConcluÃ­dos ${year}`;
+                                monthLabel = `Concluídos ${year}`;
                             } else {
-                                // Criar uma data vÃ¡lida a partir da chave YYYY-MM
+                                // Criar uma data válida a partir da chave YYYY-MM
                                 const [year, month] = monthKey.split('-');
                                 const dateForLabel = new Date(parseInt(year), parseInt(month) - 1, 1);
                                 
@@ -1936,7 +1937,7 @@ export default function OrdersPage() {
                                             </div>
                                             {!isCompletedYear && (
                                                 <p className="text-xs mt-1 text-muted-foreground">
-                                                    Peso dos itens com entrega neste mÃªs
+                                                    Peso dos itens com entrega neste mês
                                                 </p>
                                             )}
                                         </div>
@@ -1966,7 +1967,7 @@ export default function OrdersPage() {
                                             const statusProps = getStatusProps(order.status);
                                             const orderProgress = calculateOrderProgress(order);
 
-                                            // CORREÃ‡ÃƒO: Sempre mostrar peso total e todos os itens do pedido
+                                            // CORREÇÃO: Sempre mostrar peso total e todos os itens do pedido
                                             const monthSpecificWeight = order.totalWeight || 0;
                                             const monthSpecificItems = order.items.length;
 
@@ -2002,17 +2003,17 @@ export default function OrdersPage() {
                                                             </Badge>
                                                         </div>
 
-                                                        {/* InformaÃ§Ãµes do projeto e OS */}
+                                                        {/* Informações do projeto e OS */}
                                                         {(order.projectName || order.internalOS) && (
                                                             <div className="space-y-1">
                                                                 {order.projectName && (
                                                                     <p className="text-xs text-muted-foreground truncate">
-                                                                        ðŸ“‹ {order.projectName}
+                                                                        📋 {order.projectName}
                                                                     </p>
                                                                 )}
                                                                 {order.internalOS && (
                                                                     <p className="text-xs text-muted-foreground">
-                                                                        ðŸ·ï¸ OS: {order.internalOS}
+                                                                        🏷️ OS: {order.internalOS}
                                                                     </p>
                                                                 )}
                                                             </div>
@@ -2086,14 +2087,14 @@ export default function OrdersPage() {
         );
     };
 
-    // Componente de calendÃ¡rio
+    // Componente de calendário
     const CalendarView = () => {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         
         return (
             <div className="bg-white rounded-lg border">
-                {/* Header do calendÃ¡rio */}
+                {/* Header do calendário */}
                 <div className="flex items-center justify-between p-4 border-b">
                     <h2 className="text-lg font-semibold text-foreground">
                         {calendarDate.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })}
@@ -2108,7 +2109,7 @@ export default function OrdersPage() {
                                 setCalendarDate(newDate);
                             }}
                         >
-                            â†
+                            ←
                         </Button>
                         <Button
                             variant="outline"
@@ -2126,21 +2127,21 @@ export default function OrdersPage() {
                                 setCalendarDate(newDate);
                             }}
                         >
-                            â†’
+                            →
                         </Button>
                     </div>
                 </div>
 
                 {/* Dias da semana */}
                 <div className="grid grid-cols-7 border-b">
-                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'SÃ¡b'].map(day => (
+                    {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
                         <div key={day} className="p-2 text-center text-sm font-medium text-gray-700 border-r last:border-r-0">
                             {day}
                         </div>
                     ))}
                 </div>
 
-                {/* Grid do calendÃ¡rio */}
+                {/* Grid do calendário */}
                 <div className="grid grid-cols-7">
                     {calendarDays.map((day, index) => {
                         const dateKey = format(day, 'yyyy-MM-dd');
@@ -2221,7 +2222,7 @@ export default function OrdersPage() {
         if (!orderToDelete) return;
         try {
             await deleteDoc(doc(db, "companies", "mecald", "orders", orderToDelete.id));
-            toast({ title: "Pedido excluÃ­do!", description: "O pedido foi removido do sistema." });
+            toast({ title: "Pedido excluído!", description: "O pedido foi removido do sistema." });
             setOrderToDelete(null);
             setIsDeleteDialogOpen(false);
             setIsSheetOpen(false);
@@ -2231,12 +2232,12 @@ export default function OrdersPage() {
             toast({
                 variant: "destructive",
                 title: "Erro ao excluir pedido",
-                description: "NÃ£o foi possÃ­vel remover o pedido. Tente novamente.",
+                description: "Não foi possível remover o pedido. Tente novamente.",
             });
         }
     };
 
-    // FUNÃ‡ÃƒO PARA DELETAR UM ITEM
+    // FUNÇÃO PARA DELETAR UM ITEM
     const handleDeleteItem = (index: number) => {
       const currentItems = form.getValues("items");
       const itemToRemove = currentItems[index];
@@ -2245,7 +2246,7 @@ export default function OrdersPage() {
       setIsItemDeleteDialogOpen(true);
     };
 
-    // FUNÃ‡ÃƒO PARA CONFIRMAR A EXCLUSÃƒO
+    // FUNÇÃO PARA CONFIRMAR A EXCLUSÃO
     const handleConfirmDeleteItem = () => {
       if (!itemToDelete) return;
       
@@ -2264,13 +2265,13 @@ export default function OrdersPage() {
       });
     };
 
-    // FunÃ§Ã£o para adicionar novo item
+    // Função para adicionar novo item
     const handleAddNewItem = () => {
       if (!newItemForm.description.trim()) {
         toast({
           variant: "destructive",
           title: "Erro",
-          description: "A descriÃ§Ã£o do item Ã© obrigatÃ³ria.",
+          description: "A descrição do item é obrigatória.",
         });
         return;
       }
@@ -2292,7 +2293,7 @@ export default function OrdersPage() {
 
       form.setValue("items", [...currentItems, newItem]);
       
-      // Limpar formulÃ¡rio
+      // Limpar formulário
       setNewItemForm({
         description: '',
         itemNumber: '',
@@ -2308,7 +2309,7 @@ export default function OrdersPage() {
       });
     };
 
-    // FunÃ§Ã£o para cancelar adiÃ§Ã£o de item
+    // Função para cancelar adição de item
     const handleCancelAddItem = () => {
       setNewItemForm({
         description: '',
@@ -2321,7 +2322,7 @@ export default function OrdersPage() {
     };
 
     // Cronograma bidirecional: converte o intervalo manual na mesma unidade usada pelo
-    // cronograma: contagem inclusiva de dias Ãºteis ou de dias corridos.
+    // cronograma: contagem inclusiva de dias úteis ou de dias corridos.
     const calculateDurationFromDates = (
       startDate: Date,
       endDate: Date,
@@ -2347,10 +2348,10 @@ export default function OrdersPage() {
       
       if (field === 'workSchedule') {
         updatedStage[field] = value;
-        // Automaticamente define useBusinessDays baseado no horÃ¡rio
+        // Automaticamente define useBusinessDays baseado no horário
         updatedStage.useBusinessDays = value === 'normal';
       } else if (field === 'startDate' || field === 'completedDate') {
-        // CÃ³digo existente para datas
+        // Código existente para datas
         if (value === null || value === '' || value === undefined) {
           updatedStage[field] = null;
         } else {
@@ -2364,7 +2365,7 @@ export default function OrdersPage() {
       } else if (field === 'durationDays') {
         const numValue = value === '' ? 0 : parseFloat(value);
         updatedStage[field] = isNaN(numValue) ? 0 : Math.max(0.125, numValue);
-      } else if (field === 'status' && value === 'ConcluÃ­do') {
+      } else if (field === 'status' && value === 'Concluído') {
         updatedStage[field] = value;
         if (!updatedStage.completedDate) {
           updatedStage.completedDate = new Date();
@@ -2375,7 +2376,7 @@ export default function OrdersPage() {
       
       newPlan[stageIndex] = updatedStage;
 
-      // CÃ¡lculo inverso: ao informar o fim manualmente, atualizar a duraÃ§Ã£o.
+      // Cálculo inverso: ao informar o fim manualmente, atualizar a duração.
       if (field === 'completedDate' && updatedStage.startDate && updatedStage.completedDate) {
         const calculatedDuration = calculateDurationFromDates(
           updatedStage.startDate,
@@ -2388,8 +2389,8 @@ export default function OrdersPage() {
           updatedStage.durationDays = 1;
           toast({
             variant: "destructive",
-            title: "Data final invÃ¡lida",
-            description: "A data final nÃ£o pode ser anterior Ã  data inicial.",
+            title: "Data final inválida",
+            description: "A data final não pode ser anterior à data inicial.",
           });
         } else {
           updatedStage.durationDays = calculatedDuration;
@@ -2399,7 +2400,7 @@ export default function OrdersPage() {
         preserveManualEndDate = true;
       }
       
-      // Manter lÃ³gica sequencial existente
+      // Manter lógica sequencial existente
       if (field === 'startDate' || field === 'durationDays' || field === 'workSchedule') {
         recalculateSequentialTasks(newPlan, stageIndex);
       } else if (field === 'completedDate' && preserveManualEndDate) {
@@ -2410,15 +2411,15 @@ export default function OrdersPage() {
       setEditedPlan(newPlan);
     };
 
-    // NOVA FUNÃ‡ÃƒO SIMPLES PARA RECÃLCULO SEQUENCIAL
+    // NOVA FUNÇÃO SIMPLES PARA RECÁLCULO SEQUENCIAL
     const recalculateSequentialTasks = (
       plan: ProductionStage[],
       fromIndex: number,
       preserveCurrentEndDate: boolean = false
     ) => {
-      console.log('ðŸ”„ Recalculando tarefas sequenciais a partir do Ã­ndice:', fromIndex);
+      console.log('🔄 Recalculando tarefas sequenciais a partir do índice:', fromIndex);
       
-      // Primeiro, calcular a data de conclusÃ£o da tarefa atual
+      // Primeiro, calcular a data de conclusão da tarefa atual
       const currentStage = plan[fromIndex];
       if (!preserveCurrentEndDate && currentStage.startDate && currentStage.durationDays) {
         const duration = Math.max(0.125, Number(currentStage.durationDays));
@@ -2430,7 +2431,7 @@ export default function OrdersPage() {
         } else {
           // Tarefas de mais de 1 dia
           if (useBusinessDays) {
-            // Dias Ãºteis: adicionar dias Ãºteis
+            // Dias úteis: adicionar dias úteis
             currentStage.completedDate = addBusinessDaysSimple(currentStage.startDate, Math.ceil(duration) - 1);
           } else {
             // Dias corridos: adicionar dias normais
@@ -2446,15 +2447,15 @@ export default function OrdersPage() {
         const currentStage = plan[i];
         
         if (previousStage.completedDate) {
-          // CORREÃ‡ÃƒO PRINCIPAL: A prÃ³xima tarefa SEMPRE inicia no mesmo dia que a anterior termina
+          // CORREÇÃO PRINCIPAL: A próxima tarefa SEMPRE inicia no mesmo dia que a anterior termina
           currentStage.startDate = new Date(previousStage.completedDate);
           
-          // Calcular data de conclusÃ£o
+          // Calcular data de conclusão
           const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
           const useBusinessDays = currentStage.useBusinessDays !== false;
 
-          // Uma tarefa em horÃ¡rio normal nunca pode comeÃ§ar em fim de semana
-          // ou feriado, inclusive apÃ³s um tÃ©rmino digitado manualmente.
+          // Uma tarefa em horário normal nunca pode começar em fim de semana
+          // ou feriado, inclusive após um término digitado manualmente.
           if (useBusinessDays && !isBusinessDay(currentStage.startDate)) {
             currentStage.startDate = getNextBusinessDay(currentStage.startDate);
           }
@@ -2473,22 +2474,22 @@ export default function OrdersPage() {
             }
           }
           
-          console.log(`âœ… Etapa ${i + 1}: ${currentStage.stageName} | InÃ­cio: ${currentStage.startDate.toLocaleDateString()} | Fim: ${currentStage.completedDate.toLocaleDateString()}`);
+          console.log(`✅ Etapa ${i + 1}: ${currentStage.stageName} | Início: ${currentStage.startDate.toLocaleDateString()} | Fim: ${currentStage.completedDate.toLocaleDateString()}`);
         } else {
-          // Se a etapa anterior nÃ£o tem data de conclusÃ£o, limpar as datas desta etapa
+          // Se a etapa anterior não tem data de conclusão, limpar as datas desta etapa
           currentStage.startDate = null;
           currentStage.completedDate = null;
         }
       }
       
-      // DEBUG: Mostrar anÃ¡lise detalhada do acÃºmulo
+      // DEBUG: Mostrar análise detalhada do acúmulo
       if (fromIndex === 0) {
-        console.log('\nðŸ“Š EXECUTANDO DEBUG DETALHADO DO CRONOGRAMA:');
+        console.log('\n📊 EXECUTANDO DEBUG DETALHADO DO CRONOGRAMA:');
         debugTaskAccumulation(plan);
       }
     };
 
-    // FUNÃ‡ÃƒO AUXILIAR SIMPLES PARA ADICIONAR DIAS ÃšTEIS
+    // FUNÇÃO AUXILIAR SIMPLES PARA ADICIONAR DIAS ÚTEIS
     const addBusinessDaysSimple = (startDate: Date, daysToAdd: number): Date => {
       if (daysToAdd === 0) return new Date(startDate);
       
@@ -2505,20 +2506,20 @@ export default function OrdersPage() {
       return currentDate;
     };
 
-    // VERSÃƒO SIMPLIFICADA - Recalcular a partir de uma etapa especÃ­fica
+    // VERSÃO SIMPLIFICADA - Recalcular a partir de uma etapa específica
     const recalculateFromStage = (plan: ProductionStage[], fromIndex: number) => {
       recalculateSequentialTasks(plan, fromIndex);
     };
 
-    // VERSÃƒO SIMPLIFICADA - Recalcular cronograma completo
+    // VERSÃO SIMPLIFICADA - Recalcular cronograma completo
     const recalculateFromFirstStage = (plan: ProductionStage[]) => {
-      // SÃ³ recalcular se a primeira etapa tem data de inÃ­cio
+      // Só recalcular se a primeira etapa tem data de início
       if (plan[0] && plan[0].startDate) {
         recalculateSequentialTasks(plan, 0);
       }
     };
 
-    // FUNÃ‡ÃƒO AUXILIAR PARA FORMATAÃ‡ÃƒO DE DATAS
+    // FUNÇÃO AUXILIAR PARA FORMATAÇÃO DE DATAS
     const formatDate = (date: Date | null): string => {
       if (!date) return 'N/A';
       return date.toLocaleDateString('pt-BR', { 
@@ -2529,13 +2530,13 @@ export default function OrdersPage() {
       });
     };
 
-    // FUNÃ‡ÃƒO PARA MARCAR DATA BOOK COMO ENVIADO
+    // FUNÇÃO PARA MARCAR DATA BOOK COMO ENVIADO
     const handleDataBookSent = async () => {
-        if (!selectedOrder || selectedOrder.status !== 'ConcluÃ­do') {
+        if (!selectedOrder || selectedOrder.status !== 'Concluído') {
             toast({
                 variant: "destructive",
                 title: "Erro",
-                description: "SÃ³ Ã© possÃ­vel marcar Data Book para pedidos concluÃ­dos.",
+                description: "Só é possível marcar Data Book para pedidos concluídos.",
             });
             return;
         }
@@ -2552,7 +2553,7 @@ export default function OrdersPage() {
 
             toast({
                 title: "Data Book marcado como enviado!",
-                description: "A informaÃ§Ã£o foi salva com sucesso.",
+                description: "A informação foi salva com sucesso.",
             });
 
             // Atualizar estado local
@@ -2570,12 +2571,12 @@ export default function OrdersPage() {
             toast({
                 variant: "destructive",
                 title: "Erro ao salvar",
-                description: "NÃ£o foi possÃ­vel marcar o Data Book como enviado.",
+                description: "Não foi possível marcar o Data Book como enviado.",
             });
         }
     };
 
-    // FUNÃ‡ÃƒO AUXILIAR PARA ADICIONAR APENAS DIAS ÃšTEIS
+    // FUNÇÃO AUXILIAR PARA ADICIONAR APENAS DIAS ÚTEIS
     const addBusinessDaysOnly = (startDate: Date, daysToAdd: number): Date => {
       if (daysToAdd === 0) return new Date(startDate);
       
@@ -2592,45 +2593,45 @@ export default function OrdersPage() {
       return currentDate;
     };
 
-    // FUNÃ‡ÃƒO DE DEBUG PARA MOSTRAR O CÃLCULO PASSO A PASSO
+    // FUNÇÃO DE DEBUG PARA MOSTRAR O CÁLCULO PASSO A PASSO
     const debugTaskAccumulation = (plan: ProductionStage[]) => {
-      console.group('ðŸ” DEBUG - Sistema de AcÃºmulo de Tarefas');
+      console.group('🔍 DEBUG - Sistema de Acúmulo de Tarefas');
       
       if (plan.length === 0) {
-        console.log('âŒ Nenhuma tarefa para processar');
+        console.log('❌ Nenhuma tarefa para processar');
         console.groupEnd();
         return;
       }
       
-      console.log('ðŸ“‹ Processando', plan.length, 'tarefas...');
+      console.log('📋 Processando', plan.length, 'tarefas...');
       
       // Primeira tarefa
       const firstStage = plan[0];
       if (!firstStage.startDate) {
-        console.log('âŒ Primeira tarefa sem data de inÃ­cio');
+        console.log('❌ Primeira tarefa sem data de início');
         console.groupEnd();
         return;
       }
       
-      console.log(`\n1ï¸âƒ£ TAREFA 1: ${firstStage.stageName}`);
-      console.log(`   InÃ­cio: ${formatDate(firstStage.startDate)}`);
-      console.log(`   DuraÃ§Ã£o: ${firstStage.durationDays} dias`);
+      console.log(`\n1️⃣ TAREFA 1: ${firstStage.stageName}`);
+      console.log(`   Início: ${formatDate(firstStage.startDate)}`);
+      console.log(`   Duração: ${firstStage.durationDays} dias`);
       console.log(`   Fim: ${formatDate(firstStage.completedDate)}`);
       
-      // VariÃ¡veis de controle
+      // Variáveis de controle
       let currentWorkingDate = new Date(firstStage.completedDate || firstStage.startDate);
       let dailyAccumulator = 0;
       
-      console.log(`   ðŸ“ Data de trabalho atual: ${formatDate(currentWorkingDate)}`);
-      console.log(`   ðŸ“Š Acumulador inicial: ${dailyAccumulator}`);
+      console.log(`   📍 Data de trabalho atual: ${formatDate(currentWorkingDate)}`);
+      console.log(`   📊 Acumulador inicial: ${dailyAccumulator}`);
       
       // Processar tarefas seguintes
       for (let i = 1; i < plan.length; i++) {
         const stage = plan[i];
         const duration = Number(stage.durationDays) || 0;
         
-        console.log(`\n${i + 1}ï¸âƒ£ TAREFA ${i + 1}: ${stage.stageName}`);
-        console.log(`   DuraÃ§Ã£o: ${duration} dias`);
+        console.log(`\n${i + 1}️⃣ TAREFA ${i + 1}: ${stage.stageName}`);
+        console.log(`   Duração: ${duration} dias`);
         console.log(`   Acumulador antes: ${dailyAccumulator}`);
         
         dailyAccumulator += duration;
@@ -2638,57 +2639,57 @@ export default function OrdersPage() {
         console.log(`   Inicia em: ${formatDate(currentWorkingDate)}`);
         
         if (dailyAccumulator <= 1) {
-          console.log(`   âœ… Acumulador â‰¤ 1 â†’ Termina no mesmo dia`);
+          console.log(`   ✅ Acumulador ≤ 1 → Termina no mesmo dia`);
           console.log(`   Fim: ${formatDate(currentWorkingDate)}`);
         } else {
           const daysNeeded = Math.ceil(dailyAccumulator) - 1;
           const newEndDate = addBusinessDaysOnly(currentWorkingDate, daysNeeded);
           
-          console.log(`   ðŸš€ Acumulador > 1 â†’ AvanÃ§a ${daysNeeded} dias Ãºteis`);
+          console.log(`   🚀 Acumulador > 1 → Avança ${daysNeeded} dias úteis`);
           console.log(`   Fim: ${formatDate(newEndDate)}`);
           
           currentWorkingDate = new Date(newEndDate);
           dailyAccumulator = dailyAccumulator - Math.ceil(dailyAccumulator);
           
-          console.log(`   ðŸ“ Nova data de trabalho: ${formatDate(currentWorkingDate)}`);
-          console.log(`   ðŸ“Š Acumulador resetado: ${dailyAccumulator}`);
+          console.log(`   📍 Nova data de trabalho: ${formatDate(currentWorkingDate)}`);
+          console.log(`   📊 Acumulador resetado: ${dailyAccumulator}`);
         }
       }
       
       console.groupEnd();
     };
 
-    // EXEMPLO DE USO DO DEBUG EM OUTRAS FUNÃ‡Ã•ES:
+    // EXEMPLO DE USO DO DEBUG EM OUTRAS FUNÇÕES:
     // 
     // Para usar no handleSaveProgress, adicione esta linha logo antes de salvar:
     // debugTaskAccumulation(editedPlan);
     //
-    // Para usar em qualquer lugar do cÃ³digo:
-    // console.log('ðŸ” ANÃLISE DO CRONOGRAMA:');
+    // Para usar em qualquer lugar do código:
+    // console.log('🔍 ANÁLISE DO CRONOGRAMA:');
     // debugTaskAccumulation(planArray);
     //
-    // Exemplos de saÃ­da do debug:
-    // ðŸ” DEBUG - Sistema de AcÃºmulo de Tarefas
-    // ðŸ“‹ Processando 4 tarefas...
-    // 1ï¸âƒ£ TAREFA 1: PreparaÃ§Ã£o
-    //    InÃ­cio: seg., 24/07/2024
-    //    DuraÃ§Ã£o: 1 dias
+    // Exemplos de saída do debug:
+    // 🔍 DEBUG - Sistema de Acúmulo de Tarefas
+    // 📋 Processando 4 tarefas...
+    // 1️⃣ TAREFA 1: Preparação
+    //    Início: seg., 24/07/2024
+    //    Duração: 1 dias
     //    Fim: seg., 24/07/2024
-    // 2ï¸âƒ£ TAREFA 2: Corte
-    //    DuraÃ§Ã£o: 0.5 dias
+    // 2️⃣ TAREFA 2: Corte
+    //    Duração: 0.5 dias
     //    Acumulador antes: 0
     //    Acumulador depois: 0.5
-    //    âœ… Acumulador â‰¤ 1 â†’ Termina no mesmo dia
+    //    ✅ Acumulador ≤ 1 → Termina no mesmo dia
 
     const dashboardStats = useMemo(() => {
         const totalOrders = orders.length;
         const totalWeight = orders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
         
-        const completedOrdersList = orders.filter(order => order.status === 'ConcluÃ­do');
+        const completedOrdersList = orders.filter(order => order.status === 'Concluído');
         const completedOrders = completedOrdersList.length;
         const completedWeight = completedOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
 
-        const inProgressOrdersList = orders.filter(order => ['Em ProduÃ§Ã£o', 'Aguardando ProduÃ§Ã£o'].includes(order.status));
+        const inProgressOrdersList = orders.filter(order => ['Em Produção', 'Aguardando Produção'].includes(order.status));
         const inProgressOrders = inProgressOrdersList.length;
         const inProgressWeight = inProgressOrdersList.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
 
@@ -2737,7 +2738,7 @@ export default function OrdersPage() {
         setPackingSlipQuantities(newQuantities);
     };
 
-    // FunÃ§Ã£o para gerar e salvar nÃºmero sequencial do romaneio
+    // Função para gerar e salvar número sequencial do romaneio
     const getNextPackingSlipNumber = async (): Promise<string> => {
         try {
             const counterRef = doc(db, "companies", "mecald", "settings", "counters");
@@ -2754,7 +2755,7 @@ export default function OrdersPage() {
                 packingSlipNumber: currentNumber,
                 lastPackingSlipDate: Timestamp.now()
             }).catch(async (error) => {
-                // Se o documento nÃ£o existe, criar
+                // Se o documento não existe, criar
                 if (error.code === 'not-found') {
                     await setDoc(counterRef, {
                         packingSlipNumber: currentNumber,
@@ -2763,10 +2764,10 @@ export default function OrdersPage() {
                 }
             });
             
-            // Formatar com zeros Ã  esquerda (ex: 000001)
+            // Formatar com zeros à esquerda (ex: 000001)
             return currentNumber.toString().padStart(6, '0');
         } catch (error) {
-            console.error("Erro ao gerar nÃºmero do romaneio:", error);
+            console.error("Erro ao gerar número do romaneio:", error);
             // Fallback: usar timestamp se houver erro
             return Date.now().toString().slice(-6);
         }
@@ -2782,7 +2783,7 @@ export default function OrdersPage() {
             const docSnap = await getDoc(companyRef);
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
             
-            // Gerar nÃºmero sequencial do romaneio
+            // Gerar número sequencial do romaneio
             const packingSlipNumber = await getNextPackingSlipNumber();
             
             // Filtrar itens selecionados e usar quantidades customizadas
@@ -2837,19 +2838,19 @@ export default function OrdersPage() {
             docPdf.text('ROMANEIO DE ENTREGA', pageWidth / 2, yPos, { align: 'center' });
             yPos += 10;
 
-            // NÃºmero do Romaneio centralizado e destacado
+            // Número do Romaneio centralizado e destacado
             docPdf.setFontSize(10).setFont('helvetica', 'bold');
             docPdf.setTextColor(37, 99, 235); // Cor azul
-            docPdf.text(`Romaneio NÂº ${packingSlipNumber}`, pageWidth / 2, yPos, { align: 'center' });
+            docPdf.text(`Romaneio Nº ${packingSlipNumber}`, pageWidth / 2, yPos, { align: 'center' });
             docPdf.setTextColor(0, 0, 0); // Voltar para preto
             yPos += 15;
 
-            // InformaÃ§Ãµes do pedido em grid
+            // Informações do pedido em grid
             docPdf.setFontSize(10).setFont('helvetica', 'normal');
 
-            // Linha 1: Pedido e Data de EmissÃ£o
+            // Linha 1: Pedido e Data de Emissão
             docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
-            docPdf.text(`Data EmissÃ£o: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
+            docPdf.text(`Data Emissão: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
             yPos += 6;
 
             // Linha 2: Cliente e OS
@@ -2888,7 +2889,7 @@ export default function OrdersPage() {
             
             autoTable(docPdf, {
                 startY: yPos,
-                head: [['NÂº Item', 'CÃ³d.', 'DescriÃ§Ã£o', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
+                head: [['Nº Item', 'Cód.', 'Descrição', 'Qtd.', 'Peso Unit. (kg)', 'Peso Total (kg)']],
                 body: tableBody,
                 styles: { fontSize: 8 },
                 headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255, halign: 'center' },
@@ -2926,10 +2927,10 @@ export default function OrdersPage() {
             
             toast({
                 title: "Romaneio gerado com sucesso!",
-                description: `Romaneio NÂº ${packingSlipNumber} foi criado e baixado.`,
+                description: `Romaneio Nº ${packingSlipNumber} foi criado e baixado.`,
             });
             
-            // Fechar o dialog apÃ³s gerar
+            // Fechar o dialog após gerar
             setIsPackingSlipDialogOpen(false);
             
         } catch (error) {
@@ -2937,7 +2938,7 @@ export default function OrdersPage() {
             toast({
                 variant: "destructive",
                 title: "Erro ao gerar romaneio",
-                description: "NÃ£o foi possÃ­vel gerar o arquivo PDF.",
+                description: "Não foi possível gerar o arquivo PDF.",
             });
         }
     };
@@ -2956,7 +2957,7 @@ export default function OrdersPage() {
             const pageWidth = docPdf.internal.pageSize.width;
             let yPos = 15;
 
-            // Header com logo e informaÃ§Ãµes da empresa
+            // Header com logo e informações da empresa
             if (companyData.logo?.preview) {
                 try {
                     docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
@@ -2965,7 +2966,7 @@ export default function OrdersPage() {
                 }
             }
 
-            // InformaÃ§Ãµes da empresa ao lado da logo
+            // Informações da empresa ao lado da logo
             let companyInfoX = 65;
             let companyInfoY = yPos + 5;
             docPdf.setFontSize(16).setFont('helvetica', 'bold');
@@ -2992,12 +2993,12 @@ export default function OrdersPage() {
 
             yPos = 45;
 
-            // TÃ­tulo do documento
+            // Título do documento
             docPdf.setFontSize(16).setFont('helvetica', 'bold');
-            docPdf.text('CRONOGRAMA DE PRODUÃ‡ÃƒO', pageWidth / 2, yPos, { align: 'center' });
+            docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
 
-            // InformaÃ§Ãµes do pedido em duas colunas
+            // Informações do pedido em duas colunas
             docPdf.setFontSize(10).setFont('helvetica', 'normal');
             
             // Coluna esquerda
@@ -3007,7 +3008,7 @@ export default function OrdersPage() {
             docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
             leftColumnY += 6;
             docPdf.setFont('helvetica', 'normal');
-            docPdf.text(`Pedido NÂº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
             leftColumnY += 5;
             docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
             leftColumnY += 5;
@@ -3018,10 +3019,10 @@ export default function OrdersPage() {
             
             // Coluna direita
             const rightColumnX = pageWidth / 2 + 10;
-            let rightColumnY = yPos + 6; // Alinha com o inÃ­cio dos dados
+            let rightColumnY = yPos + 6; // Alinha com o início dos dados
             docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
             rightColumnY += 5;
-            docPdf.text(`Data de EmissÃ£o: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
             rightColumnY += 5;
             if (selectedOrder.deliveryDate) {
                 docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
@@ -3034,7 +3035,7 @@ export default function OrdersPage() {
             // Progresso geral do pedido
             const orderProgress = calculateOrderProgress(selectedOrder);
             
-            // TÃ­tulo do progresso geral
+            // Título do progresso geral
             docPdf.setFontSize(10).setFont('helvetica', 'bold');
             docPdf.text('PROGRESSO GERAL DO PEDIDO:', 15, yPos);
             yPos += 8;
@@ -3075,7 +3076,7 @@ export default function OrdersPage() {
             const tableBody: any[][] = [];
             selectedOrder.items.forEach(item => {
                 if (item.productionPlan && item.productionPlan.length > 0) {
-                    // CabeÃ§alho do item com cÃ³digo, descriÃ§Ã£o e quantidade na mesma linha
+                    // Cabeçalho do item com código, descrição e quantidade na mesma linha
                     const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
                     tableBody.push([{ 
                         content: itemHeader, 
@@ -3102,7 +3103,7 @@ export default function OrdersPage() {
                     // Etapas do item
                     item.productionPlan.forEach(stage => {
                         tableBody.push([
-                            `  â€¢ ${stage.stageName}`,
+                            `  • ${stage.stageName}`,
                             stage.startDate ? format(new Date(stage.startDate), 'dd/MM/yy') : 'N/A',
                             stage.completedDate ? format(new Date(stage.completedDate), 'dd/MM/yy') : 'N/A',
                             `${stage.durationDays || 0} dia(s)`,
@@ -3117,7 +3118,7 @@ export default function OrdersPage() {
             
             autoTable(docPdf, {
                 startY: yPos,
-                head: [['Etapa', 'InÃ­cio Previsto', 'Fim Previsto', 'DuraÃ§Ã£o', 'Status']],
+                head: [['Etapa', 'Início Previsto', 'Fim Previsto', 'Duração', 'Status']],
                 body: tableBody,
                 styles: { 
                     fontSize: 8,
@@ -3131,9 +3132,9 @@ export default function OrdersPage() {
                 },
                 columnStyles: {
                     0: { cellWidth: 60 }, // Etapa
-                    1: { cellWidth: 25, halign: 'center' }, // InÃ­cio
+                    1: { cellWidth: 25, halign: 'center' }, // Início
                     2: { cellWidth: 25, halign: 'center' }, // Fim
-                    3: { cellWidth: 20, halign: 'center' }, // DuraÃ§Ã£o
+                    3: { cellWidth: 20, halign: 'center' }, // Duração
                     4: { cellWidth: 25, halign: 'center' }, // Status
                 },
                 didParseCell: (data) => {
@@ -3142,7 +3143,7 @@ export default function OrdersPage() {
                     }
                 },
                 didDrawCell: (data) => {
-                    // Verifica se Ã© uma linha de progresso do item
+                    // Verifica se é uma linha de progresso do item
                     if (data.cell.raw && typeof data.cell.raw === 'string' && data.cell.raw.startsWith('Progresso:')) {
                         const progressText = data.cell.raw as string;
                         const progressMatch = progressText.match(/(\d+\.?\d*)%/);
@@ -3150,8 +3151,8 @@ export default function OrdersPage() {
                         if (progressMatch) {
                             const progress = parseFloat(progressMatch[1]);
                             
-                            // PosiÃ§Ã£o e dimensÃµes da barra (ajustada para melhor posicionamento)
-                            const barX = data.cell.x + 80; // PosiÃ§Ã£o apÃ³s o texto "Progresso: XX.X%"
+                            // Posição e dimensões da barra (ajustada para melhor posicionamento)
+                            const barX = data.cell.x + 80; // Posição após o texto "Progresso: XX.X%"
                             const barY = data.cell.y + 3;
                             const barWidth = 70;
                             const barHeight = 5;
@@ -3162,11 +3163,11 @@ export default function OrdersPage() {
                             
                             // Barra de progresso colorida baseada na porcentagem
                             const fillWidth = (progress / 100) * barWidth;
-                            if (fillWidth > 0) { // SÃ³ desenha se houver progresso
+                            if (fillWidth > 0) { // Só desenha se houver progresso
                                 if (progress < 30) {
                                     docPdf.setFillColor(239, 68, 68); // Vermelho para progresso baixo
                                 } else if (progress < 70) {
-                                    docPdf.setFillColor(245, 158, 11); // Amarelo para progresso mÃ©dio
+                                    docPdf.setFillColor(245, 158, 11); // Amarelo para progresso médio
                                 } else {
                                     docPdf.setFillColor(34, 197, 94); // Verde para progresso alto
                                 }
@@ -3183,7 +3184,7 @@ export default function OrdersPage() {
                 margin: { left: 15, right: 15 }
             });
 
-            // RodapÃ© com informaÃ§Ãµes adicionais
+            // Rodapé com informações adicionais
             const finalY = (docPdf as any).lastAutoTable.finalY;
             const pageHeight = docPdf.internal.pageSize.height;
             
@@ -3191,7 +3192,7 @@ export default function OrdersPage() {
                 yPos = finalY + 15;
                 docPdf.setFontSize(8).setFont('helvetica', 'italic');
                 docPdf.text(
-                    `Documento gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm")}`,
+                    `Documento gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
                     pageWidth / 2,
                     yPos,
                     { align: 'center' }
@@ -3205,7 +3206,7 @@ export default function OrdersPage() {
             toast({
                 variant: "destructive",
                 title: "Erro ao gerar cronograma",
-                description: "NÃ£o foi possÃ­vel gerar o arquivo PDF.",
+                description: "Não foi possível gerar o arquivo PDF.",
             });
         }
     };
@@ -3264,7 +3265,7 @@ export default function OrdersPage() {
 
             setEditedPlan(finalPlan);
         } catch(error) {
-            console.error("Erro ao preparar plano de produÃ§Ã£o:", error);
+            console.error("Erro ao preparar plano de produção:", error);
             setEditedPlan([]);
         } finally {
             setIsFetchingPlan(false);
@@ -3272,14 +3273,14 @@ export default function OrdersPage() {
     };
 
     // ==========================================
-    // CORREÃ‡ÃƒO DEFINITIVA DO SALVAMENTO NO FIRESTORE
+    // CORREÇÃO DEFINITIVA DO SALVAMENTO NO FIRESTORE
     // ==========================================
 
-    // 1. FUNÃ‡ÃƒO PARA VERIFICAR E CORRIGIR ESTRUTURA DOS DADOS
+    // 1. FUNÇÃO PARA VERIFICAR E CORRIGIR ESTRUTURA DOS DADOS
     const validateAndCleanItemData = (item: any) => {
-        console.log('ðŸ§¹ [validateAndCleanItemData] Limpando item:', item.id);
+        console.log('🧹 [validateAndCleanItemData] Limpando item:', item.id);
         
-        // Remove campos undefined, null vazios e problemÃ¡ticos
+        // Remove campos undefined, null vazios e problemáticos
         const cleanItem = {
             id: item.id || `item_${Date.now()}`,
             description: item.description || '',
@@ -3311,7 +3312,7 @@ export default function OrdersPage() {
             cleanItem.productionPlan = [];
         }
         
-        console.log('ðŸ§¹ [validateAndCleanItemData] Item limpo:', {
+        console.log('🧹 [validateAndCleanItemData] Item limpo:', {
             id: cleanItem.id,
             planStages: cleanItem.productionPlan.length,
             planSummary: cleanItem.productionPlan.map(s => ({
@@ -3328,19 +3329,19 @@ export default function OrdersPage() {
 
 
 
-    // 2. FUNÃ‡ÃƒO CORRIGIDA DE SALVAMENTO QUE PRESERVA TODOS OS DADOS
+    // 2. FUNÇÃO CORRIGIDA DE SALVAMENTO QUE PRESERVA TODOS OS DADOS
     const handleSaveProgress = async () => {
         if (!selectedOrder || !itemToTrack) {
-            console.error('âŒ [handleSaveProgress] Dados obrigatÃ³rios ausentes');
+            console.error('❌ [handleSaveProgress] Dados obrigatórios ausentes');
             return;
         }
 
-        console.log('ðŸ’¾ [handleSaveProgress] =================================');
-        console.log('ðŸ’¾ [handleSaveProgress] INICIANDO SALVAMENTO COMPLETO');
-        console.log('ðŸ’¾ [handleSaveProgress] =================================');
-        console.log('ðŸ’¾ [handleSaveProgress] Order ID:', selectedOrder.id);
-        console.log('ðŸ’¾ [handleSaveProgress] Item ID:', itemToTrack.id);
-        console.log('ðŸ’¾ [handleSaveProgress] Plano editado:', editedPlan.map(s => ({
+        console.log('💾 [handleSaveProgress] =================================');
+        console.log('💾 [handleSaveProgress] INICIANDO SALVAMENTO COMPLETO');
+        console.log('💾 [handleSaveProgress] =================================');
+        console.log('💾 [handleSaveProgress] Order ID:', selectedOrder.id);
+        console.log('💾 [handleSaveProgress] Item ID:', itemToTrack.id);
+        console.log('💾 [handleSaveProgress] Plano editado:', editedPlan.map(s => ({
             name: s.stageName,
             status: s.status,
             start: s.startDate ? s.startDate.toISOString() : null,
@@ -3357,38 +3358,38 @@ export default function OrdersPage() {
             const currentOrderSnap = await getDoc(orderRef);
             
             if (!currentOrderSnap.exists()) {
-                throw new Error("Pedido nÃ£o encontrado no banco de dados.");
+                throw new Error("Pedido não encontrado no banco de dados.");
             }
             
             const currentOrderData = currentOrderSnap.data();
-            console.log('ðŸ’¾ [handleSaveProgress] Dados atuais carregados, itens:', currentOrderData.items?.length || 0);
+            console.log('💾 [handleSaveProgress] Dados atuais carregados, itens:', currentOrderData.items?.length || 0);
 
-            // 2. Converter plano editado para formato Firestore com validaÃ§Ã£o
+            // 2. Converter plano editado para formato Firestore com validação
             const convertedProductionPlan = editedPlan
                 .filter(stage => stage.stageName && stage.stageName.trim()) // Remove etapas vazias
                 .map((stage, index) => {
-                    console.log(`ðŸ’¾ [handleSaveProgress] Convertendo etapa ${index + 1}: ${stage.stageName}`);
+                    console.log(`💾 [handleSaveProgress] Convertendo etapa ${index + 1}: ${stage.stageName}`);
                     
                     let startTimestamp = null;
                     let endTimestamp = null;
                     
-                    // ConversÃ£o de data de inÃ­cio
+                    // Conversão de data de início
                     if (stage.startDate) {
                         if (stage.startDate instanceof Date && !isNaN(stage.startDate.getTime())) {
                             startTimestamp = Timestamp.fromDate(stage.startDate);
-                            console.log(`ðŸ’¾ [handleSaveProgress] âœ“ Data inÃ­cio convertida: ${stage.startDate.toISOString()}`);
+                            console.log(`💾 [handleSaveProgress] ✓ Data início convertida: ${stage.startDate.toISOString()}`);
                         } else {
-                            console.warn(`ðŸ’¾ [handleSaveProgress] âš ï¸ Data inÃ­cio invÃ¡lida ignorada:`, stage.startDate);
+                            console.warn(`💾 [handleSaveProgress] ⚠️ Data início inválida ignorada:`, stage.startDate);
                         }
                     }
                     
-                    // ConversÃ£o de data de conclusÃ£o
+                    // Conversão de data de conclusão
                     if (stage.completedDate) {
                         if (stage.completedDate instanceof Date && !isNaN(stage.completedDate.getTime())) {
                             endTimestamp = Timestamp.fromDate(stage.completedDate);
-                            console.log(`ðŸ’¾ [handleSaveProgress] âœ“ Data fim convertida: ${stage.completedDate.toISOString()}`);
+                            console.log(`💾 [handleSaveProgress] ✓ Data fim convertida: ${stage.completedDate.toISOString()}`);
                         } else {
-                            console.warn(`ðŸ’¾ [handleSaveProgress] âš ï¸ Data fim invÃ¡lida ignorada:`, stage.completedDate);
+                            console.warn(`💾 [handleSaveProgress] ⚠️ Data fim inválida ignorada:`, stage.completedDate);
                         }
                     }
                     
@@ -3404,7 +3405,7 @@ export default function OrdersPage() {
                         supervisor: stage.supervisor || null,
                     };
                     
-                    console.log(`ðŸ’¾ [handleSaveProgress] âœ“ Etapa ${index + 1} convertida:`, {
+                    console.log(`💾 [handleSaveProgress] ✓ Etapa ${index + 1} convertida:`, {
                         name: convertedStage.stageName,
                         status: convertedStage.status,
                         duration: convertedStage.durationDays,
@@ -3418,12 +3419,12 @@ export default function OrdersPage() {
                     return convertedStage;
                 });
 
-            console.log('ðŸ’¾ [handleSaveProgress] Plano convertido completo:', convertedProductionPlan.length, 'etapas');
+            console.log('💾 [handleSaveProgress] Plano convertido completo:', convertedProductionPlan.length, 'etapas');
 
-            // 3. Atualizar APENAS o item especÃ­fico preservando TODOS os outros dados
+            // 3. Atualizar APENAS o item específico preservando TODOS os outros dados
             const updatedItems = currentOrderData.items.map((item: any) => {
                 if (item.id === itemToTrack.id) {
-                    console.log('ðŸ’¾ [handleSaveProgress] âœ“ Atualizando item alvo:', item.id);
+                    console.log('💾 [handleSaveProgress] ✓ Atualizando item alvo:', item.id);
                     
                     // Limpar e validar dados do item
                     const cleanedItem = validateAndCleanItemData(item);
@@ -3432,7 +3433,7 @@ export default function OrdersPage() {
                     cleanedItem.productionPlan = convertedProductionPlan;
                     cleanedItem.lastProgressUpdate = Timestamp.now();
                     
-                    console.log('ðŸ’¾ [handleSaveProgress] âœ“ Item atualizado com novo plano');
+                    console.log('💾 [handleSaveProgress] ✓ Item atualizado com novo plano');
                     return cleanedItem;
                 } else {
                     // Para outros itens, limpar mas manter dados existentes
@@ -3457,7 +3458,7 @@ export default function OrdersPage() {
                 }
             });
 
-            console.log('ðŸ’¾ [handleSaveProgress] Total de itens processados:', updatedItems.length);
+            console.log('💾 [handleSaveProgress] Total de itens processados:', updatedItems.length);
 
             // 4. PREPARAR DADOS PARA SALVAMENTO FINAL
             const updateData = {
@@ -3473,21 +3474,21 @@ export default function OrdersPage() {
                 ...(currentOrderData.documents && { documents: currentOrderData.documents }),
             };
 
-            console.log('ðŸ’¾ [handleSaveProgress] Dados finais preparados para salvamento');
+            console.log('💾 [handleSaveProgress] Dados finais preparados para salvamento');
 
             // 5. SALVAR NO FIRESTORE COM MERGE
             await updateDoc(orderRef, updateData);
-            console.log('ðŸ’¾ [handleSaveProgress] âœ… DADOS SALVOS NO FIRESTORE COM SUCESSO!');
+            console.log('💾 [handleSaveProgress] ✅ DADOS SALVOS NO FIRESTORE COM SUCESSO!');
 
-            // 6. VERIFICAÃ‡ÃƒO IMEDIATA DOS DADOS SALVOS
-            console.log('ðŸ” [handleSaveProgress] Verificando dados salvos...');
+            // 6. VERIFICAÇÃO IMEDIATA DOS DADOS SALVOS
+            console.log('🔍 [handleSaveProgress] Verificando dados salvos...');
             const verificationSnap = await getDoc(orderRef);
             if (verificationSnap.exists()) {
                 const savedData = verificationSnap.data();
                 const savedItem = savedData.items.find((item: any) => item.id === itemToTrack.id);
                 
                 if (savedItem && savedItem.productionPlan) {
-                    console.log('âœ… [handleSaveProgress] VERIFICAÃ‡ÃƒO: Dados salvos corretamente:', {
+                    console.log('✅ [handleSaveProgress] VERIFICAÇÃO: Dados salvos corretamente:', {
                         itemId: savedItem.id,
                         planStages: savedItem.productionPlan.length,
                         stages: savedItem.productionPlan.map((s: any) => ({
@@ -3498,35 +3499,35 @@ export default function OrdersPage() {
                         }))
                     });
                 } else {
-                    console.error('âŒ [handleSaveProgress] VERIFICAÃ‡ÃƒO FALHOU: Item nÃ£o encontrado ou sem plano');
+                    console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Item não encontrado ou sem plano');
                 }
             } else {
-                console.error('âŒ [handleSaveProgress] VERIFICAÃ‡ÃƒO FALHOU: Documento nÃ£o existe');
+                console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Documento não existe');
             }
 
             // 7. Verificar status geral
             const allItemsCompleted = updatedItems.every((item: any) => {
                 if (item.productionPlan && item.productionPlan.length > 0) {
-                    return item.productionPlan.every((p: any) => p.status === 'ConcluÃ­do');
+                    return item.productionPlan.every((p: any) => p.status === 'Concluído');
                 }
                 return true;
             });
 
-            if (allItemsCompleted && currentOrderData.status !== 'ConcluÃ­do') {
+            if (allItemsCompleted && currentOrderData.status !== 'Concluído') {
                 await updateDoc(orderRef, { 
-                    status: "ConcluÃ­do",
+                    status: "Concluído",
                     completedAt: Timestamp.now(),
                     lastUpdate: Timestamp.now()
                 });
                 
                 toast({ 
-                    title: "ðŸŽ‰ Pedido ConcluÃ­do!", 
+                    title: "🎉 Pedido Concluído!", 
                     description: "Todos os itens foram finalizados. Status atualizado automaticamente." 
                 });
             } else {
                 toast({ 
-                    title: "âœ… Progresso Salvo!", 
-                    description: "As etapas foram salvas e estarÃ£o disponÃ­veis em todos os dispositivos." 
+                    title: "✅ Progresso Salvo!", 
+                    description: "As etapas foram salvas e estarão disponíveis em todos os dispositivos." 
                 });
             }
 
@@ -3535,7 +3536,7 @@ export default function OrdersPage() {
             setItemToTrack(null);
 
             // 9. RECARREGAR DADOS LOCAIS
-            console.log('ðŸ”„ [handleSaveProgress] Recarregando dados locais...');
+            console.log('🔄 [handleSaveProgress] Recarregando dados locais...');
             
             // Aguardar um pouco para garantir que o Firestore processou
             await new Promise(resolve => setTimeout(resolve, 500));
@@ -3549,28 +3550,28 @@ export default function OrdersPage() {
                     ...updatedOrderInList,
                     status: updatedOrderInList.status as any,
                 });
-                console.log('âœ… [handleSaveProgress] Estado local atualizado com sucesso');
+                console.log('✅ [handleSaveProgress] Estado local atualizado com sucesso');
             } else {
-                console.warn('âš ï¸ [handleSaveProgress] Pedido nÃ£o encontrado apÃ³s recarregamento');
+                console.warn('⚠️ [handleSaveProgress] Pedido não encontrado após recarregamento');
             }
 
-            console.log('ðŸ’¾ [handleSaveProgress] =================================');
-            console.log('ðŸ’¾ [handleSaveProgress] SALVAMENTO CONCLUÃDO COM SUCESSO');
-            console.log('ðŸ’¾ [handleSaveProgress] =================================');
+            console.log('💾 [handleSaveProgress] =================================');
+            console.log('💾 [handleSaveProgress] SALVAMENTO CONCLUÍDO COM SUCESSO');
+            console.log('💾 [handleSaveProgress] =================================');
 
         } catch (error) {
-            console.error("âŒ [handleSaveProgress] ERRO CRÃTICO:", error);
-            console.error("âŒ [handleSaveProgress] Stack:", error.stack);
+            console.error("❌ [handleSaveProgress] ERRO CRÍTICO:", error);
+            console.error("❌ [handleSaveProgress] Stack:", error.stack);
             
             toast({ 
                 variant: "destructive", 
-                title: "Erro CrÃ­tico no Salvamento", 
+                title: "Erro Crítico no Salvamento", 
                 description: `Falha ao salvar: ${error instanceof Error ? error.message : 'Erro desconhecido'}. Tente novamente.` 
             });
         }
     };
 
-    // FunÃ§Ãµes de auto-preenchimento inteligente
+    // Funções de auto-preenchimento inteligente
     const autoScheduleFromToday = () => {
         const today = new Date();
         const updatedPlan = editedPlan.map((stage, index) => {
@@ -3585,7 +3586,7 @@ export default function OrdersPage() {
         });
         setEditedPlan(updatedPlan);
         toast({
-            title: "Agendamento automÃ¡tico aplicado",
+            title: "Agendamento automático aplicado",
             description: "Primeira etapa agendada para hoje e marcada como 'Em Andamento'"
         });
     };
@@ -3593,10 +3594,10 @@ export default function OrdersPage() {
     const markPreviousAsCompleted = () => {
         const updatedPlan = editedPlan.map((stage, index) => {
             const currentIndex = editedPlan.findIndex(s => s.status === 'Em Andamento');
-            if (index < currentIndex && stage.status !== 'ConcluÃ­do') {
+            if (index < currentIndex && stage.status !== 'Concluído') {
                 return {
                     ...stage,
-                    status: 'ConcluÃ­do',
+                    status: 'Concluído',
                     completedDate: stage.startDate || new Date()
                 };
             }
@@ -3604,20 +3605,20 @@ export default function OrdersPage() {
         });
         setEditedPlan(updatedPlan);
         toast({
-            title: "Etapas anteriores marcadas como concluÃ­das",
-            description: "Todas as etapas anteriores Ã  atual foram finalizadas"
+            title: "Etapas anteriores marcadas como concluídas",
+            description: "Todas as etapas anteriores à atual foram finalizadas"
         });
     };
 
     const applyStandardDurations = () => {
         const standardDurations = {
-            'PreparaÃ§Ã£o': 1,
+            'Preparação': 1,
             'Corte': 2,
             'Soldagem': 3,
             'Usinagem': 2,
             'Montagem': 2,
             'Pintura': 1,
-            'InspeÃ§Ã£o': 0.5,
+            'Inspeção': 0.5,
             'Embalagem': 0.5
         };
 
@@ -3630,15 +3631,15 @@ export default function OrdersPage() {
         });
         setEditedPlan(updatedPlan);
         toast({
-            title: "DuraÃ§Ãµes padrÃ£o aplicadas",
-            description: "DuraÃ§Ãµes padrÃ£o foram aplicadas a todas as etapas"
+            title: "Durações padrão aplicadas",
+            description: "Durações padrão foram aplicadas a todas as etapas"
         });
     };
 
-    // FunÃ§Ã£o para Ã­cones de status
+    // Função para ícones de status
     const getStatusIcon = (status: string) => {
         switch(status) {
-            case 'ConcluÃ­do': 
+            case 'Concluído': 
                 return <CheckCircle className="h-4 w-4 text-green-500" />;
             case 'Em Andamento': 
                 return <PlayCircle className="h-4 w-4 text-blue-500" />;
@@ -3661,7 +3662,7 @@ export default function OrdersPage() {
 
     const handlePasteProgress = async (targetItem: OrderItem) => {
         if (!progressClipboard || !selectedOrder) {
-            toast({ variant: "destructive", title: "Erro", description: "Nenhum progresso na Ã¡rea de transferÃªncia." });
+            toast({ variant: "destructive", title: "Erro", description: "Nenhum progresso na área de transferência." });
             return;
         }
 
@@ -3713,7 +3714,7 @@ export default function OrdersPage() {
 
         } catch (error) {
             console.error("Error pasting progress:", error);
-            toast({ variant: "destructive", title: "Erro ao colar", description: "NÃ£o foi possÃ­vel colar o progresso." });
+            toast({ variant: "destructive", title: "Erro ao colar", description: "Não foi possível colar o progresso." });
         }
     };
 
@@ -3726,8 +3727,8 @@ export default function OrdersPage() {
         if (!trimmedName) {
         toast({
             variant: "destructive",
-            title: "Nome da etapa invÃ¡lido",
-            description: "O nome da etapa nÃ£o pode estar em branco.",
+            title: "Nome da etapa inválido",
+            description: "O nome da etapa não pode estar em branco.",
         });
         return;
         }
@@ -3737,7 +3738,7 @@ export default function OrdersPage() {
             startDate: null,
             completedDate: null,
             durationDays: 0,
-            useBusinessDays: true, // Default para dias Ãºteis
+            useBusinessDays: true, // Default para dias úteis
             assignedResource: undefined,
             supervisor: undefined,
         };
@@ -3824,7 +3825,7 @@ export default function OrdersPage() {
             const pageWidth = docPdf.internal.pageSize.width;
             let yPos = 15;
 
-            // Header com logo e informaÃ§Ãµes da empresa
+            // Header com logo e informações da empresa
             if (companyData.logo?.preview) {
                 try {
                     docPdf.addImage(companyData.logo.preview, 'PNG', 15, yPos, 40, 20, undefined, 'FAST');
@@ -3833,7 +3834,7 @@ export default function OrdersPage() {
                 }
             }
 
-            // InformaÃ§Ãµes da empresa
+            // Informações da empresa
             let companyInfoX = 65;
             let companyInfoY = yPos + 5;
             docPdf.setFontSize(16).setFont('helvetica', 'bold');
@@ -3849,17 +3850,17 @@ export default function OrdersPage() {
 
             yPos = 45;
 
-            // TÃ­tulo - ajusta baseado no progresso do item
+            // Título - ajusta baseado no progresso do item
             const itemProgress = calculateItemProgress(item);
             docPdf.setFontSize(18).setFont('helvetica', 'bold');
             if (itemProgress === 100) {
                 docPdf.text('CONTROLE DE EMBARQUE E ENTREGA', pageWidth / 2, yPos, { align: 'center' });
             } else {
-                docPdf.text('FOLHA DE APONTAMENTO DE PRODUÃ‡ÃƒO', pageWidth / 2, yPos, { align: 'center' });
+                docPdf.text('FOLHA DE APONTAMENTO DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
             }
             yPos += 15;
 
-            // InformaÃ§Ãµes do pedido
+            // Informações do pedido
             docPdf.setFontSize(11).setFont('helvetica', 'normal');
             docPdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 15, yPos);
             docPdf.text(`Data: ${format(new Date(), "dd/MM/yyyy")}`, pageWidth - 15, yPos, { align: 'right' });
@@ -3875,19 +3876,19 @@ export default function OrdersPage() {
             yPos += 8;
 
             docPdf.setFontSize(10).setFont('helvetica', 'normal');
-            docPdf.text(`CÃ³digo: ${item.code || 'N/A'}`, 15, yPos);
+            docPdf.text(`Código: ${item.code || 'N/A'}`, 15, yPos);
             yPos += 5;
-            docPdf.text(`DescriÃ§Ã£o: ${item.description}`, 15, yPos);
+            docPdf.text(`Descrição: ${item.description}`, 15, yPos);
             yPos += 5;
             docPdf.text(`Quantidade: ${item.quantity}`, 15, yPos);
             docPdf.text(`Peso Unit.: ${(Number(item.unitWeight) || 0).toLocaleString('pt-BR')} kg`, pageWidth / 2, yPos);
             yPos += 5;
             
-            // InformaÃ§Ãµes de embarque se o item estiver concluÃ­do
+            // Informações de embarque se o item estiver concluído
             if (itemProgress === 100) {
                 yPos += 10;
                 docPdf.setFontSize(12).setFont('helvetica', 'bold');
-                docPdf.text('INFORMAÃ‡Ã•ES DE EMBARQUE:', 15, yPos);
+                docPdf.text('INFORMAÇÕES DE EMBARQUE:', 15, yPos);
                 yPos += 8;
                 
                 docPdf.setFontSize(10).setFont('helvetica', 'normal');
@@ -3916,13 +3917,13 @@ export default function OrdersPage() {
                 yPos += 10;
             }
 
-            // QR Code MELHORADO com dados mais completos incluindo informaÃ§Ãµes de embarque
+            // QR Code MELHORADO com dados mais completos incluindo informações de embarque
             const qrData = JSON.stringify({
                 type: 'controle_embarque',
                 orderId: selectedOrder.id,
                 itemId: item.id,
                 orderNumber: selectedOrder.quotationNumber,
-                itemNumber: item.itemNumber || null, // NÃºmero do item no pedido de compra
+                itemNumber: item.itemNumber || null, // Número do item no pedido de compra
                 itemCode: item.code || 'SEM_CODIGO',
                 itemDescription: item.description,
                 quantity: item.quantity,
@@ -3947,7 +3948,7 @@ export default function OrdersPage() {
                     errorCorrectionLevel: 'M'
                 });
                 
-                // Posiciona o QR Code no canto superior direito da seÃ§Ã£o de dados
+                // Posiciona o QR Code no canto superior direito da seção de dados
                 docPdf.addImage(qrCodeDataUrl, 'PNG', pageWidth - 45, yPos - 25, 30, 30);
                 
                 // Adiciona texto explicativo abaixo do QR Code
@@ -3963,14 +3964,14 @@ export default function OrdersPage() {
                 toast({
                     variant: "destructive",
                     title: "Aviso",
-                    description: "QR Code nÃ£o pÃ´de ser gerado, mas o documento foi criado normalmente.",
+                    description: "QR Code não pôde ser gerado, mas o documento foi criado normalmente.",
                 });
             }
 
-            // Tabela de etapas de produÃ§Ã£o
+            // Tabela de etapas de produção
             if (item.productionPlan && item.productionPlan.length > 0) {
                 docPdf.setFontSize(12).setFont('helvetica', 'bold');
-                docPdf.text('ETAPAS DE PRODUÃ‡ÃƒO:', 15, yPos + 10);
+                docPdf.text('ETAPAS DE PRODUÇÃO:', 15, yPos + 10);
                 yPos += 20;
 
                 const tableBody = item.productionPlan.map((stage: any) => [
@@ -3983,7 +3984,7 @@ export default function OrdersPage() {
 
                 autoTable(docPdf, {
                     startY: yPos,
-                    head: [['Etapa', 'InÃ­cio', 'Fim', 'Status', 'Assinatura ResponsÃ¡vel']],
+                    head: [['Etapa', 'Início', 'Fim', 'Status', 'Assinatura Responsável']],
                     body: tableBody,
                     styles: { fontSize: 9, cellPadding: 3 },
                     headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
@@ -3999,7 +4000,7 @@ export default function OrdersPage() {
                 yPos = (docPdf as any).lastAutoTable.finalY + 15;
             }
 
-            // SeÃ§Ã£o de apontamentos
+            // Seção de apontamentos
             docPdf.setFontSize(12).setFont('helvetica', 'bold');
             docPdf.text('REGISTRO DE APONTAMENTOS:', 15, yPos);
             yPos += 10;
@@ -4009,7 +4010,7 @@ export default function OrdersPage() {
             
             autoTable(docPdf, {
                 startY: yPos,
-                head: [['Data', 'Hora InÃ­cio', 'Hora Fim', 'FuncionÃ¡rio', 'Etapa/Atividade', 'ObservaÃ§Ãµes']],
+                head: [['Data', 'Hora Início', 'Hora Fim', 'Funcionário', 'Etapa/Atividade', 'Observações']],
                 body: appointmentRows,
                 styles: { fontSize: 9, cellPadding: 4, minCellHeight: 8 },
                 headStyles: { fillColor: [37, 99, 235], fontSize: 10, textColor: 255 },
@@ -4023,7 +4024,7 @@ export default function OrdersPage() {
                 }
             });
 
-            // RodapÃ©
+            // Rodapé
             const finalY = (docPdf as any).lastAutoTable.finalY;
             const pageHeight = docPdf.internal.pageSize.height;
             
@@ -4031,7 +4032,7 @@ export default function OrdersPage() {
                 yPos = finalY + 15;
                 docPdf.setFontSize(8).setFont('helvetica', 'italic');
                 docPdf.text(
-                    `Documento gerado em ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm")}`,
+                    `Documento gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
                     pageWidth / 2,
                     yPos,
                     { align: 'center' }
@@ -4046,7 +4047,7 @@ export default function OrdersPage() {
             const documentType = itemProgress === 100 ? 'Controle de Embarque' : 'Folha de Apontamento';
             toast({
                 title: `${documentType} gerado com sucesso!`,
-                description: `Arquivo ${filename} foi baixado. QR Code incluÃ­do para rastreamento.`,
+                description: `Arquivo ${filename} foi baixado. QR Code incluído para rastreamento.`,
             });
 
         } catch (error) {
@@ -4054,7 +4055,7 @@ export default function OrdersPage() {
             toast({
                 variant: "destructive",
                 title: "Erro ao gerar folha",
-                description: "NÃ£o foi possÃ­vel gerar a folha de apontamento.",
+                description: "Não foi possível gerar a folha de apontamento.",
             });
         }
     };
@@ -4063,8 +4064,8 @@ export default function OrdersPage() {
         if (monthFilter === 'all') {
             toast({
                 variant: "destructive",
-                title: "Selecione um mÃªs",
-                description: "Por favor, selecione um mÃªs especÃ­fico para gerar o relatÃ³rio.",
+                title: "Selecione um mês",
+                description: "Por favor, selecione um mês específico para gerar o relatório.",
             });
             return;
         }
@@ -4073,12 +4074,12 @@ export default function OrdersPage() {
             toast({
                 variant: "destructive",
                 title: "Nenhum dado para exportar",
-                description: "NÃ£o hÃ¡ pedidos para o mÃªs selecionado.",
+                description: "Não há pedidos para o mês selecionado.",
             });
             return;
         }
 
-        toast({ title: "Gerando RelatÃ³rio Mensal...", description: "Por favor, aguarde." });
+        toast({ title: "Gerando Relatório Mensal...", description: "Por favor, aguarde." });
 
         try {
             // Buscar dados da empresa
@@ -4088,7 +4089,7 @@ export default function OrdersPage() {
                 const docSnap = await getDoc(companyRef);
                 companyData = docSnap.exists() ? (docSnap.data() as CompanyData) : {};
             } catch (error) {
-                console.warn("NÃ£o foi possÃ­vel carregar dados da empresa:", error);
+                console.warn("Não foi possível carregar dados da empresa:", error);
             }
 
             // Criar o PDF
@@ -4132,12 +4133,12 @@ export default function OrdersPage() {
 
             yPos = 55;
 
-            // TÃ­tulo do documento
+            // Título do documento
             const selectedMonth = availableMonths.find(m => m.value === monthFilter);
             const monthName = selectedMonth ? selectedMonth.label : monthFilter;
             
             docPdf.setFontSize(16).setFont('helvetica', 'bold');
-            docPdf.text('RELATÃ“RIO MENSAL DE PRODUÃ‡ÃƒO', pageWidth / 2, yPos, { align: 'center' });
+            docPdf.text('RELATÓRIO MENSAL DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
             yPos += 8;
             
             docPdf.setFontSize(14).setFont('helvetica', 'normal');
@@ -4174,7 +4175,7 @@ export default function OrdersPage() {
             const col2X = boxX + boxWidth / 2;
             
             docPdf.text(`Total de Pedidos: ${monthWeightStats.totalOrders}`, col1X, yPos);
-            docPdf.text(`Data de EmissÃ£o: ${format(new Date(), "dd/MM/yyyy")}`, col2X, yPos);
+            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, col2X, yPos);
             yPos += 5;
             
             docPdf.setFont('helvetica', 'bold');
@@ -4183,30 +4184,30 @@ export default function OrdersPage() {
             yPos += 5;
             
             docPdf.setTextColor(21, 128, 61);
-            docPdf.text(`âœ“ ConcluÃ­do: ${monthWeightStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col1X, yPos);
+            docPdf.text(`✓ Concluído: ${monthWeightStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col1X, yPos);
             docPdf.setTextColor(234, 88, 12);
-            docPdf.text(`â§— Pendente: ${monthWeightStats.pendingWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col2X, yPos);
+            docPdf.text(`⧗ Pendente: ${monthWeightStats.pendingWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} kg`, col2X, yPos);
             docPdf.setTextColor(0, 0, 0);
             yPos += 5;
             
             docPdf.setFont('helvetica', 'bold');
-            docPdf.text(`Taxa de ConclusÃ£o: ${monthWeightStats.completedPercentage.toFixed(1)}%`, col1X, yPos);
+            docPdf.text(`Taxa de Conclusão: ${monthWeightStats.completedPercentage.toFixed(1)}%`, col1X, yPos);
             docPdf.setFont('helvetica', 'normal');
             
             yPos += 20;
 
             // Agrupamento por status
             const ordersByStatus = {
-                'ConcluÃ­do': monthOrders.filter(o => o.status === 'ConcluÃ­do'),
-                'Em ProduÃ§Ã£o': monthOrders.filter(o => o.status === 'Em ProduÃ§Ã£o'),
-                'Aguardando ProduÃ§Ã£o': monthOrders.filter(o => o.status === 'Aguardando ProduÃ§Ã£o'),
+                'Concluído': monthOrders.filter(o => o.status === 'Concluído'),
+                'Em Produção': monthOrders.filter(o => o.status === 'Em Produção'),
+                'Aguardando Produção': monthOrders.filter(o => o.status === 'Aguardando Produção'),
                 'Pronto para Entrega': monthOrders.filter(o => o.status === 'Pronto para Entrega'),
                 'Atrasado': monthOrders.filter(o => o.status === 'Atrasado'),
             } as const;
 
-            // EstatÃ­sticas por status
+            // Estatísticas por status
             docPdf.setFontSize(12).setFont('helvetica', 'bold');
-            docPdf.text('DISTRIBUIÃ‡ÃƒO POR STATUS', 15, yPos);
+            docPdf.text('DISTRIBUIÇÃO POR STATUS', 15, yPos);
             yPos += 10;
 
             const totalWeight = monthWeightStats.totalWeight || 0;
@@ -4286,11 +4287,11 @@ export default function OrdersPage() {
                 didParseCell: (data) => {
                     if (data.column.index === 6 && data.section === 'body') {
                         const status = data.cell.raw as string;
-                        if (status === 'ConcluÃ­do') {
+                        if (status === 'Concluído') {
                             data.cell.styles.fillColor = [220, 252, 231];
                             data.cell.styles.textColor = [21, 128, 61];
                             data.cell.styles.fontStyle = 'bold';
-                        } else if (status === 'Em ProduÃ§Ã£o') {
+                        } else if (status === 'Em Produção') {
                             data.cell.styles.fillColor = [219, 234, 254];
                             data.cell.styles.textColor = [37, 99, 235];
                         } else if (status === 'Atrasado') {
@@ -4314,10 +4315,10 @@ export default function OrdersPage() {
                 yPos = finalY + 5;
             }
 
-            // AnÃ¡lise por cliente
+            // Análise por cliente
             const ordersByCustomer = new Map<string, { orders: Order[]; totalWeight: number }>();
             monthOrders.forEach(order => {
-                const customerName = order.customer?.name || 'NÃ£o informado';
+                const customerName = order.customer?.name || 'Não informado';
                 if (!ordersByCustomer.has(customerName)) {
                     ordersByCustomer.set(customerName, { orders: [], totalWeight: 0 });
                 }
@@ -4327,7 +4328,7 @@ export default function OrdersPage() {
             });
 
             docPdf.setFontSize(12).setFont('helvetica', 'bold');
-            docPdf.text('ANÃLISE POR CLIENTE', 15, yPos);
+            docPdf.text('ANÁLISE POR CLIENTE', 15, yPos);
             yPos += 10;
 
             const customerData = Array.from(ordersByCustomer.entries())
@@ -4363,7 +4364,7 @@ export default function OrdersPage() {
                 docPdf.setFontSize(8).setFont('helvetica', 'italic');
                 docPdf.setTextColor(100, 100, 100);
                 docPdf.text(
-                    `RelatÃ³rio gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm")}`,
+                    `Relatório gerado automaticamente em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
                     pageWidth / 2,
                     finalTableY,
                     { align: 'center' }
@@ -4379,7 +4380,7 @@ export default function OrdersPage() {
 
             const [year, month] = monthFilter.split('-');
             const monthNames = [
-                'Janeiro', 'Fevereiro', 'MarÃ§o', 'Abril', 'Maio', 'Junho',
+                'Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho',
                 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'
             ];
             const monthNameFile = monthNames[parseInt(month, 10) - 1] || month;
@@ -4389,23 +4390,23 @@ export default function OrdersPage() {
             docPdf.save(filename);
             
             toast({
-                title: "âœ… RelatÃ³rio Gerado com Sucesso!",
-                description: `O arquivo "${filename}" foi baixado com todas as estatÃ­sticas do mÃªs.`,
+                title: "✅ Relatório Gerado com Sucesso!",
+                description: `O arquivo "${filename}" foi baixado com todas as estatísticas do mês.`,
             });
 
         } catch (error) {
-            console.error("Erro completo ao gerar relatÃ³rio mensal:", error);
+            console.error("Erro completo ao gerar relatório mensal:", error);
             toast({
                 variant: "destructive",
-                title: "Erro ao Gerar RelatÃ³rio",
-                description: `Falha na geraÃ§Ã£o: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+                title: "Erro ao Gerar Relatório",
+                description: `Falha na geração: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
             });
         }
     };
 
-    // FUNÃ‡ÃƒO AUXILIAR MELHORADA para debug
+    // FUNÇÃO AUXILIAR MELHORADA para debug
     const logProgressState = (context: string, plan: ProductionStage[]) => {
-        console.log(`ðŸ“Š ${context}:`, plan.map(stage => ({
+        console.log(`📊 ${context}:`, plan.map(stage => ({
             name: stage.stageName,
             status: stage.status,
             start: stage.startDate ? format(stage.startDate, 'dd/MM/yyyy') : 'null',
@@ -4415,10 +4416,10 @@ export default function OrdersPage() {
         })));
     };
 
-    // CORREÃ‡ÃƒO 1: CÃLCULO CORRETO DE DIAS DE ATRASO
-    // CORREÃ‡ÃƒO: FunÃ§Ã£o analyzeItemDelivery com cÃ¡lculo correto de dias de diferenÃ§a
+    // CORREÇÃO 1: CÁLCULO CORRETO DE DIAS DE ATRASO
+    // CORREÇÃO: Função analyzeItemDelivery com cálculo correto de dias de diferença
     const analyzeItemDelivery = (item: OrderItem, orderDeliveryDate?: Date) => {
-      console.log('ðŸ” Analisando item:', {
+      console.log('🔍 Analisando item:', {
         id: item.id,
         description: item.description,
         expectedDate: item.itemDeliveryDate || orderDeliveryDate,
@@ -4433,14 +4434,14 @@ export default function OrdersPage() {
         quantity: item.quantity,
         
         // Dados de embarque
-        hasShippingList: !!(item.shippingList && item.shippingList.trim() && item.shippingList !== 'NÃ£o informada'),
-        shippingList: item.shippingList && item.shippingList.trim() ? item.shippingList.trim() : 'NÃ£o informada',
-        hasInvoice: !!(item.invoiceNumber && item.invoiceNumber.trim() && item.invoiceNumber !== 'NÃ£o informada'),
-        invoiceNumber: item.invoiceNumber && item.invoiceNumber.trim() ? item.invoiceNumber.trim() : 'NÃ£o informada',
+        hasShippingList: !!(item.shippingList && item.shippingList.trim() && item.shippingList !== 'Não informada'),
+        shippingList: item.shippingList && item.shippingList.trim() ? item.shippingList.trim() : 'Não informada',
+        hasInvoice: !!(item.invoiceNumber && item.invoiceNumber.trim() && item.invoiceNumber !== 'Não informada'),
+        invoiceNumber: item.invoiceNumber && item.invoiceNumber.trim() ? item.invoiceNumber.trim() : 'Não informada',
         hasShippingDate: !!item.shippingDate,
         shippingDate: item.shippingDate,
         
-        // Datas para anÃ¡lise
+        // Datas para análise
         expectedDate: item.itemDeliveryDate || orderDeliveryDate,
         actualDate: item.shippingDate,
         
@@ -4455,20 +4456,20 @@ export default function OrdersPage() {
 
       analysis.isComplete = analysis.hasShippingList && analysis.hasInvoice && analysis.hasShippingDate;
 
-      // CORREÃ‡ÃƒO PRINCIPAL: CÃ¡lculo correto de dias de diferenÃ§a
+      // CORREÇÃO PRINCIPAL: Cálculo correto de dias de diferença
       if (analysis.actualDate && analysis.expectedDate) {
-        // Normalizar datas para meia-noite para comparaÃ§Ã£o correta
+        // Normalizar datas para meia-noite para comparação correta
         const expectedDateNormalized = new Date(analysis.expectedDate);
         expectedDateNormalized.setHours(0, 0, 0, 0);
         
         const actualDateNormalized = new Date(analysis.actualDate);
         actualDateNormalized.setHours(0, 0, 0, 0);
         
-        // Calcular diferenÃ§a em milissegundos e converter para dias
+        // Calcular diferença em milissegundos e converter para dias
         const diffTime = actualDateNormalized.getTime() - expectedDateNormalized.getTime();
-        const diffDays = diffTime / (1000 * 60 * 60 * 24); // NÃ£o usar Math.round aqui
+        const diffDays = diffTime / (1000 * 60 * 60 * 24); // Não usar Math.round aqui
         
-        console.log('ðŸ“… CÃ¡lculo de diferenÃ§a CORRIGIDO:', {
+        console.log('📅 Cálculo de diferença CORRIGIDO:', {
           expectedNormalized: expectedDateNormalized.toISOString().split('T')[0],
           actualNormalized: actualDateNormalized.toISOString().split('T')[0],
           diffTime,
@@ -4476,19 +4477,19 @@ export default function OrdersPage() {
           diffDaysRounded: Math.round(Math.abs(diffDays))
         });
         
-        // Armazenar sempre o valor absoluto para exibiÃ§Ã£o
+        // Armazenar sempre o valor absoluto para exibição
         analysis.daysDifference = Math.round(Math.abs(diffDays));
         
-        // Definir status baseado no sinal da diferenÃ§a
+        // Definir status baseado no sinal da diferença
         if (diffDays < 0) {
           analysis.deliveryStatus = 'early'; // Entregue antes do prazo (negativo)
-          console.log('âœ… Status: ANTECIPADO -', analysis.daysDifference, 'dias');
+          console.log('✅ Status: ANTECIPADO -', analysis.daysDifference, 'dias');
         } else if (diffDays === 0) {
           analysis.deliveryStatus = 'ontime'; // Entregue no prazo exato
-          console.log('âœ… Status: NO PRAZO EXATO');
+          console.log('✅ Status: NO PRAZO EXATO');
         } else {
           analysis.deliveryStatus = 'late'; // Entregue com atraso (positivo)
-          console.log('âŒ Status: ATRASADO +', analysis.daysDifference, 'dias');
+          console.log('❌ Status: ATRASADO +', analysis.daysDifference, 'dias');
         }
         
       } else if (analysis.expectedDate && !analysis.actualDate) {
@@ -4502,14 +4503,14 @@ export default function OrdersPage() {
           analysis.deliveryStatus = 'overdue';
           const diffTime = today.getTime() - expectedDateOnly.getTime();
           analysis.daysDifference = Math.round(diffTime / (1000 * 60 * 60 * 24));
-          console.log('âš ï¸ Status: VENCIDO -', analysis.daysDifference, 'dias');
+          console.log('⚠️ Status: VENCIDO -', analysis.daysDifference, 'dias');
         }
       }
 
       return analysis;
     };
 
-    // FUNÃ‡ÃƒO PARA ANÃLISE DE ENTREGA DO PEDIDO (usando a nova anÃ¡lise de itens)
+    // FUNÇÃO PARA ANÁLISE DE ENTREGA DO PEDIDO (usando a nova análise de itens)
     const analyzeOrderDelivery = (order: Order) => {
         const itemAnalyses = order.items.map(item => analyzeItemDelivery(item, order.deliveryDate));
         
@@ -4540,11 +4541,11 @@ export default function OrdersPage() {
         return { summary, itemAnalyses };
     };
 
-    // CORREÃ‡ÃƒO: Componente de visualizaÃ§Ã£o das mensagens de entrega no modal
+    // CORREÇÃO: Componente de visualização das mensagens de entrega no modal
     const DeliveryStatusMessage = ({ item, orderDeliveryDate }: { item: OrderItem, orderDeliveryDate?: Date }) => {
       if (!item.shippingDate) return null;
       
-      // Usar a data de entrega especÃ­fica do item ou a data geral do pedido
+      // Usar a data de entrega específica do item ou a data geral do pedido
       const expectedDate = item.itemDeliveryDate || orderDeliveryDate;
       if (!expectedDate) return null;
 
@@ -4555,11 +4556,11 @@ export default function OrdersPage() {
       const deliveryDate = new Date(expectedDate);
       deliveryDate.setHours(0, 0, 0, 0);
       
-      // Calcular diferenÃ§a em dias (negativo = antecipado, positivo = atrasado)
+      // Calcular diferença em dias (negativo = antecipado, positivo = atrasado)
       const diffTime = shippingDate.getTime() - deliveryDate.getTime();
       const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
       
-      console.log('ðŸŽ¨ Renderizando status de entrega:', {
+      console.log('🎨 Renderizando status de entrega:', {
         shipping: format(shippingDate, 'dd/MM/yyyy'),
         expected: format(deliveryDate, 'dd/MM/yyyy'),
         diffDays,
@@ -4591,14 +4592,14 @@ export default function OrdersPage() {
           <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
             <AlertTriangle className="h-4 w-4" />
             <span className="font-medium">
-              Item entregue {diffDays} dia{diffDays !== 1 ? 's' : ''} apÃ³s o prazo
+              Item entregue {diffDays} dia{diffDays !== 1 ? 's' : ''} após o prazo
             </span>
           </div>
         );
       }
     };
 
-    // CORREÃ‡ÃƒO: Badge de status para o item
+    // CORREÇÃO: Badge de status para o item
     const DeliveryStatusBadge = ({ item, orderDeliveryDate }: { item: OrderItem, orderDeliveryDate?: Date }) => {
       if (!item.shippingDate || !orderDeliveryDate) return null;
 
@@ -4631,7 +4632,7 @@ export default function OrdersPage() {
       }
     };
 
-    // COMPONENTE DO BOTÃƒO LIMPO (sem debug)
+    // COMPONENTE DO BOTÃO LIMPO (sem debug)
     const DeliveryReportButton = ({ order }: { order: Order }) => {
         const analysis = analyzeOrderDelivery(order);
         const hasDeliveryData = analysis.summary.completedItems > 0;
@@ -4644,7 +4645,7 @@ export default function OrdersPage() {
                     className="flex items-center gap-2"
                 >
                     <FileText className="h-4 w-4" />
-                    RelatÃ³rio de Entrega
+                    Relatório de Entrega
                 </Button>
                 {hasDeliveryData && (
                     <div className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -4656,7 +4657,7 @@ export default function OrdersPage() {
         );
     };
 
-    // PREVIEW LIMPO (sem botÃµes de debug) para o modal
+    // PREVIEW LIMPO (sem botões de debug) para o modal
     const DeliveryPreviewCard = ({ selectedOrder }: { selectedOrder: Order }) => {
         const analysis = analyzeOrderDelivery(selectedOrder);
         const hasData = analysis.summary.completedItems > 0;
@@ -4670,13 +4671,13 @@ export default function OrdersPage() {
                             Performance de Entrega
                         </CardTitle>
                         <CardDescription>
-                            AnÃ¡lise dos dados de embarque e pontualidade das entregas
+                            Análise dos dados de embarque e pontualidade das entregas
                         </CardDescription>
                     </CardHeader>
                     <CardContent>
                         <div className="text-center py-6 text-muted-foreground">
                             <Clock className="h-8 w-8 mx-auto mb-2" />
-                            <p className="text-sm">Nenhum dado de embarque disponÃ­vel ainda</p>
+                            <p className="text-sm">Nenhum dado de embarque disponível ainda</p>
                         </div>
                     </CardContent>
                 </Card>
@@ -4694,15 +4695,15 @@ export default function OrdersPage() {
                         Performance de Entrega
                     </CardTitle>
                     <CardDescription>
-                        AnÃ¡lise dos dados de embarque e pontualidade das entregas
+                        Análise dos dados de embarque e pontualidade das entregas
                     </CardDescription>
                 </CardHeader>
                 <CardContent>
                     <div className="space-y-4">
-                        {/* Ãndice de Performance */}
+                        {/* Índice de Performance */}
                         <div className="flex items-center justify-between p-4 bg-secondary rounded-lg">
                             <div>
-                                <p className="text-sm font-medium text-muted-foreground">Ãndice de Entrega no Prazo</p>
+                                <p className="text-sm font-medium text-muted-foreground">Índice de Entrega no Prazo</p>
                                 <p className="text-2xl font-bold">{overallRate.toFixed(1)}%</p>
                                 <p className="text-xs text-muted-foreground">
                                     {analysis.summary.onTimeItems + analysis.summary.earlyItems} de {analysis.summary.totalItems} itens
@@ -4767,7 +4768,7 @@ export default function OrdersPage() {
                                         .slice(0, 3)
                                         .map(item => (
                                             <p key={item.itemId} className="text-xs text-red-700">
-                                                â€¢ {item.description.substring(0, 40)}... 
+                                                • {item.description.substring(0, 40)}... 
                                                 ({item.deliveryStatus === 'late' ? `${item.daysDifference}d atrasado` : `${item.daysDifference}d vencido`})
                                             </p>
                                         ))}
@@ -4800,8 +4801,8 @@ export default function OrdersPage() {
         setCostAnalysis(null);
 
         try {
-            // A coleÃ§Ã£o usa o cÃ³digo do produto como ID. A normalizaÃ§Ã£o tambÃ©m
-            // atende documentos antigos salvos com diferenÃ§a de caixa/espaÃ§os.
+            // A coleção usa o código do produto como ID. A normalização também
+            // atende documentos antigos salvos com diferença de caixa/espaços.
             const pricingSnapshot = await getDocs(collection(db, "companies", "mecald", "pricingCalculations"));
             const pricingByCode = new Map<string, any>();
             pricingSnapshot.docs.forEach(pricingDoc => {
@@ -4828,7 +4829,7 @@ export default function OrdersPage() {
                 const machiningUnit = pricing ? Number(pricing.machiningCost) || 0 : 0;
                 const consumablesUnit = pricing ? Number(pricing.consumablesCost) || 0 : 0;
 
-                // totalCost Ã© o custo de fabricaÃ§Ã£o salvo, sem lucro, IRPJ ou CSLL.
+                // totalCost é o custo de fabricação salvo, sem lucro, IRPJ ou CSLL.
                 const calculatedUnitCost = materialUnit + productionUnit + machiningUnit + consumablesUnit;
                 const unitCost = pricing
                     ? (Number.isFinite(Number(pricing.totalCost)) ? Number(pricing.totalCost) : calculatedUnitCost)
@@ -4836,8 +4837,8 @@ export default function OrdersPage() {
 
                 return {
                     itemId: item.id || `${order.id}-${index}`,
-                    code: code || 'Sem cÃ³digo',
-                    description: item.description || 'Item sem descriÃ§Ã£o',
+                    code: code || 'Sem código',
+                    description: item.description || 'Item sem descrição',
                     quantity,
                     hasSavedPricing: Boolean(pricing),
                     unitCost,
@@ -4864,7 +4865,7 @@ export default function OrdersPage() {
             toast({
                 variant: 'destructive',
                 title: 'Erro ao analisar custos',
-                description: 'NÃ£o foi possÃ­vel carregar as precificaÃ§Ãµes dos produtos.',
+                description: 'Não foi possível carregar as precificações dos produtos.',
             });
             setIsCostAnalysisOpen(false);
         } finally {
@@ -4879,7 +4880,7 @@ export default function OrdersPage() {
         const generatedAt = format(new Date(), 'dd/MM/yyyy HH:mm');
 
         pdf.setFontSize(16);
-        pdf.text('ANÃLISE DE CUSTOS DE FABRICAÃ‡ÃƒO', 14, 16);
+        pdf.text('ANÁLISE DE CUSTOS DE FABRICAÇÃO', 14, 16);
         pdf.setFontSize(10);
         pdf.text(`Pedido: ${selectedOrder.quotationNumber}`, 14, 24);
         pdf.text(`OS: ${selectedOrder.internalOS || 'N/A'}`, 105, 24);
@@ -4888,7 +4889,7 @@ export default function OrdersPage() {
 
         autoTable(pdf, {
             startY: 36,
-            head: [['Item', 'CÃ³digo', 'DescriÃ§Ã£o', 'Qtd.', 'Custo unitÃ¡rio', 'Custo total', 'SituaÃ§Ã£o']],
+            head: [['Item', 'Código', 'Descrição', 'Qtd.', 'Custo unitário', 'Custo total', 'Situação']],
             body: costAnalysis.items.map((item, index) => [
                 String(index + 1),
                 item.code,
@@ -4896,7 +4897,7 @@ export default function OrdersPage() {
                 item.quantity.toLocaleString('pt-BR'),
                 formatCurrency(item.unitCost),
                 formatCurrency(item.totalCost),
-                item.hasSavedPricing ? 'PrecificaÃ§Ã£o salva' : 'Sem precificaÃ§Ã£o (R$ 0,00)',
+                item.hasSavedPricing ? 'Precificação salva' : 'Sem precificação (R$ 0,00)',
             ]),
             styles: { fontSize: 8, cellPadding: 2 },
             headStyles: { fillColor: [37, 99, 235] },
@@ -4917,10 +4918,10 @@ export default function OrdersPage() {
             head: [['Resumo da OS', 'Valor']],
             body: [
                 ['Materiais', formatCurrency(costAnalysis.materialTotal)],
-                ['ProduÃ§Ã£o / mÃ£o de obra', formatCurrency(costAnalysis.productionTotal)],
+                ['Produção / mão de obra', formatCurrency(costAnalysis.productionTotal)],
                 ['Usinagem', formatCurrency(costAnalysis.machiningTotal)],
-                ['Insumos e consumÃ­veis', formatCurrency(costAnalysis.consumablesTotal)],
-                ['CUSTO TOTAL DE FABRICAÃ‡ÃƒO', formatCurrency(costAnalysis.grandTotal)],
+                ['Insumos e consumíveis', formatCurrency(costAnalysis.consumablesTotal)],
+                ['CUSTO TOTAL DE FABRICAÇÃO', formatCurrency(costAnalysis.grandTotal)],
             ],
             theme: 'grid',
             tableWidth: 105,
@@ -4935,7 +4936,7 @@ export default function OrdersPage() {
         pdf.save(`analise-custos-${safeOS}-${safeOrderNumber}.pdf`);
     };
 
-    // FOOTER DO MODAL ATUALIZADO (sem botÃµes de debug)
+    // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
     const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent, resetPackingSlipQuantities, setIsPackingSlipDialogOpen }) => (
         <SheetFooter className="flex-shrink-0 pt-4 border-t">
             <div className="flex items-center justify-between w-full gap-4 flex-wrap">
@@ -4963,14 +4964,14 @@ export default function OrdersPage() {
                         disabled={isLoadingCostAnalysis}
                     >
                         <DollarSign className="mr-2 h-4 w-4" />
-                        AnÃ¡lise de Custos
+                        Análise de Custos
                     </Button>
                     
-                    {/* BOTÃƒO LIMPO SEM DEBUG */}
+                    {/* BOTÃO LIMPO SEM DEBUG */}
                     <DeliveryReportButton order={selectedOrder} />
                     
-                    {/* BotÃ£o Data Book */}
-                    {selectedOrder.status === 'ConcluÃ­do' && !selectedOrder.dataBookSent && (
+                    {/* Botão Data Book */}
+                    {selectedOrder.status === 'Concluído' && !selectedOrder.dataBookSent && (
                         <Button 
                             onClick={onDataBookSent} 
                             className="bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-600 shadow-md hover:shadow-lg transition-all duration-200"
@@ -5004,18 +5005,18 @@ export default function OrdersPage() {
         </SheetFooter>
     );
 
-    // CORREÃ‡ÃƒO 2: LAYOUT DO RELATÃ“RIO PDF CORRIGIDO
+    // CORREÇÃO 2: LAYOUT DO RELATÓRIO PDF CORRIGIDO
     const handleGenerateDeliveryReport = async (order: Order) => {
       if (!order) {
         toast({
           variant: "destructive",
           title: "Erro",
-          description: "Dados do pedido nÃ£o encontrados.",
+          description: "Dados do pedido não encontrados.",
         });
         return;
       }
 
-      toast({ title: "Gerando RelatÃ³rio de Entrega...", description: "Por favor, aguarde." });
+      toast({ title: "Gerando Relatório de Entrega...", description: "Por favor, aguarde." });
 
       try {
         // Analisar dados de entrega
@@ -5028,7 +5029,7 @@ export default function OrdersPage() {
           const docSnap = await getDoc(companyRef);
           companyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
         } catch (error) {
-          console.warn("NÃ£o foi possÃ­vel carregar dados da empresa:", error);
+          console.warn("Não foi possível carregar dados da empresa:", error);
         }
         
         // Criar o PDF
@@ -5072,12 +5073,12 @@ export default function OrdersPage() {
 
         yPos = 55;
 
-        // TÃ­tulo do documento
+        // Título do documento
         docPdf.setFontSize(16).setFont('helvetica', 'bold');
-        docPdf.text('RELATÃ“RIO DE ENTREGA E PERFORMANCE', pageWidth / 2, yPos, { align: 'center' });
+        docPdf.text('RELATÓRIO DE ENTREGA E PERFORMANCE', pageWidth / 2, yPos, { align: 'center' });
         yPos += 15;
 
-        // InformaÃ§Ãµes do pedido em duas colunas
+        // Informações do pedido em duas colunas
         docPdf.setFontSize(11).setFont('helvetica', 'normal');
         
         // Coluna esquerda
@@ -5087,7 +5088,7 @@ export default function OrdersPage() {
         docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
         leftColumnY += 6;
         docPdf.setFont('helvetica', 'normal');
-        docPdf.text(`Pedido NÂº: ${order.quotationNumber || 'N/A'}`, leftColumnX, leftColumnY);
+        docPdf.text(`Pedido Nº: ${order.quotationNumber || 'N/A'}`, leftColumnX, leftColumnY);
         leftColumnY += 5;
         docPdf.text(`Cliente: ${order.customer?.name || 'N/A'}`, leftColumnX, leftColumnY);
         leftColumnY += 5;
@@ -5101,7 +5102,7 @@ export default function OrdersPage() {
         let rightColumnY = yPos + 6;
         docPdf.text(`OS Interna: ${order.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
         rightColumnY += 5;
-        docPdf.text(`Data de EmissÃ£o: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+        docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
         rightColumnY += 5;
         if (order.deliveryDate) {
             docPdf.text(`Data de Entrega Geral: ${format(order.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
@@ -5111,13 +5112,13 @@ export default function OrdersPage() {
         
         yPos = Math.max(leftColumnY, rightColumnY) + 15;
 
-        // Ãndice de Performance Geral
+        // Índice de Performance Geral
         const overallOnTimeRate = analysis.summary.totalItems > 0 ? 
           ((analysis.summary.onTimeItems + analysis.summary.earlyItems) / analysis.summary.totalItems) * 100 : 0;
         
         docPdf.setTextColor(0, 0, 0);
         docPdf.setFontSize(12).setFont('helvetica', 'bold');
-        docPdf.text('ÃNDICE GERAL DE PONTUALIDADE:', 15, yPos);
+        docPdf.text('ÍNDICE GERAL DE PONTUALIDADE:', 15, yPos);
         
         docPdf.setFontSize(20);
         const color = overallOnTimeRate >= 80 ? [34, 197, 94] : overallOnTimeRate >= 60 ? [245, 158, 11] : [239, 68, 68];
@@ -5126,7 +5127,7 @@ export default function OrdersPage() {
         
         yPos += 25;
 
-        // Cards de performance em linha Ãºnica para economizar espaÃ§o
+        // Cards de performance em linha única para economizar espaço
         docPdf.setTextColor(0, 0, 0);
         docPdf.setFontSize(10).setFont('helvetica', 'bold');
         docPdf.text('RESUMO:', 15, yPos);
@@ -5137,7 +5138,7 @@ export default function OrdersPage() {
         docPdf.text(summaryText, 15, yPos);
         yPos += 15;
 
-        // Verificar se precisa de nova pÃ¡gina antes da tabela
+        // Verificar se precisa de nova página antes da tabela
         if (yPos + 60 > pageHeight - 20) {
           docPdf.addPage();
           yPos = 20;
@@ -5168,11 +5169,11 @@ export default function OrdersPage() {
               break;
             case 'overdue':
               statusText = `Vencido ${item.daysDifference}d`;
-              deliveryText = 'NÃ£o entregue';
+              deliveryText = 'Não entregue';
               break;
             default:
               statusText = 'Pendente';
-              deliveryText = 'NÃ£o entregue';
+              deliveryText = 'Não entregue';
           }
 
           // Mostrar dados reais de LE e NF
@@ -5199,7 +5200,7 @@ export default function OrdersPage() {
         // TABELA COM LAYOUT OTIMIZADO
         autoTable(docPdf, {
           startY: yPos,
-          head: [['Item', 'CÃ³digo', 'DescriÃ§Ã£o', 'Prevista', 'Real', 'Status', 'LE', 'NF']],
+          head: [['Item', 'Código', 'Descrição', 'Prevista', 'Real', 'Status', 'LE', 'NF']],
           body: tableBody,
           styles: { 
             fontSize: 6,  // Reduzido para 6
@@ -5209,15 +5210,15 @@ export default function OrdersPage() {
           },
           headStyles: { 
             fillColor: [37, 99, 235], 
-            fontSize: 7, // CabeÃ§alho um pouco maior
+            fontSize: 7, // Cabeçalho um pouco maior
             textColor: 255,
             fontStyle: 'bold',
             halign: 'center'
           },
           columnStyles: {
             0: { cellWidth: 12, halign: 'center' }, // Item - reduzido
-            1: { cellWidth: 16, halign: 'center' }, // CÃ³digo - reduzido
-            2: { cellWidth: 45, halign: 'left' },   // DescriÃ§Ã£o - mantido
+            1: { cellWidth: 16, halign: 'center' }, // Código - reduzido
+            2: { cellWidth: 45, halign: 'left' },   // Descrição - mantido
             3: { cellWidth: 16, halign: 'center' }, // Prevista - reduzido
             4: { cellWidth: 16, halign: 'center' }, // Real - reduzido
             5: { cellWidth: 20, halign: 'center' }, // Status - reduzido
@@ -5226,7 +5227,7 @@ export default function OrdersPage() {
           },
           margin: { left: 15, right: 15 },
           didParseCell: (data) => {
-            // Colorir cÃ©lulas baseado no status
+            // Colorir células baseado no status
             if (data.column.index === 5 && data.section === 'body') {
               const status = data.cell.raw as string;
               if (status.includes('Antecip')) {
@@ -5253,7 +5254,7 @@ export default function OrdersPage() {
           }
         });
 
-        // RodapÃ© com resumo executivo
+        // Rodapé com resumo executivo
         const finalY = (docPdf as any).lastAutoTable.finalY + 10;
         
         if (finalY + 25 < pageHeight - 20) {
@@ -5262,17 +5263,17 @@ export default function OrdersPage() {
           let summaryY = finalY + 6;
           
           docPdf.setFontSize(8).setFont('helvetica', 'normal');
-          docPdf.text(`â€¢ Total: ${analysis.summary.totalItems} itens | Completos: ${analysis.summary.completedItems} | Taxa no prazo: ${(analysis.summary.onTimeRate + analysis.summary.earlyRate).toFixed(1)}%`, 15, summaryY);
+          docPdf.text(`• Total: ${analysis.summary.totalItems} itens | Completos: ${analysis.summary.completedItems} | Taxa no prazo: ${(analysis.summary.onTimeRate + analysis.summary.earlyRate).toFixed(1)}%`, 15, summaryY);
           summaryY += 4;
           
           const itemsWithLE = analysis.itemAnalyses.filter(item => item.hasShippingList).length;
           const itemsWithNF = analysis.itemAnalyses.filter(item => item.hasInvoice).length;
-          docPdf.text(`â€¢ Lista de Embarque: ${itemsWithLE}/${analysis.summary.totalItems} | Nota Fiscal: ${itemsWithNF}/${analysis.summary.totalItems}`, 15, summaryY);
+          docPdf.text(`• Lista de Embarque: ${itemsWithLE}/${analysis.summary.totalItems} | Nota Fiscal: ${itemsWithNF}/${analysis.summary.totalItems}`, 15, summaryY);
           
           summaryY += 8;
           docPdf.setFontSize(7).setFont('helvetica', 'italic');
           docPdf.text(
-            `RelatÃ³rio gerado em ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm")}`,
+            `Relatório gerado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")}`,
             pageWidth / 2,
             summaryY,
             { align: 'center' }
@@ -5286,16 +5287,16 @@ export default function OrdersPage() {
         docPdf.save(filename);
         
         toast({
-          title: "âœ… RelatÃ³rio Gerado com Sucesso!",
-          description: `O arquivo "${filename}" foi baixado com cÃ¡lculo correto de atraso.`,
+          title: "✅ Relatório Gerado com Sucesso!",
+          description: `O arquivo "${filename}" foi baixado com cálculo correto de atraso.`,
         });
 
       } catch (error) {
-        console.error("Erro completo ao gerar relatÃ³rio:", error);
+        console.error("Erro completo ao gerar relatório:", error);
         toast({
           variant: "destructive",
-          title: "Erro ao Gerar RelatÃ³rio",
-          description: `Falha na geraÃ§Ã£o: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
+          title: "Erro ao Gerar Relatório",
+          description: `Falha na geração: ${error instanceof Error ? error.message : 'Erro desconhecido'}`,
         });
       }
     };
@@ -5308,9 +5309,9 @@ return (
     <div className="w-full">
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
-                    <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de ProduÃ§Ã£o</h1>
+                    <h1 className="text-3xl font-bold tracking-tight font-headline">Pedidos de Produção</h1>
                     <div className="flex items-center gap-4">
-                        {/* BotÃµes de visualizaÃ§Ã£o */}
+                        {/* Botões de visualização */}
                         <div className="flex items-center rounded-lg border p-1">
                             <Button
                                 size="sm"
@@ -5343,7 +5344,7 @@ return (
                                 }`}
                             >
                                 <CalendarDays className="mr-2 h-4 w-4" />
-                                CalendÃ¡rio
+                                Calendário
                             </Button>
                             <Button
                                 size="sm"
@@ -5354,7 +5355,7 @@ return (
                                 }`}
                             >
                                 <Weight className="mr-2 h-4 w-4" />
-                                OcupaÃ§Ã£o
+                                Ocupação
                             </Button>
                         </div>
                         
@@ -5362,7 +5363,7 @@ return (
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input
-                                placeholder="Buscar por nÂº, OS, projeto, cliente..."
+                                placeholder="Buscar por nº, OS, projeto, cliente..."
                                 value={searchQuery}
                                 onChange={(e) => setSearchQuery(e.target.value)}
                                 className="pl-9 w-80"
@@ -5379,16 +5380,16 @@ return (
                         description={`${dashboardStats.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg no total`}
                     />
                     <StatCard
-                        title="Pedidos ConcluÃ­dos"
+                        title="Pedidos Concluídos"
                         value={dashboardStats.completedOrders.toString()}
                         icon={CheckCircle}
-                        description={`${dashboardStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg concluÃ­das`}
+                        description={`${dashboardStats.completedWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg concluídas`}
                     />
                     <StatCard
                         title="Em Andamento"
                         value={dashboardStats.inProgressOrders.toString()}
                         icon={PlayCircle}
-                        description={`${dashboardStats.inProgressWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg em produÃ§Ã£o`}
+                        description={`${dashboardStats.inProgressWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg em produção`}
                     />
                     <StatCard
                         title="Pedidos Atrasados"
@@ -5429,10 +5430,10 @@ return (
                             </SelectContent>
                         </Select>
 
-                        {/* NOVO FILTRO DE MÃŠS */}
+                        {/* NOVO FILTRO DE MÊS */}
                         <Select value={monthFilter} onValueChange={setMonthFilter}>
                             <SelectTrigger className="w-[240px]">
-                                <SelectValue placeholder="MÃªs de Entrega" />
+                                <SelectValue placeholder="Mês de Entrega" />
                             </SelectTrigger>
                             <SelectContent>
                                 <SelectItem value="all">Todos os Meses</SelectItem>
@@ -5454,7 +5455,7 @@ return (
                                     Todos ({orders.length})
                                 </SelectItem>
                                 <SelectItem value="pendente">
-                                    Data Book Pendente ({orders.filter(o => o.status === 'ConcluÃ­do' && !o.dataBookSent).length})
+                                    Data Book Pendente ({orders.filter(o => o.status === 'Concluído' && !o.dataBookSent).length})
                                 </SelectItem>
                                 <SelectItem value="enviado">
                                     Data Book Enviado ({orders.filter(o => o.dataBookSent).length})
@@ -5467,7 +5468,7 @@ return (
                                 type="date"
                                 value={dateFilter ? format(dateFilter, "yyyy-MM-dd") : ""}
                                 onChange={(e) => {
-                                    console.log('ðŸ”¥ FILTRO DATA ALTERADO:', e.target.value);
+                                    console.log('🔥 FILTRO DATA ALTERADO:', e.target.value);
                                     if (e.target.value) {
                                         setDateFilter(new Date(e.target.value));
                                     } else {
@@ -5500,12 +5501,12 @@ return (
                                 className="ml-auto bg-green-600 hover:bg-green-700 text-white"
                             >
                                 <FileText className="mr-2 h-4 w-4" />
-                                Exportar RelatÃ³rio Mensal
+                                Exportar Relatório Mensal
                             </Button>
                         )}
                     </div>
                     
-                    {/* CARD DE ESTATÃSTICAS DO MÃŠS SELECIONADO */}
+                    {/* CARD DE ESTATÍSTICAS DO MÊS SELECIONADO */}
                     {monthWeightStats && (
                         <div className="mt-4 pt-4 border-t">
                             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -5539,7 +5540,7 @@ return (
                                         <CheckCircle className="h-5 w-5 text-green-600" />
                                     </div>
                                     <div>
-                                        <p className="text-xs text-muted-foreground">Peso ConcluÃ­do</p>
+                                        <p className="text-xs text-muted-foreground">Peso Concluído</p>
                                         <p className="text-lg font-bold text-green-700">
                                             {monthWeightStats.completedWeight.toLocaleString('pt-BR', { 
                                                 minimumFractionDigits: 2, 
@@ -5565,11 +5566,11 @@ return (
                                 </div>
                             </div>
                             
-                            {/* Barra de progresso do mÃªs */}
+                            {/* Barra de progresso do mês */}
                             <div className="mt-4">
                                 <div className="flex items-center justify-between mb-2">
                                     <span className="text-sm font-medium text-muted-foreground">
-                                        Progresso de ConclusÃ£o do MÃªs
+                                        Progresso de Conclusão do Mês
                                     </span>
                                     <span className="text-sm font-bold text-primary">
                                         {monthWeightStats.completedPercentage.toFixed(1)}%
@@ -5585,7 +5586,7 @@ return (
                                     className="bg-green-600 hover:bg-green-700 text-white shadow-md hover:shadow-lg transition-all duration-200"
                                 >
                                     <FileText className="mr-2 h-5 w-5" />
-                                    Exportar RelatÃ³rio Completo do MÃªs
+                                    Exportar Relatório Completo do Mês
                                 </Button>
                             </div>
                         </div>
@@ -5596,7 +5597,7 @@ return (
                     <Card>
                         <CardHeader>
                             <CardTitle className="text-foreground">Lista de Pedidos</CardTitle>
-                            <CardDescription className="text-foreground/80">Acompanhe todos os pedidos de produÃ§Ã£o aprovados.</CardDescription>
+                            <CardDescription className="text-foreground/80">Acompanhe todos os pedidos de produção aprovados.</CardDescription>
                         </CardHeader>
                         <CardContent>
                             {isLoading ? (
@@ -5615,12 +5616,12 @@ return (
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle className="text-foreground">Kanban de Pedidos por MÃªs de Entrega</CardTitle>
+                                    <CardTitle className="text-foreground">Kanban de Pedidos por Mês de Entrega</CardTitle>
                                     <CardDescription className="text-foreground/80">
-                                        Visualize os pedidos organizados por mÃªs de entrega com peso total por coluna.
+                                        Visualize os pedidos organizados por mês de entrega com peso total por coluna.
                                         {filteredOrders.length > 0 && (
                                             <span className="ml-2">
-                                                {filteredOrders.filter(o => o.deliveryDate || o.status === 'ConcluÃ­do').length} de {filteredOrders.length} pedidos exibidos
+                                                {filteredOrders.filter(o => o.deliveryDate || o.status === 'Concluído').length} de {filteredOrders.length} pedidos exibidos
                                             </span>
                                         )}
                                     </CardDescription>
@@ -5628,7 +5629,7 @@ return (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-green-600"></div>
-                                        <span>ConcluÃ­do</span>
+                                        <span>Concluído</span>
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-blue-500"></div>
@@ -5636,7 +5637,7 @@ return (
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-gray-600"></div>
-                                        <span>Em ProduÃ§Ã£o</span>
+                                        <span>Em Produção</span>
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-orange-500"></div>
@@ -5666,7 +5667,7 @@ return (
                         <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
                             <Card>
                                 <CardHeader className="pb-2">
-                                    <CardDescription>Peso em fabricaÃ§Ã£o</CardDescription>
+                                    <CardDescription>Peso em fabricação</CardDescription>
                                     <CardTitle className="text-2xl text-primary">
                                         {occupationStats.totalInProduction.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                                     </CardTitle>
@@ -5686,7 +5687,7 @@ return (
                             </Card>
                             <Card>
                                 <CardHeader className="pb-2">
-                                    <CardDescription>Aguardando inÃ­cio de etapa</CardDescription>
+                                    <CardDescription>Aguardando início de etapa</CardDescription>
                                     <CardTitle className="text-2xl text-orange-500">
                                         {occupationStats.waitingWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                                     </CardTitle>
@@ -5697,13 +5698,13 @@ return (
                             </Card>
                             <Card>
                                 <CardHeader className="pb-2">
-                                    <CardDescription>FabricaÃ§Ã£o mÃ©dia mensal</CardDescription>
+                                    <CardDescription>Fabricação média mensal</CardDescription>
                                     <CardTitle className="text-2xl text-green-500">
-                                        {monthlyProductionStats.average.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg/mÃªs
+                                        {monthlyProductionStats.average.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg/mês
                                     </CardTitle>
                                 </CardHeader>
                                 <CardContent className="text-sm text-muted-foreground">
-                                    MÃ©dia dos Ãºltimos 12 meses
+                                    Média dos últimos 12 meses
                                 </CardContent>
                             </Card>
                         </div>
@@ -5713,7 +5714,7 @@ return (
                                 <CardHeader>
                                     <CardTitle>Carga atual por setor</CardTitle>
                                     <CardDescription>
-                                        O peso integral de cada item Ã© atribuÃ­do Ã  etapa marcada como Em Andamento.
+                                        O peso integral de cada item é atribuído à etapa marcada como Em Andamento.
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent>
@@ -5730,14 +5731,14 @@ return (
                                                         <div>
                                                             <p className="font-semibold text-foreground">{sector.stageName}</p>
                                                             <p className="text-xs text-muted-foreground">
-                                                                {sector.itemCount} itens Â· {sector.orderCount} pedidos
+                                                                {sector.itemCount} itens · {sector.orderCount} pedidos
                                                             </p>
                                                         </div>
                                                         <div className="text-right">
                                                             <p className="font-semibold">
                                                                 {sector.weight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                                                             </p>
-                                                            <p className="text-xs text-muted-foreground">{sector.percentage.toFixed(1)}% da carga em fabricaÃ§Ã£o</p>
+                                                            <p className="text-xs text-muted-foreground">{sector.percentage.toFixed(1)}% da carga em fabricação</p>
                                                         </div>
                                                     </div>
                                                     <Progress value={sector.percentage} className="h-3" />
@@ -5750,8 +5751,8 @@ return (
 
                             <Card>
                                 <CardHeader>
-                                    <CardTitle>ProduÃ§Ã£o concluÃ­da</CardTitle>
-                                    <CardDescription>HistÃ³rico mensal em kg dos Ãºltimos 12 meses.</CardDescription>
+                                    <CardTitle>Produção concluída</CardTitle>
+                                    <CardDescription>Histórico mensal em kg dos últimos 12 meses.</CardDescription>
                                 </CardHeader>
                                 <CardContent>
                                     <div className="space-y-3">
@@ -5771,7 +5772,7 @@ return (
                                     </div>
                                     <Separator className="my-4" />
                                     <div className="flex justify-between text-sm">
-                                        <span className="text-muted-foreground">Total no perÃ­odo</span>
+                                        <span className="text-muted-foreground">Total no período</span>
                                         <span className="font-semibold">
                                             {monthlyProductionStats.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                                         </span>
@@ -5784,16 +5785,16 @@ return (
                             <CardHeader>
                                 <CardTitle>Itens por setor</CardTitle>
                                 <CardDescription>
-                                    Selecione um setor para visualizar os itens que compÃµem sua carga atual.
+                                    Selecione um setor para visualizar os itens que compõem sua carga atual.
                                 </CardDescription>
                             </CardHeader>
                             <CardContent>
                                 {occupationStats.sectors.length === 0 ? (
                                     <div className="py-10 text-center text-muted-foreground">
-                                        Nenhum item em fabricaÃ§Ã£o.
+                                        Nenhum item em fabricação.
                                     </div>
                                 ) : (
-                                    <div className="space-y-3" aria-label="Setores de fabricaÃ§Ã£o">
+                                    <div className="space-y-3" aria-label="Setores de fabricação">
                                         {occupationStats.sectors.map(sector => (
                                             <details
                                                 key={sector.stageName}
@@ -5805,7 +5806,7 @@ return (
                                                         <div className="min-w-0">
                                                             <p className="truncate font-semibold text-foreground">{sector.stageName}</p>
                                                             <p className="text-sm text-muted-foreground">
-                                                                {sector.itemCount} {sector.itemCount === 1 ? 'item' : 'itens'} Â· {sector.orderCount} {sector.orderCount === 1 ? 'pedido' : 'pedidos'}
+                                                                {sector.itemCount} {sector.itemCount === 1 ? 'item' : 'itens'} · {sector.orderCount} {sector.orderCount === 1 ? 'pedido' : 'pedidos'}
                                                             </p>
                                                         </div>
                                                     </div>
@@ -5853,7 +5854,7 @@ return (
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle className="text-foreground">CalendÃ¡rio de Entregas</CardTitle>
+                                    <CardTitle className="text-foreground">Calendário de Entregas</CardTitle>
                                     <CardDescription className="text-foreground/80">
                                         Visualize os pedidos organizados por data de entrega. 
                                         {filteredOrders.length > 0 && (
@@ -5866,7 +5867,7 @@ return (
                                 <div className="flex items-center gap-2 text-sm text-muted-foreground">
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-green-600"></div>
-                                        <span>ConcluÃ­do</span>
+                                        <span>Concluído</span>
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-blue-500"></div>
@@ -5874,7 +5875,7 @@ return (
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-gray-600"></div>
-                                        <span>Em ProduÃ§Ã£o</span>
+                                        <span>Em Produção</span>
                                     </div>
                                     <div className="flex items-center gap-1">
                                         <div className="w-3 h-3 rounded bg-orange-500"></div>
@@ -5894,7 +5895,7 @@ return (
                                     <CalendarDays className="mx-auto h-12 w-12 text-gray-400 mb-4" />
                                     <h3 className="text-lg font-medium mb-2 text-foreground">Nenhum pedido com data de entrega</h3>
                                     <p className="text-foreground/70">
-                                        Os pedidos aparecerÃ£o no calendÃ¡rio quando tiverem data de entrega definida.
+                                        Os pedidos aparecerão no calendário quando tiverem data de entrega definida.
                                     </p>
                                 </div>
                             ) : (
@@ -5922,7 +5923,7 @@ return (
           
           if (savedPosition > 0) {
             kanbanScrollRef.current.scrollLeft = savedPosition;
-            console.log('ðŸ”„ Restaurando scroll horizontal ao fechar:', savedPosition);
+            console.log('🔄 Restaurando scroll horizontal ao fechar:', savedPosition);
           }
         }
         
@@ -5934,7 +5935,7 @@ return (
             const savedScroll = columnScrollPositions.current.get(columnId);
             if (savedScroll !== undefined) {
               column.scrollTop = savedScroll;
-              console.log(`ðŸ”„ Restaurando scroll da coluna ${columnId}:`, savedScroll);
+              console.log(`🔄 Restaurando scroll da coluna ${columnId}:`, savedScroll);
             }
           }
         });
@@ -5947,22 +5948,22 @@ return (
       <>
         {/* Header fixo */}
         <SheetHeader className="flex-shrink-0 pb-4 border-b">
-          <SheetTitle className="font-headline text-2xl">Pedido NÂº {selectedOrder.quotationNumber}</SheetTitle>
+          <SheetTitle className="font-headline text-2xl">Pedido Nº {selectedOrder.quotationNumber}</SheetTitle>
           <SheetDescription>
             Cliente: <span className="font-medium text-foreground">{selectedOrder.customer?.name || 'N/A'}</span>
           </SheetDescription>
         </SheetHeader>
 
-        {/* ConteÃºdo principal */}
+        {/* Conteúdo principal */}
         {isEditing ? (
-          // MODO DE EDIÃ‡ÃƒO - COM SCROLL CORRIGIDO
+          // MODO DE EDIÇÃO - COM SCROLL CORRIGIDO
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onOrderSubmit)} className="flex flex-col flex-1 min-h-0">
-              {/* Ãrea de conteÃºdo com scroll */}
+              {/* Área de conteúdo com scroll */}
               <div className="flex-1 overflow-hidden py-4">
                 <ScrollArea className="h-full pr-4">
                   <div className="space-y-6">
-                    {/* InformaÃ§Ãµes BÃ¡sicas do Pedido */}
+                    {/* Informações Básicas do Pedido */}
                     <Card className="p-4 bg-secondary/50">
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                         <FormField control={form.control} name="customer" render={({ field }) => (
@@ -5992,7 +5993,7 @@ return (
                         <FormField control={form.control} name="projectName" render={({ field }) => (
                           <FormItem>
                             <FormLabel>Projeto do Cliente</FormLabel>
-                            <FormControl><Input placeholder="Ex: AmpliaÃ§Ã£o Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
+                            <FormControl><Input placeholder="Ex: Ampliação Planta XPTO" {...field} value={field.value ?? ''} /></FormControl>
                             <FormMessage />
                           </FormItem>
                         )}/>
@@ -6018,10 +6019,10 @@ return (
                                   </SelectTrigger>
                                 </FormControl>
                                 <SelectContent>
-                                  <SelectItem value="Aguardando ProduÃ§Ã£o">Aguardando ProduÃ§Ã£o</SelectItem>
-                                  <SelectItem value="Em ProduÃ§Ã£o">Em ProduÃ§Ã£o</SelectItem>
+                                  <SelectItem value="Aguardando Produção">Aguardando Produção</SelectItem>
+                                  <SelectItem value="Em Produção">Em Produção</SelectItem>
                                   <SelectItem value="Pronto para Entrega">Pronto para Entrega</SelectItem>
-                                  <SelectItem value="ConcluÃ­do">ConcluÃ­do</SelectItem>
+                                  <SelectItem value="Concluído">Concluído</SelectItem>
                                   <SelectItem value="Cancelado">Cancelado</SelectItem>
                                 </SelectContent>
                               </Select>
@@ -6032,7 +6033,7 @@ return (
                       </div>
 
                       {/* Controle de Data Book */}
-                      {form.watch("status") === "ConcluÃ­do" && (
+                      {form.watch("status") === "Concluído" && (
                         <Card className="mt-4">
                           <CardHeader>
                             <CardTitle>Controle de Data Book</CardTitle>
@@ -6061,14 +6062,14 @@ return (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
                         <FormField control={form.control} name="quotationNumber" render={({ field }) => (
                           <FormItem>
-                            <FormLabel>NÂº Pedido (Compra)</FormLabel>
+                            <FormLabel>Nº Pedido (Compra)</FormLabel>
                             <FormControl>
                               <Input 
-                                placeholder="NÂº do Pedido de Compra do Cliente" 
+                                placeholder="Nº do Pedido de Compra do Cliente" 
                                 {...field} 
                                 value={field.value ?? ''} 
                                 onChange={(e) => {
-                                  console.log('ðŸ“ [DEBUG] NÃºmero do pedido alterado:', e.target.value);
+                                  console.log('📝 [DEBUG] Número do pedido alterado:', e.target.value);
                                   field.onChange(e.target.value);
                                 }}
                               />
@@ -6084,7 +6085,7 @@ return (
                                 type="date"
                                 value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
                                 onChange={(e) => {
-                                  console.log('ðŸ”¥ DATA ENTREGA ALTERADA:', e.target.value);
+                                  console.log('🔥 DATA ENTREGA ALTERADA:', e.target.value);
                                   if (e.target.value) {
                                     field.onChange(new Date(e.target.value));
                                   } else {
@@ -6116,8 +6117,8 @@ return (
                         <FormField control={form.control} name="documents.drawings" render={({ field }) => (
                           <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
                             <div className="space-y-0.5">
-                              <FormLabel>Desenhos TÃ©cnicos</FormLabel>
-                              <FormDescription>Marque se os desenhos foram recebidos e estÃ£o na pasta.</FormDescription>
+                              <FormLabel>Desenhos Técnicos</FormLabel>
+                              <FormDescription>Marque se os desenhos foram recebidos e estão na pasta.</FormDescription>
                             </div>
                             <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
                           </FormItem>
@@ -6125,8 +6126,8 @@ return (
                         <FormField control={form.control} name="documents.inspectionTestPlan" render={({ field }) => (
                           <FormItem className="flex flex-row items-center justify-between rounded-lg border p-3 shadow-sm">
                             <div className="space-y-0.5">
-                              <FormLabel>Plano de InspeÃ§Ã£o e Testes (PIT)</FormLabel>
-                              <FormDescription>Marque se o plano de inspeÃ§Ã£o foi recebido.</FormDescription>
+                              <FormLabel>Plano de Inspeção e Testes (PIT)</FormLabel>
+                              <FormDescription>Marque se o plano de inspeção foi recebido.</FormDescription>
                             </div>
                             <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
                           </FormItem>
@@ -6143,11 +6144,11 @@ return (
                       </CardContent>
                     </Card>
 
-                    {/* Itens do Pedido - MODO DE EDIÃ‡ÃƒO COM ADICIONAR/REMOVER */}
+                    {/* Itens do Pedido - MODO DE EDIÇÃO COM ADICIONAR/REMOVER */}
                     <Card>
                       <CardHeader>
                         <CardTitle className="flex items-center justify-between">
-                          <span>Itens do Pedido (EditÃ¡vel)</span>
+                          <span>Itens do Pedido (Editável)</span>
                           <div className="flex items-center gap-4">
                             <div className="flex items-center gap-2 text-sm text-muted-foreground">
                               <Package className="h-4 w-4" />
@@ -6171,7 +6172,7 @@ return (
                           <div className="text-center py-8 text-muted-foreground">
                             <Package className="h-8 w-8 mx-auto mb-2" />
                             <p>Nenhum item no pedido</p>
-                            <p className="text-xs">Este pedido nÃ£o possui itens cadastrados.</p>
+                            <p className="text-xs">Este pedido não possui itens cadastrados.</p>
                             <div className="mt-4">
                               <Button
                                 type="button"
@@ -6190,7 +6191,7 @@ return (
                             const itemProgress = calculateItemProgress(watchedItems[index] || {});
                             return (
                               <Card key={field.id} className="p-4 bg-secondary relative">
-                                {/* BotÃ£o de ExclusÃ£o no Canto Superior Direito */}
+                                {/* Botão de Exclusão no Canto Superior Direito */}
                                 <Button
                                   type="button"
                                   variant="ghost"
@@ -6202,8 +6203,8 @@ return (
                                   <Trash2 className="h-4 w-4" />
                                 </Button>
 
-                                <div className="space-y-4 pr-10"> {/* Adicionar padding-right para evitar sobreposiÃ§Ã£o com botÃ£o */}
-                                  {/* Header do Item com NÃºmero */}
+                                <div className="space-y-4 pr-10"> {/* Adicionar padding-right para evitar sobreposição com botão */}
+                                  {/* Header do Item com Número */}
                                   <div className="flex items-center gap-2 pb-2 border-b border-border/50">
                                     <div className="bg-primary text-primary-foreground rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold">
                                       {index + 1}
@@ -6213,7 +6214,7 @@ return (
                                       {itemProgress === 100 && (
                                         <Badge variant="default" className="ml-2 bg-green-600 hover:bg-green-600/90">
                                           <CheckCircle className="mr-1 h-3 w-3" />
-                                          ConcluÃ­do
+                                          Concluído
                                         </Badge>
                                       )}
                                     </h4>
@@ -6221,10 +6222,10 @@ return (
 
                                   <FormField control={form.control} name={`items.${index}.description`} render={({ field }) => (
                                     <FormItem>
-                                      <FormLabel>DescriÃ§Ã£o do Item</FormLabel>
+                                      <FormLabel>Descrição do Item</FormLabel>
                                       <FormControl>
                                         <Textarea 
-                                          placeholder="DescriÃ§Ã£o completa do item" 
+                                          placeholder="Descrição completa do item" 
                                           {...field} 
                                           className="min-h-[80px]"
                                         />
@@ -6236,22 +6237,22 @@ return (
                                   <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                                     <FormField control={form.control} name={`items.${index}.itemNumber`} render={({ field }) => (
                                       <FormItem>
-                                        <FormLabel>NÂº Item PC</FormLabel>
+                                        <FormLabel>Nº Item PC</FormLabel>
                                         <FormControl>
                                           <Input placeholder="Ex: 001" {...field} value={field.value || ''} />
                                         </FormControl>
                                         <FormMessage />
                                         <FormDescription className="text-xs">
-                                          NÂº do item conforme Pedido de Compra do cliente
+                                          Nº do item conforme Pedido de Compra do cliente
                                         </FormDescription>
                                       </FormItem>
                                     )}/>
 
                                     <FormField control={form.control} name={`items.${index}.code`} render={({ field }) => (
                                       <FormItem>
-                                        <FormLabel>CÃ³digo</FormLabel>
+                                        <FormLabel>Código</FormLabel>
                                         <FormControl>
-                                          <Input placeholder="CÃ³d. Produto" {...field} value={field.value || ''} />
+                                          <Input placeholder="Cód. Produto" {...field} value={field.value || ''} />
                                         </FormControl>
                                         <FormMessage />
                                       </FormItem>
@@ -6309,15 +6310,15 @@ return (
                                                   : ""
                                               }
                                               onChange={(e) => {
-                                                console.log('ðŸ“… [ITEM DELIVERY] MudanÃ§a detectada:', e.target.value);
+                                                console.log('📅 [ITEM DELIVERY] Mudança detectada:', e.target.value);
                                                 if (e.target.value) {
                                                   // Criar data de forma mais robusta
                                                   const [year, month, day] = e.target.value.split('-').map(Number);
                                                   const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
-                                                  console.log('ðŸ“… [ITEM DELIVERY] Nova data criada:', newDate);
+                                                  console.log('📅 [ITEM DELIVERY] Nova data criada:', newDate);
                                                   field.onChange(newDate);
                                                 } else {
-                                                  console.log('ðŸ“… [ITEM DELIVERY] Data limpa');
+                                                  console.log('📅 [ITEM DELIVERY] Data limpa');
                                                   field.onChange(null);
                                                 }
                                               }}
@@ -6327,28 +6328,28 @@ return (
                                           </FormControl>
                                           <FormMessage />
                                           <FormDescription className="text-xs text-muted-foreground">
-                                            Data especÃ­fica de entrega deste item (opcional)
+                                            Data específica de entrega deste item (opcional)
                                           </FormDescription>
                                         </FormItem>
                                       )}
                                     />
                                   </div>
 
-                                  {/* SeÃ§Ã£o de Embarque para Itens ConcluÃ­dos */}
+                                  {/* Seção de Embarque para Itens Concluídos */}
                                   {itemProgress === 100 && (
                                     <>
                                       <Separator className="my-3" />
                                       <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                                         <div className="flex items-center gap-2 mb-3">
                                           <CheckCircle className="h-5 w-5 text-green-600" />
-                                          <h5 className="font-semibold text-green-800">Item ConcluÃ­do - Preencha as InformaÃ§Ãµes de Embarque</h5>
+                                          <h5 className="font-semibold text-green-800">Item Concluído - Preencha as Informações de Embarque</h5>
                                         </div>
                                         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                           <FormField control={form.control} name={`items.${index}.shippingList`} render={({ field }) => (
                                             <FormItem>
                                               <FormLabel>Lista de Embarque (LE)</FormLabel>
                                               <FormControl>
-                                                <Input placeholder="NÂº da LE" {...field} value={field.value ?? ''} />
+                                                <Input placeholder="Nº da LE" {...field} value={field.value ?? ''} />
                                               </FormControl>
                                               <FormMessage />
                                             </FormItem>
@@ -6358,7 +6359,7 @@ return (
                                             <FormItem>
                                               <FormLabel>Nota Fiscal (NF-e) *</FormLabel>
                                               <FormControl>
-                                                <Input placeholder="NÂº da NF-e" {...field} value={field.value ?? ''} />
+                                                <Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} />
                                               </FormControl>
                                               <FormMessage />
                                             </FormItem>
@@ -6382,14 +6383,14 @@ return (
                                                         : ""
                                                     }
                                                     onChange={(e) => {
-                                                      console.log('ðŸ“… [SHIPPING] MudanÃ§a detectada:', e.target.value);
+                                                      console.log('📅 [SHIPPING] Mudança detectada:', e.target.value);
                                                       if (e.target.value) {
                                                         const [year, month, day] = e.target.value.split('-').map(Number);
                                                         const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
-                                                        console.log('ðŸ“… [SHIPPING] Nova data criada:', newDate);
+                                                        console.log('📅 [SHIPPING] Nova data criada:', newDate);
                                                         field.onChange(newDate);
                                                       } else {
-                                                        console.log('ðŸ“… [SHIPPING] Data limpa');
+                                                        console.log('📅 [SHIPPING] Data limpa');
                                                         field.onChange(null);
                                                       }
                                                     }}
@@ -6402,19 +6403,19 @@ return (
                                           />
                                         </div>
 
-                                        {/* Indicador de Atraso/AntecipaÃ§Ã£o */}
+                                        {/* Indicador de Atraso/Antecipação */}
                                         {watchedItems[index]?.shippingDate && selectedOrder.deliveryDate && (
                                           <div className="mt-3">
                                             {new Date(watchedItems[index].shippingDate) <= selectedOrder.deliveryDate ? (
                                               <div className="flex items-center gap-2 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
                                                 <CheckCircle className="h-4 w-4" />
-                                                <span className="font-medium">Item serÃ¡ entregue no prazo</span>
+                                                <span className="font-medium">Item será entregue no prazo</span>
                                               </div>
                                             ) : (
                                               <div className="flex items-center gap-2 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
                                                 <AlertTriangle className="h-4 w-4" />
                                                 <span className="font-medium">
-                                                  Item serÃ¡ entregue {Math.ceil((new Date(watchedItems[index].shippingDate).getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) apÃ³s o prazo
+                                                  Item será entregue {Math.ceil((new Date(watchedItems[index].shippingDate).getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
                                                 </span>
                                               </div>
                                             )}
@@ -6422,7 +6423,7 @@ return (
                                         )}
 
                                         <p className="text-xs text-muted-foreground mt-2">
-                                          * Campos obrigatÃ³rios para finalizaÃ§Ã£o do embarque
+                                          * Campos obrigatórios para finalização do embarque
                                         </p>
                                       </div>
                                     </>
@@ -6438,12 +6439,12 @@ return (
                 </ScrollArea>
               </div>
               
-              {/* Footer fixo com botÃµes */}
+              {/* Footer fixo com botões */}
               <div className="flex-shrink-0 pt-4 border-t bg-background">
                 <div className="flex items-center justify-between gap-4 flex-wrap">
                   <div className="text-sm text-muted-foreground">
                     <span>Itens: {fields.length}</span>
-                    <span className="mx-2">â€¢</span>
+                    <span className="mx-2">•</span>
                     <span>Peso Total: <span className="font-semibold">{currentTotalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg</span></span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -6451,7 +6452,7 @@ return (
                       Cancelar
                     </Button>
                     <Button type="submit" disabled={form.formState.isSubmitting || fields.length === 0}>
-                      {form.formState.isSubmitting ? "Salvando..." : "Salvar AlteraÃ§Ãµes"}
+                      {form.formState.isSubmitting ? "Salvando..." : "Salvar Alterações"}
                     </Button>
                   </div>
                 </div>
@@ -6459,12 +6460,12 @@ return (
             </form>
           </Form>
         ) : (
-          // MODO DE VISUALIZAÃ‡ÃƒO - MANTÃ‰M ESTRUTURA ORIGINAL
+          // MODO DE VISUALIZAÇÃO - MANTÉM ESTRUTURA ORIGINAL
           <div className="flex flex-col flex-1 min-h-0">
             <div className="flex-1 overflow-hidden py-4">
               <ScrollArea className="h-full pr-4">
                 <div className="space-y-6">
-                  {/* InformaÃ§Ãµes Gerais */}
+                  {/* Informações Gerais */}
                   <Card className="p-6 bg-secondary/50">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                       <div className="space-y-2">
@@ -6527,7 +6528,7 @@ return (
                             <FileText className="h-4 w-4" />
                           </div>
                           <div>
-                            <p className="font-medium">Desenhos TÃ©cnicos</p>
+                            <p className="font-medium">Desenhos Técnicos</p>
                             <p className="text-sm text-muted-foreground">{selectedOrder.documents?.drawings ? 'Recebido' : 'Pendente'}</p>
                           </div>
                         </div>
@@ -6536,7 +6537,7 @@ return (
                             <ClipboardCheck className="h-4 w-4" />
                           </div>
                           <div>
-                            <p className="font-medium">Plano de InspeÃ§Ã£o</p>
+                            <p className="font-medium">Plano de Inspeção</p>
                             <p className="text-sm text-muted-foreground">{selectedOrder.documents?.inspectionTestPlan ? 'Recebido' : 'Pendente'}</p>
                           </div>
                         </div>
@@ -6564,7 +6565,7 @@ return (
                         {progressClipboard && (
                           <Button variant="outline" size="sm" onClick={handleCancelCopy}>
                             <X className="mr-2 h-4 w-4" />
-                            Cancelar CÃ³pia
+                            Cancelar Cópia
                           </Button>
                         )}
                         <div className="flex items-center space-x-2">
@@ -6592,7 +6593,7 @@ return (
                                 />
                                 <div>
                                   <h4 className="font-medium">{item.description}</h4>
-                                  {item.code && <p className="text-sm text-muted-foreground">CÃ³digo: {item.code}</p>}
+                                  {item.code && <p className="text-sm text-muted-foreground">Código: {item.code}</p>}
                                 </div>
                               </div>
                               <div className="flex items-center gap-2">
@@ -6645,7 +6646,7 @@ return (
                             </div>
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                               <div>
-                                <span className="text-muted-foreground">NÂº Item PC:</span>
+                                <span className="text-muted-foreground">Nº Item PC:</span>
                                 <p className="font-medium">{item.itemNumber || 'N/A'}</p>
                               </div>
                               <div>
@@ -6678,7 +6679,7 @@ return (
                                 <div className="bg-green-50 border border-green-200 rounded-lg p-4">
                                   <div className="flex items-center gap-2 mb-3">
                                     <CheckCircle className="h-5 w-5 text-green-600" />
-                                    <h5 className="font-semibold text-green-800">Item ConcluÃ­do - InformaÃ§Ãµes de Embarque</h5>
+                                    <h5 className="font-semibold text-green-800">Item Concluído - Informações de Embarque</h5>
                                   </div>
                                   <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                                     <div>
@@ -6716,7 +6717,7 @@ return (
                                       <div className="flex items-center gap-1">
                                         <AlertTriangle className="h-3 w-3" />
                                         <span className="font-medium">
-                                          Entregue {Math.ceil((item.shippingDate.getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) apÃ³s o prazo
+                                          Entregue {Math.ceil((item.shippingDate.getTime() - selectedOrder.deliveryDate.getTime()) / (1000 * 60 * 60 * 24))} dia(s) após o prazo
                                         </span>
                                       </div>
                                     </div>
@@ -6728,7 +6729,7 @@ return (
                         );
                       })}
 
-                        {/* FormulÃ¡rio para adicionar novo item */}
+                        {/* Formulário para adicionar novo item */}
                         {isAddingItem && (
                           <Card className="p-4 bg-blue-50 border-blue-200">
                             <div className="space-y-4">
@@ -6743,10 +6744,10 @@ return (
 
                               <div className="space-y-4">
                                 <div>
-                                  <Label htmlFor="new-description" className="text-blue-800">DescriÃ§Ã£o do Item *</Label>
+                                  <Label htmlFor="new-description" className="text-blue-800">Descrição do Item *</Label>
                                   <Textarea
                                     id="new-description"
-                                    placeholder="DescriÃ§Ã£o completa do item"
+                                    placeholder="Descrição completa do item"
                                     value={newItemForm.description}
                                     onChange={(e) => setNewItemForm(prev => ({ ...prev, description: e.target.value }))}
                                     className="min-h-[80px] border-blue-300 focus:border-blue-500"
@@ -6755,7 +6756,7 @@ return (
 
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                                   <div>
-                                    <Label htmlFor="new-itemNumber" className="text-blue-800">NÂº Item PC</Label>
+                                    <Label htmlFor="new-itemNumber" className="text-blue-800">Nº Item PC</Label>
                                     <Input
                                       id="new-itemNumber"
                                       placeholder="Ex: 001"
@@ -6766,10 +6767,10 @@ return (
                                   </div>
 
                                   <div>
-                                    <Label htmlFor="new-code" className="text-blue-800">CÃ³digo</Label>
+                                    <Label htmlFor="new-code" className="text-blue-800">Código</Label>
                                     <Input
                                       id="new-code"
-                                      placeholder="CÃ³d. Produto"
+                                      placeholder="Cód. Produto"
                                       value={newItemForm.code}
                                       onChange={(e) => setNewItemForm(prev => ({ ...prev, code: e.target.value }))}
                                       className="border-blue-300 focus:border-blue-500"
@@ -6832,7 +6833,7 @@ return (
               </ScrollArea>
             </div>
             
-            {/* Footer de visualizaÃ§Ã£o limpo */}
+            {/* Footer de visualização limpo */}
             <UpdatedSheetFooter 
               selectedOrder={selectedOrder}
               selectedItems={selectedItems}
@@ -6856,11 +6857,11 @@ return (
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <DollarSign className="h-5 w-5 text-primary" />
-            AnÃ¡lise de Custos da OS {selectedOrder?.internalOS || 'N/A'}
+            Análise de Custos da OS {selectedOrder?.internalOS || 'N/A'}
           </DialogTitle>
           <DialogDescription>
-            Pedido {selectedOrder?.quotationNumber || 'N/A'} â€” {selectedOrder?.customer?.name || 'Cliente nÃ£o informado'}.
-            Os valores representam custos de fabricaÃ§Ã£o salvos na calculadora de preÃ§os, multiplicados pela quantidade do pedido.
+            Pedido {selectedOrder?.quotationNumber || 'N/A'} — {selectedOrder?.customer?.name || 'Cliente não informado'}.
+            Os valores representam custos de fabricação salvos na calculadora de preços, multiplicados pela quantidade do pedido.
           </DialogDescription>
         </DialogHeader>
 
@@ -6877,11 +6878,11 @@ return (
                 <p className="text-2xl font-bold">{costAnalysis.items.length}</p>
               </Card>
               <Card className="p-4 border-green-600/40">
-                <p className="text-xs text-muted-foreground">Com precificaÃ§Ã£o</p>
+                <p className="text-xs text-muted-foreground">Com precificação</p>
                 <p className="text-2xl font-bold text-green-600">{costAnalysis.pricedItems}</p>
               </Card>
               <Card className="p-4 border-amber-600/40">
-                <p className="text-xs text-muted-foreground">Sem precificaÃ§Ã£o</p>
+                <p className="text-xs text-muted-foreground">Sem precificação</p>
                 <p className="text-2xl font-bold text-amber-600">{costAnalysis.unpricedItems}</p>
               </Card>
               <Card className="p-4 border-primary/50 bg-primary/5">
@@ -6893,19 +6894,19 @@ return (
             <Card>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Custos por item</CardTitle>
-                <CardDescription>Itens sem precificaÃ§Ã£o salva sÃ£o apresentados com custo zero.</CardDescription>
+                <CardDescription>Itens sem precificação salva são apresentados com custo zero.</CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="overflow-x-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>CÃ³digo</TableHead>
-                        <TableHead>DescriÃ§Ã£o</TableHead>
+                        <TableHead>Código</TableHead>
+                        <TableHead>Descrição</TableHead>
                         <TableHead className="text-right">Qtd.</TableHead>
-                        <TableHead className="text-right">Custo unitÃ¡rio</TableHead>
+                        <TableHead className="text-right">Custo unitário</TableHead>
                         <TableHead className="text-right">Custo total</TableHead>
-                        <TableHead>SituaÃ§Ã£o</TableHead>
+                        <TableHead>Situação</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -6918,7 +6919,7 @@ return (
                           <TableCell className="text-right font-mono font-semibold">{formatCurrency(item.totalCost)}</TableCell>
                           <TableCell>
                             <Badge variant={item.hasSavedPricing ? 'default' : 'secondary'} className={item.hasSavedPricing ? 'bg-green-600' : 'text-amber-700'}>
-                              {item.hasSavedPricing ? 'PrecificaÃ§Ã£o salva' : 'Sem precificaÃ§Ã£o'}
+                              {item.hasSavedPricing ? 'Precificação salva' : 'Sem precificação'}
                             </Badge>
                           </TableCell>
                         </TableRow>
@@ -6932,13 +6933,13 @@ return (
             <Card className="p-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 text-sm">
                 <div className="flex justify-between"><span>Materiais</span><strong>{formatCurrency(costAnalysis.materialTotal)}</strong></div>
-                <div className="flex justify-between"><span>ProduÃ§Ã£o / mÃ£o de obra</span><strong>{formatCurrency(costAnalysis.productionTotal)}</strong></div>
+                <div className="flex justify-between"><span>Produção / mão de obra</span><strong>{formatCurrency(costAnalysis.productionTotal)}</strong></div>
                 <div className="flex justify-between"><span>Usinagem</span><strong>{formatCurrency(costAnalysis.machiningTotal)}</strong></div>
-                <div className="flex justify-between"><span>Insumos e consumÃ­veis</span><strong>{formatCurrency(costAnalysis.consumablesTotal)}</strong></div>
+                <div className="flex justify-between"><span>Insumos e consumíveis</span><strong>{formatCurrency(costAnalysis.consumablesTotal)}</strong></div>
               </div>
               <Separator className="my-4" />
               <div className="flex justify-between items-center text-lg">
-                <span className="font-semibold">Custo total de fabricaÃ§Ã£o da OS</span>
+                <span className="font-semibold">Custo total de fabricação da OS</span>
                 <span className="font-bold text-primary">{formatCurrency(costAnalysis.grandTotal)}</span>
               </div>
             </Card>
@@ -6949,7 +6950,7 @@ return (
           <Button variant="outline" onClick={() => setIsCostAnalysisOpen(false)}>Fechar</Button>
           <Button onClick={handleExportCostAnalysis} disabled={!costAnalysis || isLoadingCostAnalysis}>
             <Download className="mr-2 h-4 w-4" />
-            Exportar anÃ¡lise em PDF
+            Exportar análise em PDF
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -6961,7 +6962,7 @@ return (
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
           <DialogDescription>
-            Atualize o status e as datas para cada etapa de fabricaÃ§Ã£o. O cronograma serÃ¡ calculado automaticamente considerando apenas dias Ãºteis.
+            Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
           </DialogDescription>
           
           {/* DEBUG - REMOVER DEPOIS */}
@@ -6969,29 +6970,29 @@ return (
             <div className="flex items-center gap-2">
               <CalendarIcon className="h-4 w-4 text-blue-600" />
               <p className="text-sm text-blue-800">
-                <strong>Importante:</strong> O sistema considera apenas dias Ãºteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
+                <strong>Importante:</strong> O sistema considera apenas dias úteis (segunda a sexta-feira), excluindo feriados nacionais brasileiros. Suporta valores decimais (ex: 0.5 para meio dia, 1.5 para 1 dia e meio).
               </p>
             </div>
           </div>
         </DialogHeader>
 
-        {/* Barra de progresso no cabeÃ§alho */}
+        {/* Barra de progresso no cabeçalho */}
         <div className="px-6 py-4 border-b">
           <div className="flex items-center justify-between mb-2">
             <span className="text-sm font-medium">
-              Progresso: {editedPlan.filter(s => s.status === 'ConcluÃ­do').length} de {editedPlan.length} etapas
+              Progresso: {editedPlan.filter(s => s.status === 'Concluído').length} de {editedPlan.length} etapas
             </span>
             <span className="text-sm text-muted-foreground">
-              {Math.round((editedPlan.filter(s => s.status === 'ConcluÃ­do').length / editedPlan.length) * 100)}%
+              {Math.round((editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100)}%
             </span>
           </div>
           <Progress 
-            value={(editedPlan.filter(s => s.status === 'ConcluÃ­do').length / editedPlan.length) * 100} 
+            value={(editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100} 
             className="h-2" 
           />
         </div>
 
-        {/* AÃ§Ãµes em lote */}
+        {/* Ações em lote */}
         <div className="px-6 py-3 border-b">
           <div className="flex gap-2">
             <Button 
@@ -6999,33 +7000,33 @@ return (
               onClick={() => autoScheduleFromToday()}
               size="sm"
             >
-              ðŸ“… Agendar a partir de hoje
+              📅 Agendar a partir de hoje
             </Button>
             <Button 
               variant="outline" 
               onClick={() => markPreviousAsCompleted()}
               size="sm"
             >
-              âœ… Marcar anteriores como concluÃ­das
+              ✅ Marcar anteriores como concluídas
             </Button>
             <Button 
               variant="outline" 
               onClick={() => applyStandardDurations()}
               size="sm"
             >
-              â±ï¸ Aplicar duraÃ§Ãµes padrÃ£o
+              ⏱️ Aplicar durações padrão
             </Button>
           </div>
         </div>
 
-        {/* Ãrea de conteÃºdo com scroll */}
+        {/* Área de conteúdo com scroll */}
         <div className="flex-1 overflow-auto">
           <div className="min-w-[1200px] p-4">
             {isFetchingPlan ? (
               <div className="flex justify-center items-center h-48">
                 <div className="text-center">
                   <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-2"></div>
-                  <p>Buscando plano de fabricaÃ§Ã£o...</p>
+                  <p>Buscando plano de fabricação...</p>
                 </div>
               </div>
             ) : (editedPlan && editedPlan.length > 0) ? (
@@ -7036,11 +7037,11 @@ return (
                       <TableHead className="w-12">#</TableHead>
                       <TableHead className="min-w-[200px]">Etapa</TableHead>
                       <TableHead className="w-32">Status</TableHead>
-                      <TableHead className="w-32">InÃ­cio</TableHead>
+                      <TableHead className="w-32">Início</TableHead>
                       <TableHead className="w-32">Fim</TableHead>
-                      <TableHead className="w-24">DuraÃ§Ã£o</TableHead>
-                      <TableHead className="w-40">HorÃ¡rio</TableHead>
-                      <TableHead className="w-20">AÃ§Ãµes</TableHead>
+                      <TableHead className="w-24">Duração</TableHead>
+                      <TableHead className="w-40">Horário</TableHead>
+                      <TableHead className="w-20">Ações</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -7065,12 +7066,12 @@ return (
                               <SelectContent>
                                 <SelectItem value="Pendente">Pendente</SelectItem>
                                 <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                                <SelectItem value="ConcluÃ­do">ConcluÃ­do</SelectItem>
+                                <SelectItem value="Concluído">Concluído</SelectItem>
                               </SelectContent>
                             </Select>
                           </TableCell>
                           <TableCell>
-                            {stage.status === 'ConcluÃ­do' ? (
+                            {stage.status === 'Concluído' ? (
                               <div className="text-green-700 font-medium">
                                 {stage.startDate ? format(stage.startDate, "dd/MM") : '-'}
                               </div>
@@ -7084,7 +7085,7 @@ return (
                             )}
                           </TableCell>
                           <TableCell>
-                            {stage.status === 'ConcluÃ­do' ? (
+                            {stage.status === 'Concluído' ? (
                               <div className="text-green-700 font-medium">
                                 {stage.completedDate ? format(stage.completedDate, "dd/MM") : '-'}
                               </div>
@@ -7112,13 +7113,13 @@ return (
                               value={stage.workSchedule || "normal"} 
                               onValueChange={(value) => {
                                 handlePlanChange(index, 'workSchedule', value);
-                                // Automaticamente ajusta useBusinessDays baseado na seleÃ§Ã£o
+                                // Automaticamente ajusta useBusinessDays baseado na seleção
                                 const useBusinessDays = value === 'normal';
                                 handlePlanChange(index, 'useBusinessDays', useBusinessDays);
                               }}
                             >
                               <SelectTrigger className="h-10 w-full">
-                                <SelectValue placeholder="Selecionar horÃ¡rio" />
+                                <SelectValue placeholder="Selecionar horário" />
                               </SelectTrigger>
                               <SelectContent>
                                 <SelectItem value="normal">
@@ -7126,7 +7127,7 @@ return (
                                     <CalendarDays className="h-4 w-4 text-blue-500" />
                                     <div className="text-left">
                                       <div className="font-medium">Normal</div>
-                                      <div className="text-xs text-muted-foreground">Dias Ãºteis apenas</div>
+                                      <div className="text-xs text-muted-foreground">Dias úteis apenas</div>
                                     </div>
                                   </div>
                                 </SelectItem>
@@ -7135,7 +7136,7 @@ return (
                                     <Clock className="h-4 w-4 text-orange-500" />
                                     <div className="text-left">
                                       <div className="font-medium">Especial</div>
-                                      <div className="text-xs text-muted-foreground">IncluÃ­ fins de semana</div>
+                                      <div className="text-xs text-muted-foreground">Incluí fins de semana</div>
                                     </div>
                                   </div>
                                 </SelectItem>
@@ -7175,8 +7176,8 @@ return (
             ) : (
               <div className="text-center text-muted-foreground py-8">
                 <CalendarClock className="h-12 w-12 mx-auto mb-4 text-muted-foreground/50" />
-                <p className="text-lg font-medium">Nenhuma etapa de fabricaÃ§Ã£o definida</p>
-                <p className="text-sm">VocÃª pode definir as etapas na tela de Produtos ou adicionar manualmente abaixo.</p>
+                <p className="text-lg font-medium">Nenhuma etapa de fabricação definida</p>
+                <p className="text-sm">Você pode definir as etapas na tela de Produtos ou adicionar manualmente abaixo.</p>
               </div>
             )}
           </div>
@@ -7211,9 +7212,9 @@ return (
     <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>VocÃª tem certeza?</AlertDialogTitle>
+          <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
           <AlertDialogDescription>
-            Esta aÃ§Ã£o nÃ£o pode ser desfeita. Isso excluirÃ¡ permanentemente o pedido NÂº <span className="font-bold">{orderToDelete?.quotationNumber}</span> do sistema.
+            Esta ação não pode ser desfeita. Isso excluirá permanentemente o pedido Nº <span className="font-bold">{orderToDelete?.quotationNumber}</span> do sistema.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
@@ -7225,13 +7226,13 @@ return (
       </AlertDialogContent>
     </AlertDialog>
 
-    {/* Alert Dialog para ExclusÃ£o de Itens */}
+    {/* Alert Dialog para Exclusão de Itens */}
     <AlertDialog open={isItemDeleteDialogOpen} onOpenChange={setIsItemDeleteDialogOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Remover Item do Pedido</AlertDialogTitle>
           <AlertDialogDescription>
-            VocÃª tem certeza que deseja remover este item do pedido?
+            Você tem certeza que deseja remover este item do pedido?
             {itemToDelete && (
               <div className="mt-2 p-3 bg-muted rounded-lg">
                 <p className="font-medium text-foreground">
@@ -7239,18 +7240,18 @@ return (
                 </p>
                 {itemToDelete.item.itemNumber && (
                   <p className="text-sm text-muted-foreground">
-                    NÂº Item PC: {itemToDelete.item.itemNumber}
+                    Nº Item PC: {itemToDelete.item.itemNumber}
                   </p>
                 )}
                 {itemToDelete.item.code && (
                   <p className="text-sm text-muted-foreground">
-                    CÃ³digo: {itemToDelete.item.code}
+                    Código: {itemToDelete.item.code}
                   </p>
                 )}
               </div>
             )}
             <p className="mt-2 text-sm">
-              <strong>AtenÃ§Ã£o:</strong> Esta aÃ§Ã£o nÃ£o pode ser desfeita. O item serÃ¡ removido permanentemente do pedido.
+              <strong>Atenção:</strong> Esta ação não pode ser desfeita. O item será removido permanentemente do pedido.
             </p>
           </AlertDialogDescription>
         </AlertDialogHeader>
@@ -7273,7 +7274,7 @@ return (
             <DialogHeader>
                 <DialogTitle>Selecionar Quantidades para o Romaneio</DialogTitle>
                 <DialogDescription>
-                    Ajuste a quantidade de peÃ§as de cada item que serÃ¡ incluÃ­da no romaneio. O peso serÃ¡ calculado automaticamente.
+                    Ajuste a quantidade de peças de cada item que será incluída no romaneio. O peso será calculado automaticamente.
                 </DialogDescription>
             </DialogHeader>
             
@@ -7293,7 +7294,7 @@ return (
                                                 <div className="flex-1">
                                                     <h4 className="font-medium">{item.description}</h4>
                                                     <p className="text-sm text-muted-foreground">
-                                                        CÃ³digo: {item.code || 'N/A'} | Item PC: {item.itemNumber || 'N/A'}
+                                                        Código: {item.code || 'N/A'} | Item PC: {item.itemNumber || 'N/A'}
                                                     </p>
                                                 </div>
                                             </div>
@@ -7345,7 +7346,7 @@ return (
                                                 <div className="flex items-center gap-2 p-2 bg-orange-50 border border-orange-200 rounded text-xs text-orange-700">
                                                     <AlertTriangle className="h-3 w-3" />
                                                     <span>
-                                                        Romaneio parcial: {selectedQty} de {item.quantity} peÃ§as ({((selectedQty / item.quantity) * 100).toFixed(0)}%)
+                                                        Romaneio parcial: {selectedQty} de {item.quantity} peças ({((selectedQty / item.quantity) * 100).toFixed(0)}%)
                                                     </span>
                                                 </div>
                                             )}
