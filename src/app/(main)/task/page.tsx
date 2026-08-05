@@ -133,6 +133,49 @@ type CompanyData = {
 
 const UNASSIGNED_SELECT_VALUE = '__unassigned__';
 
+const RESPONSIBLE_SECTORS: Resource[] = [
+  'PCP',
+  'Compras',
+  'Almoxarifado',
+  'Preparação',
+  'Montagem',
+  'Solda',
+  'Controle da qualidade',
+  'Jato',
+  'Pintura',
+  'Usinagem',
+  'Célula Robótica',
+  'Furação',
+  'Desempeno',
+  'Montagem Mecânica',
+  'Peritagem',
+].map((name) => ({
+  id: `setor-${name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-')}`,
+  name,
+  type: 'Setor',
+  status: 'disponivel',
+}));
+
+const normalizeStatus = (value: unknown) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .trim()
+  .toLowerCase();
+
+const isClosedOrderStatus = (value: unknown) => [
+  'concluido',
+  'concluida',
+  'entregue',
+  'finalizado',
+  'finalizada',
+  'expedido',
+  'expedida',
+  'encerrado',
+  'encerrada',
+  'cancelado',
+  'cancelada',
+].includes(normalizeStatus(value));
+
 type TaskStatus =
   | 'Programada'
   | 'Liberada para execução'
@@ -561,9 +604,28 @@ export default function TasksPage() {
   // Buscar tarefas programadas para o dia
   const fetchDailyTasks = async () => {
     try {
-      const ref = collection(db, "companies", "mecald", "dailyTasks");
-      const snap = await getDocs(ref);
-      const list: DailyTask[] = snap.docs.map(d => {
+      const dailyTasksRef = collection(db, "companies", "mecald", "dailyTasks");
+      const ordersRef = collection(db, "companies", "mecald", "orders");
+      const [snap, ordersSnap] = await Promise.all([
+        getDocs(dailyTasksRef),
+        getDocs(ordersRef),
+      ]);
+
+      // Uma tarefa diária só permanece visível enquanto o pedido de origem estiver aberto.
+      // Isso também limpa visualmente tarefas antigas que ficaram gravadas antes da conclusão.
+      const openOrderIds = new Set(
+        ordersSnap.docs
+          .filter(orderDoc => {
+            const orderData = orderDoc.data();
+            const status = orderData.status ?? orderData.orderStatus ?? orderData.statusPedido;
+            return !isClosedOrderStatus(status);
+          })
+          .map(orderDoc => orderDoc.id)
+      );
+
+      const list: DailyTask[] = snap.docs
+        .filter(d => openOrderIds.has(String(d.data().orderId || '')))
+        .map(d => {
         const data = d.data();
         return {
           id: d.id,
@@ -600,7 +662,7 @@ export default function TasksPage() {
     }
   };
 
-  // Calcular recursos alocados vs ociosos
+  // Calcular setores com e sem tarefas pendentes
   const getResourcesAllocation = useMemo(() => {
     const allocatedResources = new Set(
       tasks
@@ -609,7 +671,7 @@ export default function TasksPage() {
         .filter(Boolean)
     );
     
-    const totalResources = resources.filter(r => r.status === 'disponivel').length;
+    const totalResources = RESPONSIBLE_SECTORS.length;
     const allocated = allocatedResources.size;
     const idle = totalResources - allocated;
     
@@ -619,7 +681,7 @@ export default function TasksPage() {
       idle,
       allocationRate: totalResources > 0 ? (allocated / totalResources) * 100 : 0
     };
-  }, [tasks, resources]);
+  }, [tasks]);
 
   // Buscar dados iniciais
   const fetchInitialData = async () => {
@@ -1409,7 +1471,9 @@ export default function TasksPage() {
       setSelectedTask(task);
       setAllocationData({
         taskId: String(task.id),
-        resourceId: task.assignedResource?.resourceId ? String(task.assignedResource.resourceId) : undefined,
+        resourceId: task.assignedResource?.resourceId && RESPONSIBLE_SECTORS.some(sector => sector.id === task.assignedResource?.resourceId)
+          ? String(task.assignedResource.resourceId)
+          : undefined,
         supervisorId: task.supervisor?.memberId && leadershipMembers.some(member => member.id === task.supervisor?.memberId)
           ? String(task.supervisor.memberId)
           : undefined,
@@ -1429,6 +1493,16 @@ export default function TasksPage() {
 
   const handleSaveAllocation = async () => {
     if (!selectedTask) return;
+
+    const selectedSector = RESPONSIBLE_SECTORS.find(sector => sector.id === allocationData.resourceId);
+    if (!selectedSector) {
+      toast({
+        variant: "destructive",
+        title: "Selecione um setor",
+        description: "A tarefa precisa ser vinculada ao setor responsável.",
+      });
+      return;
+    }
 
     const selectedLeader = leadershipMembers.find(member => member.id === allocationData.supervisorId);
     if (!selectedLeader) {
@@ -1457,7 +1531,7 @@ export default function TasksPage() {
         if (resolvedItemId === selectedTask.itemId) {
           const updatedPlan = item.productionPlan.map((stage: any, index: number) => {
             if (`${selectedTask.orderId}-${selectedTask.itemId}-${index}` === selectedTask.id) {
-              const selectedResource = resources.find(r => r.id === allocationData.resourceId);
+              const selectedResource = selectedSector;
               const selectedSupervisor = selectedLeader;
               
               return {
@@ -1598,7 +1672,7 @@ export default function TasksPage() {
 
       autoTable(docPdf, {
         startY: yPos,
-        head: [['Pedido', 'Item', 'Etapa', 'Recurso', 'Líder', 'Prazo', 'Status']],
+        head: [['Pedido', 'Item', 'Etapa', 'Setor', 'Líder', 'Prazo', 'Status']],
         body: tableBody,
         styles: { fontSize: 8, cellPadding: 2 },
         headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
@@ -1798,16 +1872,16 @@ export default function TasksPage() {
           description={`${tasksSummary.pendingTasks} pendentes`}
         />
         <StatCard
-          title="Recursos Alocados"
+          title="Setores Alocados"
           value={`${getResourcesAllocation.allocated}/${getResourcesAllocation.total}`}
           icon={Users}
           description={`${getResourcesAllocation.allocationRate.toFixed(1)}% de utilização`}
         />
         <StatCard
-          title="Recursos Ociosos"
+          title="Setores sem Tarefas"
           value={getResourcesAllocation.idle.toString()}
           icon={Clock}
-          description="Recursos disponíveis sem tarefas"
+          description="Setores sem tarefas pendentes"
         />
       </div>
 
@@ -1903,14 +1977,14 @@ export default function TasksPage() {
 
                 <Select value={filterResource} onValueChange={setFilterResource}>
                   <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Filtrar por Recurso" />
+                    <SelectValue placeholder="Filtrar por Setor" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos os Recursos</SelectItem>
-                    <SelectItem value="unassigned">Sem Recurso</SelectItem>
-                    {resources.filter(resource => Boolean(String(resource.id || '').trim())).map(resource => (
-                      <SelectItem key={resource.id} value={resource.id}>
-                        {resource.name}
+                    <SelectItem value="all">Todos os Setores</SelectItem>
+                    <SelectItem value="unassigned">Sem Setor</SelectItem>
+                    {RESPONSIBLE_SECTORS.map(sector => (
+                      <SelectItem key={sector.id} value={sector.id}>
+                        {sector.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1977,7 +2051,7 @@ export default function TasksPage() {
                         <TableHead>Pedido</TableHead>
                         <TableHead>Item</TableHead>
                         <TableHead>Etapa</TableHead>
-                        <TableHead>Recurso</TableHead>
+                        <TableHead>Setor</TableHead>
                         <TableHead>Líder</TableHead>
                         <TableHead>Prazo</TableHead>
                         <TableHead>Status</TableHead>
@@ -1998,7 +2072,7 @@ export default function TasksPage() {
                                 <span className="text-sm">{task.assignedResource.resourceName}</span>
                               </div>
                             ) : (
-                              <span className="text-xs text-muted-foreground">Não alocado</span>
+                              <span className="text-xs text-muted-foreground">Sem setor</span>
                             )}
                           </TableCell>
                           <TableCell>
@@ -2550,9 +2624,9 @@ export default function TasksPage() {
       <Dialog open={isAllocationDialogOpen} onOpenChange={setIsAllocationDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Alocar Recurso e Líder</DialogTitle>
+            <DialogTitle>Alocar Setor e Líder</DialogTitle>
             <DialogDescription>
-              Defina o recurso produtivo e o líder responsável pela execução desta tarefa.
+              Defina o setor e o líder responsáveis pela execução desta tarefa.
             </DialogDescription>
           </DialogHeader>
           
@@ -2566,9 +2640,9 @@ export default function TasksPage() {
                 </p>
               </div>
               
-              {/* Seleção de recurso */}
+              {/* Seleção do setor */}
               <div className="space-y-2">
-                <Label>Recurso Produtivo</Label>
+                <Label>Setor Responsável</Label>
                 <Select 
                   value={allocationData.resourceId || UNASSIGNED_SELECT_VALUE}
                   onValueChange={(value) => 
@@ -2579,22 +2653,15 @@ export default function TasksPage() {
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione um recurso" />
+                    <SelectValue placeholder="Selecione um setor" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={UNASSIGNED_SELECT_VALUE}>Nenhum recurso</SelectItem>
-                    {resources
-                      .filter(r => r.status === 'disponivel' && Boolean(String(r.id || '').trim()))
-                      .map(resource => (
-                      <SelectItem key={resource.id} value={String(resource.id)}>
-                        <div className="flex items-center gap-2">
-                          <span>{resource.name}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {resource.type}
-                          </Badge>
-                        </div>
+                    <SelectItem value={UNASSIGNED_SELECT_VALUE}>Selecione um setor</SelectItem>
+                    {RESPONSIBLE_SECTORS.map(sector => (
+                      <SelectItem key={sector.id} value={sector.id}>
+                        {sector.name}
                       </SelectItem>
-                      ))}
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
