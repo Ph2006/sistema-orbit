@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText, Search, Link2 } from "lucide-react";
+import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText, Search, Link2, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -165,6 +165,26 @@ const requisitionSequence = (value?: string): number => {
 const compareRequisitionsAscending = (a: Requisition, b: Requisition): number =>
     requisitionSequence(a.requisitionNumber) - requisitionSequence(b.requisitionNumber)
     || a.requisitionNumber.localeCompare(b.requisitionNumber, 'pt-BR', { numeric: true });
+
+const weightToKg = (weight?: number, unit?: string): number => {
+    const value = Number(weight) || 0;
+    if (value <= 0) return 0;
+    const normalizedUnit = (unit || 'kg').trim().toLocaleLowerCase('pt-BR');
+    if (['g', 'grama', 'gramas'].includes(normalizedUnit)) return value / 1000;
+    if (['t', 'ton', 'tonelada', 'toneladas'].includes(normalizedUnit)) return value * 1000;
+    if (['lb', 'lbs', 'libra', 'libras'].includes(normalizedUnit)) return value * 0.45359237;
+    return value;
+};
+
+const requisitionFinancialSummary = (requisition: Requisition) => {
+    const totalValue = requisition.items.reduce((sum, item) => sum + (Number(item.invoiceItemValue) || 0), 0);
+    const totalWeightKg = requisition.items.reduce((sum, item) => sum + weightToKg(item.weight, item.weightUnit), 0);
+    return {
+        totalValue,
+        totalWeightKg,
+        averageCostPerKg: totalWeightKg > 0 ? totalValue / totalWeightKg : 0,
+    };
+};
 
 // Função utilitária para formatação segura de datas
 const safeFormatDate = (date: any, formatString: string, fallback: string = 'Data inválida'): string => {
@@ -2012,6 +2032,62 @@ export default function CostsPage() {
         }
     };
 
+    const exportRequisitionCostReport = (requisition: Requisition) => {
+        const linkedOrder = resolveLinkedOrder(requisition);
+        const osNumber = linkedOrder?.internalOS || requisition.orderNumber || requisition.internalOS || 'SEM-OS';
+        const customerName = linkedOrder?.customerName || '';
+        const { totalValue, totalWeightKg, averageCostPerKg } = requisitionFinancialSummary(requisition);
+        const pricedItems = requisition.items.filter(item => (Number(item.invoiceItemValue) || 0) > 0).length;
+        const itemsWithoutWeight = requisition.items.filter(item => (Number(item.invoiceItemValue) || 0) > 0 && weightToKg(item.weight, item.weightUnit) <= 0).length;
+        const currency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+        const number = (value: number, digits = 2) => value.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
+        const html = (value: unknown) => String(value ?? '')
+            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+
+        const rows = requisition.items.map(item => {
+            const value = Number(item.invoiceItemValue) || 0;
+            const weightKg = weightToKg(item.weight, item.weightUnit);
+            const itemCostPerKg = weightKg > 0 ? value / weightKg : 0;
+            return `<tr>
+                <td>${html(item.description)}</td>
+                <td class="center">${number(Number(item.quantityRequested) || 0, 0)}</td>
+                <td class="right">${weightKg > 0 ? `${number(weightKg, 3)} kg` : '-'}</td>
+                <td class="right">${currency(value)}</td>
+                <td class="right">${weightKg > 0 ? `${currency(itemCostPerKg)}/kg` : '-'}</td>
+                <td>${html(item.supplierName || '-')}</td>
+                <td>${html(item.invoiceNumber || '-')}</td>
+                <td>${html(item.inspectionStatus || item.status || '-')}</td>
+            </tr>`;
+        }).join('');
+
+        const reportWindow = window.open('', '_blank', 'noopener,noreferrer');
+        if (!reportWindow) {
+            toast({ variant: 'destructive', title: 'Pop-up bloqueado', description: 'Permita pop-ups para exportar o relatório.' });
+            return;
+        }
+
+        reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Custos OS ${html(osNumber)}</title>
+            <style>
+                body{font-family:Arial,sans-serif;color:#111827;margin:28px;font-size:12px}h1{font-size:20px;margin:0 0 5px}h2{font-size:14px;margin:20px 0 8px}.meta{color:#475569;margin-bottom:16px}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}.box{border:1px solid #cbd5e1;border-radius:6px;padding:10px}.label{font-size:10px;color:#64748b}.value{font-size:16px;font-weight:700;margin-top:4px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:6px}th{background:#e2e8f0;text-align:left}.right{text-align:right}.center{text-align:center}.warning{color:#991b1b;background:#fee2e2;border:1px solid #fecaca;padding:8px;margin:10px 0}.formula{font-size:11px;color:#475569;margin-top:6px}@media print{button{display:none}body{margin:10mm}}
+            </style></head><body>
+            <h1>Relação de Custos de Matéria-Prima — OS ${html(osNumber)}</h1>
+            <div class="meta">Cliente: ${html(customerName || '-')} · Requisição: ${html(requisition.requisitionNumber)} · Data: ${html(safeFormatDate(requisition.date, 'dd/MM/yyyy'))}</div>
+            <div class="summary">
+                <div class="box"><div class="label">Valor total pago</div><div class="value">${currency(totalValue)}</div></div>
+                <div class="box"><div class="label">Peso total adquirido</div><div class="value">${number(totalWeightKg, 3)} kg</div></div>
+                <div class="box"><div class="label">Custo médio ponderado</div><div class="value">${currency(averageCostPerKg)}/kg</div></div>
+                <div class="box"><div class="label">Itens precificados</div><div class="value">${pricedItems}/${requisition.items.length}</div></div>
+            </div>
+            <div class="formula">Cálculo: ${currency(totalValue)} ÷ ${number(totalWeightKg, 3)} kg = ${currency(averageCostPerKg)}/kg</div>
+            ${itemsWithoutWeight > 0 ? `<div class="warning">Atenção: ${itemsWithoutWeight} item(ns) com valor pago não possuem peso informado. O R$/kg ficará superestimado até o preenchimento desses pesos.</div>` : ''}
+            <h2>Itens adquiridos</h2><table><thead><tr><th>Item</th><th>Qtd.</th><th>Peso em kg</th><th>Valor pago</th><th>R$/kg</th><th>Fornecedor</th><th>NF</th><th>Inspeção</th></tr></thead><tbody>${rows}</tbody></table>
+            <p class="meta">Relatório gerado em ${html(safeFormatDate(new Date(), 'dd/MM/yyyy HH:mm'))}.</p>
+            <button onclick="window.print()">Imprimir / Salvar em PDF</button>
+            <script>window.onload=()=>window.print();<\/script></body></html>`);
+        reportWindow.document.close();
+    };
+
 
 
     // Proteção contra erros de renderização
@@ -2114,6 +2190,7 @@ export default function CostsPage() {
                                             const itemsWithPrice = req.items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
                                             const totalItems = req.items.length;
                                             const progress = totalItems > 0 ? Math.round((itemsWithPrice / totalItems) * 100) : 0;
+                                            const { totalWeightKg, averageCostPerKg } = requisitionFinancialSummary(req);
                                             
                                             return (
                                                 <div className="mb-6">
@@ -2147,13 +2224,18 @@ export default function CostsPage() {
                                                     
                                                     {/* Resumo Financeiro da Requisição */}
                                                     <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
-                                                        <div className="flex items-center justify-between mb-3">
+                                                        <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                                                             <h4 className="font-semibold text-blue-900 flex items-center gap-2">
                                                                 💰 Resumo Financeiro da Requisição
                                                             </h4>
-                                                            <Badge variant={progress === 100 ? "default" : progress > 0 ? "secondary" : "outline"} className="text-xs">
-                                                                {progress === 100 ? "✅ Completo" : progress > 0 ? `${progress}% Precificado` : "⏳ Aguardando"}
-                                                            </Badge>
+                                                            <div className="flex items-center gap-2">
+                                                                <Button type="button" size="sm" variant="outline" onClick={() => exportRequisitionCostReport(req)}>
+                                                                    <Download className="mr-2 h-4 w-4" /> Baixar custos da OS
+                                                                </Button>
+                                                                <Badge variant={progress === 100 ? "default" : progress > 0 ? "secondary" : "outline"} className="text-xs">
+                                                                    {progress === 100 ? "✅ Completo" : progress > 0 ? `${progress}% Precificado` : "⏳ Aguardando"}
+                                                                </Badge>
+                                                            </div>
                                                         </div>
                                                         
                                                         <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -2185,9 +2267,12 @@ export default function CostsPage() {
                                                             </div>
                                                             
                                                             <div className="bg-white p-3 rounded border">
-                                                                <span className="text-xs text-muted-foreground block">Valor Médio/Item</span>
+                                                                <span className="text-xs text-muted-foreground block">Custo Médio da Matéria-Prima</span>
                                                                 <span className="text-lg font-bold text-purple-600">
-                                                                    {itemsWithPrice > 0 ? (totalValue / itemsWithPrice).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : 'R$ 0,00'}
+                                                                    {averageCostPerKg.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/kg
+                                                                </span>
+                                                                <span className="text-[10px] text-muted-foreground block mt-1">
+                                                                    {totalWeightKg.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg adquiridos
                                                                 </span>
                                                             </div>
                                                         </div>
