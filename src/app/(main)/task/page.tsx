@@ -332,6 +332,7 @@ export default function TasksPage() {
   const [companyData, setCompanyData] = useState<CompanyData>({});
   const [isLoading, setIsLoading] = useState(true);
   const { user, loading: authLoading } = useAuth();
+  const userId = user?.uid;
   const { toast } = useToast();
 
   // Estados de filtro e navegação
@@ -342,6 +343,8 @@ export default function TasksPage() {
   const [filterSupervisor, setFilterSupervisor] = useState<string>('all');
   const [filterOrderNumber, setFilterOrderNumber] = useState<string>('');
   const [filterPriority, setFilterPriority] = useState<string>('all');
+  const [taskPage, setTaskPage] = useState(1);
+  const TASKS_PER_PAGE = 100;
   
   // Novos estados para alocação
   const [selectedTask, setSelectedTask] = useState<SimpleTask | null>(null);
@@ -724,7 +727,7 @@ export default function TasksPage() {
 
   // UseEffect principal
   useEffect(() => {
-    if (!authLoading && user) {
+    if (!authLoading && userId) {
       const loadData = async () => {
         await Promise.all([
           fetchTasksFromOrders(),
@@ -735,7 +738,7 @@ export default function TasksPage() {
       };
       loadData();
     }
-  }, [user, authLoading]);
+  }, [userId, authLoading]);
 
   useEffect(() => {
     if (!dailyTasks.some(t => t.status === 'Em execução')) return;
@@ -807,6 +810,17 @@ export default function TasksPage() {
       return isInPeriod && orderMatch && statusMatch && resourceMatch && supervisorMatch && priorityMatch;
     });
   }, [tasks, currentDate, viewMode, filterStatus, filterResource, filterSupervisor, filterOrderNumber, filterPriority]);
+
+  const totalTaskPages = Math.max(1, Math.ceil(getFilteredTasks.length / TASKS_PER_PAGE));
+  const paginatedTasks = useMemo(() => {
+    const safePage = Math.min(taskPage, totalTaskPages);
+    const start = (safePage - 1) * TASKS_PER_PAGE;
+    return getFilteredTasks.slice(start, start + TASKS_PER_PAGE);
+  }, [getFilteredTasks, taskPage, totalTaskPages]);
+
+  useEffect(() => {
+    setTaskPage(1);
+  }, [currentDate, viewMode, filterStatus, filterResource, filterSupervisor, filterOrderNumber, filterPriority]);
 
   // Estatísticas simplificadas
   const tasksSummary = useMemo(() => {
@@ -2220,7 +2234,7 @@ export default function TasksPage() {
                   </p>
                 </div>
               ) : (
-                <ScrollArea className="h-[600px]">
+                <div className="h-[600px] overflow-auto">
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -2236,7 +2250,7 @@ export default function TasksPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {Array.isArray(getFilteredTasks) && getFilteredTasks.map((task) => (
+                      {paginatedTasks.map((task) => (
                         <TableRow key={task.id}>
                           <TableCell className="font-medium">{task.orderNumber}</TableCell>
                           <TableCell>{task.itemDescription.substring(0, 30)}...</TableCell>
@@ -2278,7 +2292,22 @@ export default function TasksPage() {
                       ))}
                     </TableBody>
                   </Table>
-                </ScrollArea>
+                </div>
+              )}
+              {getFilteredTasks.length > TASKS_PER_PAGE && (
+                <div className="mt-4 flex items-center justify-between border-t pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    Página {Math.min(taskPage, totalTaskPages)} de {totalTaskPages} · {getFilteredTasks.length} tarefas
+                  </p>
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" disabled={taskPage <= 1} onClick={() => setTaskPage(page => Math.max(1, page - 1))}>
+                      Anterior
+                    </Button>
+                    <Button variant="outline" size="sm" disabled={taskPage >= totalTaskPages} onClick={() => setTaskPage(page => Math.min(totalTaskPages, page + 1))}>
+                      Próxima
+                    </Button>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>
