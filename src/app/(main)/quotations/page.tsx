@@ -68,6 +68,9 @@ const quotationSchema = z.object({
   discount: z.coerce.number().min(0).max(100).optional(),
   isEmergency: z.boolean().optional().default(false),
   emergencyRate: z.coerce.number().min(0).max(500).optional().default(30),
+  freightType: z.enum(["FOB", "CIF"]).optional().default("FOB"),
+  freightValue: z.coerce.number().min(0).optional().default(0),
+  freightIncludedInPrice: z.boolean().optional().default(true),
   items: z.array(itemSchema).min(1, "Adicione pelo menos um item ao orçamento."),
   includedServices: z.array(z.string()).optional(),
 });
@@ -216,6 +219,24 @@ const calculateGrandTotal = (items: Item[] | any[], discountPercent: number = 0,
     return { total, totalDiscount, originalTotal, totalIcms, totalPis, totalCofins, totalEmergency };
 };
 
+const calculateQuotationGrandTotal = (quotation: Pick<Quotation, 'items' | 'discount' | 'isEmergency' | 'emergencyRate' | 'freightType' | 'freightValue' | 'freightIncludedInPrice'>) => {
+    const productTotals = calculateGrandTotal(
+        quotation.items,
+        quotation.discount || 0,
+        quotation.isEmergency ? (quotation.emergencyRate || 0) : 0
+    );
+    const totalFreight = quotation.freightType === 'CIF' && quotation.freightIncludedInPrice === false
+        ? (Number(quotation.freightValue) || 0)
+        : 0;
+
+    return {
+        ...productTotals,
+        productsTotal: productTotals.total,
+        totalFreight,
+        total: productTotals.total + totalFreight,
+    };
+};
+
 // Função para calcular o lead time total de um produto
 const calculateLeadTime = (product: Product): number => {
     if (!product.productionPlanTemplate || product.productionPlanTemplate.length === 0) {
@@ -344,6 +365,9 @@ export default function QuotationsPage() {
             discount: 0,
             isEmergency: false,
             emergencyRate: 30,
+            freightType: "FOB",
+            freightValue: 0,
+            freightIncludedInPrice: true,
         }
     });
 
@@ -364,9 +388,23 @@ export default function QuotationsPage() {
     const watchedIsEmergency = form.watch("isEmergency") || false;
     const watchedEmergencyRate = form.watch("emergencyRate") || 0;
     const activeEmergencyRate = watchedIsEmergency ? watchedEmergencyRate : 0;
+    const watchedFreightType = form.watch("freightType") || "FOB";
+    const watchedFreightValue = form.watch("freightValue") || 0;
+    const watchedFreightIncludedInPrice = form.watch("freightIncludedInPrice") ?? true;
+    const freightAddedToTotal = watchedFreightType === "CIF" && !watchedFreightIncludedInPrice
+        ? watchedFreightValue
+        : 0;
     const grandTotalCalcs = useMemo(() => 
-        calculateGrandTotal(watchedItems, watchedDiscount, activeEmergencyRate), 
-        [watchedItems, watchedDiscount, activeEmergencyRate]
+        {
+            const productTotals = calculateGrandTotal(watchedItems, watchedDiscount, activeEmergencyRate);
+            return {
+                ...productTotals,
+                productsTotal: productTotals.total,
+                totalFreight: freightAddedToTotal,
+                total: productTotals.total + freightAddedToTotal,
+            };
+        },
+        [watchedItems, watchedDiscount, activeEmergencyRate, freightAddedToTotal]
     );
 
     // Busca produtos filtrados para o modal
@@ -506,6 +544,9 @@ export default function QuotationsPage() {
                     discount: data.discount || 0,
                     isEmergency: Boolean(data.isEmergency),
                     emergencyRate: Number(data.emergencyRate) || 30,
+                    freightType: data.freightType === "CIF" ? "CIF" : "FOB",
+                    freightValue: Number(data.freightValue) || 0,
+                    freightIncludedInPrice: data.freightIncludedInPrice !== false,
                     items: finalItems,
                     includedServices: data.includedServices || [],
                     createdAt: getCreatedAt(),
@@ -855,6 +896,9 @@ export default function QuotationsPage() {
             discount: 0,
             isEmergency: false,
             emergencyRate: 30,
+            freightType: "FOB",
+            freightValue: 0,
+            freightIncludedInPrice: true,
         });
         setCurrentItem(emptyItem);
         setEditIndex(null);
@@ -1026,16 +1070,15 @@ export default function QuotationsPage() {
                     ...item,
                     itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
                 })),
-                totalValue: calculateGrandTotal(
-                    quotationToConvert.items,
-                    quotationToConvert.discount || 0,
-                    quotationToConvert.isEmergency ? (quotationToConvert.emergencyRate || 0) : 0
-                ).total,
+                totalValue: calculateQuotationGrandTotal(quotationToConvert).total,
                 isEmergency: Boolean(quotationToConvert.isEmergency),
                 emergencyRate: quotationToConvert.isEmergency ? (quotationToConvert.emergencyRate || 0) : 0,
                 priorityNote: quotationToConvert.isEmergency
                     ? 'Fabricação emergencial para atendimento urgente'
                     : '',
+                freightType: quotationToConvert.freightType || 'FOB',
+                freightValue: Number(quotationToConvert.freightValue) || 0,
+                freightIncludedInPrice: quotationToConvert.freightIncludedInPrice !== false,
                 status: "Aguardando Produção",
                 createdAt: Timestamp.now(),
                 deliveryDate: Timestamp.fromDate(quotationToConvert.validity),
@@ -1077,7 +1120,7 @@ export default function QuotationsPage() {
             const { items, customer, number, validity, paymentTerms, deliveryTime, notes, includedServices } = selectedQuotation;
             const discount = selectedQuotation.discount || 0;
             const emergencyRate = selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0;
-            const grandTotalCalcs = calculateGrandTotal(items, discount, emergencyRate);
+            const grandTotalCalcs = calculateQuotationGrandTotal(selectedQuotation);
     
             if (formatType === 'pdf') {
                 const docPdf = new jsPDF({ orientation: "landscape" });
@@ -1230,6 +1273,20 @@ export default function QuotationsPage() {
                     y += 8;
                 }
 
+                if ((selectedQuotation.freightValue || 0) > 0) {
+                    const freightWasAdded = selectedQuotation.freightType === 'CIF' && selectedQuotation.freightIncludedInPrice === false;
+                    docPdf.setTextColor(37, 99, 235).setFont(undefined, 'bold');
+                    docPdf.text(
+                        `Frete ${selectedQuotation.freightType || 'FOB'}${freightWasAdded ? ' adicionado ao total' : ' informativo/embutido'}:`,
+                        rightColX - 80,
+                        y,
+                        { align: 'right' }
+                    );
+                    docPdf.text(Number(selectedQuotation.freightValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), rightColX, y, { align: 'right' });
+                    docPdf.setTextColor(0, 0, 0).setFont(undefined, 'normal');
+                    y += 8;
+                }
+
                 if (discount && discount > 0) {
                     const totals = calculateGrandTotal(items, discount, emergencyRate);
                     
@@ -1271,6 +1328,24 @@ export default function QuotationsPage() {
                 docPdf.text(`Pagamento: ${paymentTerms}`, 18, y);
                 y+= 5;
                 docPdf.text(`Prazo de Entrega: ${deliveryTime}`, 18, y);
+                y += 5;
+                docPdf.text(
+                    `Frete: ${selectedQuotation.freightType === 'CIF'
+                        ? 'CIF — responsabilidade da fornecedora/contratada'
+                        : 'FOB — responsabilidade do cliente/contratante'}`,
+                    18,
+                    y
+                );
+                y += 5;
+                docPdf.text(
+                    `Valor do frete: ${Number(selectedQuotation.freightValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — ${selectedQuotation.freightType === 'FOB'
+                        ? 'não incluído no total'
+                        : selectedQuotation.freightIncludedInPrice === false
+                            ? 'adicionado separadamente ao total'
+                            : 'já embutido no valor dos produtos'}`,
+                    18,
+                    y
+                );
                 y += 10;
     
                 if (notes) {
@@ -1337,6 +1412,12 @@ export default function QuotationsPage() {
                     ['PIS:', '', '', '', '', '', '', '', '', grandTotalCalcs.totalPis],
                     ['COFINS:', '', '', '', '', '', '', '', '', grandTotalCalcs.totalCofins],
                     ...(selectedQuotation.isEmergency ? [['Adicional emergencial:', '', '', '', '', '', '', '', `${emergencyRate}%`, grandTotalCalcs.totalEmergency]] : []),
+                    ['Frete:', '', '', '', '', '', '', '', selectedQuotation.freightType || 'FOB', Number(selectedQuotation.freightValue) || 0],
+                    ['Tratamento do frete:', '', '', '', '', '', '', '', '', selectedQuotation.freightType === 'FOB'
+                        ? 'Cliente/contratante — não somado'
+                        : selectedQuotation.freightIncludedInPrice === false
+                            ? 'Fornecedora/contratada — adicionado ao total'
+                            : 'Fornecedora/contratada — já embutido'],
                     [],
                     ['Serviços Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
@@ -1344,6 +1425,8 @@ export default function QuotationsPage() {
                     ['Condições Comerciais:'],
                     [`Pagamento: ${paymentTerms}`],
                     [`Prazo de Entrega: ${deliveryTime}`],
+                    [`Frete: ${selectedQuotation.freightType === 'CIF' ? 'CIF — fornecedora/contratada' : 'FOB — cliente/contratante'}`],
+                    [`Valor do frete: ${Number(selectedQuotation.freightValue || 0)}`],
                     [],
                     ['Observações:'],
                     [notes || ''],
@@ -1447,11 +1530,7 @@ export default function QuotationsPage() {
         const approvalRate = totalCount > 0 ? (approvedCount / totalCount) * 100 : 0;
 
         // Valores
-        const quotationTotal = (q: Quotation) => calculateGrandTotal(
-            q.items,
-            q.discount || 0,
-            q.isEmergency ? (q.emergencyRate || 0) : 0
-        ).total;
+        const quotationTotal = (q: Quotation) => calculateQuotationGrandTotal(q).total;
         const issuedValue = relevantQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
         const approvedValue = approvedQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
         const rejectedValue = rejectedQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
@@ -1646,7 +1725,7 @@ export default function QuotationsPage() {
                                                 <TableCell>{q.customer.name}</TableCell>
                                                 <TableCell>{format(q.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
                                                 <TableCell>
-                                                    {calculateGrandTotal(q.items, q.discount || 0, q.isEmergency ? (q.emergencyRate || 0) : 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    {calculateQuotationGrandTotal(q).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant={getStatusVariant(q.status)} className={cn((q.status === 'Aprovado' || q.status === 'Pedido Gerado') && 'bg-green-600 hover:bg-green-700 text-primary-foreground')}>{q.status}</Badge>
@@ -2026,6 +2105,12 @@ export default function QuotationsPage() {
                                                             <span>+ {grandTotalCalcs.totalEmergency.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                                         </div>
                                                     )}
+                                                    {watchedFreightType === 'CIF' && !watchedFreightIncludedInPrice && watchedFreightValue > 0 && (
+                                                        <div className="flex justify-end items-center gap-4 text-sm font-medium text-blue-600">
+                                                            <span>Frete CIF:</span>
+                                                            <span>+ {Number(watchedFreightValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                        </div>
+                                                    )}
                                                     <div className="flex justify-end items-center gap-4 text-lg font-bold">
                                                         <span>Total Geral:</span>
                                                         <span className="text-primary">
@@ -2133,6 +2218,90 @@ export default function QuotationsPage() {
                                                     </FormItem>
                                                 )}
                                             />
+                                        </CardContent>
+                                    </Card>
+
+                                    <Card>
+                                        <CardHeader>
+                                            <CardTitle>Condição de Frete</CardTitle>
+                                            <CardDescription>
+                                                Informe quem contratará e pagará o transporte e como o valor será apresentado na proposta.
+                                            </CardDescription>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            <FormField
+                                                control={form.control}
+                                                name="freightType"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>Modalidade</FormLabel>
+                                                        <Select
+                                                            value={field.value || 'FOB'}
+                                                            onValueChange={(value: 'FOB' | 'CIF') => {
+                                                                field.onChange(value);
+                                                                if (value === 'FOB') form.setValue('freightIncludedInPrice', true);
+                                                            }}
+                                                        >
+                                                            <FormControl>
+                                                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                                            </FormControl>
+                                                            <SelectContent>
+                                                                <SelectItem value="FOB">FOB — frete por conta do cliente/contratante</SelectItem>
+                                                                <SelectItem value="CIF">CIF — frete por conta da fornecedora/contratada</SelectItem>
+                                                            </SelectContent>
+                                                        </Select>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+
+                                            <FormField
+                                                control={form.control}
+                                                name="freightValue"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel>
+                                                            {watchedFreightType === 'CIF' ? 'Valor do frete contratado (R$)' : 'Valor estimado do frete — informativo (R$)'}
+                                                        </FormLabel>
+                                                        <FormControl>
+                                                            <Input type="number" min="0" step="0.01" placeholder="0,00" {...field} />
+                                                        </FormControl>
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+
+                                            {watchedFreightType === 'CIF' ? (
+                                                <FormField
+                                                    control={form.control}
+                                                    name="freightIncludedInPrice"
+                                                    render={({ field }) => (
+                                                        <FormItem>
+                                                            <FormLabel>Tratamento do valor</FormLabel>
+                                                            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                                                                <Button type="button" variant={field.value ? 'default' : 'outline'} onClick={() => field.onChange(true)}>
+                                                                    Frete já embutido nos produtos
+                                                                </Button>
+                                                                <Button type="button" variant={!field.value ? 'default' : 'outline'} onClick={() => field.onChange(false)}>
+                                                                    Adicionar frete ao total
+                                                                </Button>
+                                                            </div>
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                            ) : (
+                                                <div className="rounded-md border bg-muted p-3 text-sm text-muted-foreground">
+                                                    FOB: o cliente/contratante providencia e paga o frete. O valor informado não será somado ao orçamento.
+                                                </div>
+                                            )}
+
+                                            {watchedFreightType === 'CIF' && (
+                                                <div className="rounded-md border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
+                                                    CIF: a fornecedora/contratada providencia o frete. {watchedFreightIncludedInPrice
+                                                        ? 'O valor já está embutido nos preços e não será somado novamente.'
+                                                        : `Serão adicionados ${Number(watchedFreightValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} ao total.`}
+                                                </div>
+                                            )}
                                         </CardContent>
                                     </Card>
 
@@ -2305,6 +2474,28 @@ export default function QuotationsPage() {
                                             <span className="font-medium text-muted-foreground">Prazo de Entrega</span>
                                             <span>{selectedQuotation.deliveryTime}</span>
                                         </div>
+                                        <Separator />
+                                        <div className="flex justify-between items-start gap-4">
+                                            <span className="font-medium text-muted-foreground">Frete</span>
+                                            <span className="text-right font-medium">
+                                                {selectedQuotation.freightType === 'CIF'
+                                                    ? 'CIF — fornecedora/contratada'
+                                                    : 'FOB — cliente/contratante'}
+                                            </span>
+                                        </div>
+                                        <div className="flex justify-between items-start gap-4">
+                                            <span className="font-medium text-muted-foreground">Valor do frete</span>
+                                            <span className="text-right">
+                                                {Number(selectedQuotation.freightValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                <span className="block text-xs text-muted-foreground">
+                                                    {selectedQuotation.freightType === 'FOB'
+                                                        ? 'não incluído no orçamento'
+                                                        : selectedQuotation.freightIncludedInPrice === false
+                                                            ? 'adicionado separadamente ao total'
+                                                            : 'já embutido nos produtos'}
+                                                </span>
+                                            </span>
+                                        </div>
                                     </CardContent>
                                 </Card>
                                 
@@ -2365,18 +2556,24 @@ export default function QuotationsPage() {
                                                 <>
                                                     <div className="flex justify-end items-center gap-4 text-sm text-muted-foreground">
                                                         <span>Subtotal Original:</span>
-                                                        <span>{calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount, selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0).originalTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                        <span>{calculateQuotationGrandTotal(selectedQuotation).originalTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                                     </div>
                                                     <div className="flex justify-end items-center gap-4 text-sm text-red-600">
                                                         <span>Desconto ({selectedQuotation.discount}%):</span>
-                                                        <span>- {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount, selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0).totalDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                        <span>- {calculateQuotationGrandTotal(selectedQuotation).totalDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                                     </div>
                                                 </>
+                                            )}
+                                            {calculateQuotationGrandTotal(selectedQuotation).totalFreight > 0 && (
+                                                <div className="flex justify-end items-center gap-4 text-sm font-medium text-blue-600">
+                                                    <span>Frete CIF:</span>
+                                                    <span>+ {calculateQuotationGrandTotal(selectedQuotation).totalFreight.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                </div>
                                             )}
                                             <div className="flex justify-end items-center gap-4 text-xl font-bold">
                                                 <span>Total Geral:</span>
                                                 <span className="text-primary">
-                                                    {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount || 0, selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    {calculateQuotationGrandTotal(selectedQuotation).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </span>
                                             </div>
                                         </div>
