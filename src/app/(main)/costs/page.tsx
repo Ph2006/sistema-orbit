@@ -9,6 +9,8 @@ import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteD
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -2041,51 +2043,71 @@ export default function CostsPage() {
         const itemsWithoutWeight = requisition.items.filter(item => (Number(item.invoiceItemValue) || 0) > 0 && weightToKg(item.weight, item.weightUnit) <= 0).length;
         const currency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
         const number = (value: number, digits = 2) => value.toLocaleString('pt-BR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-        const html = (value: unknown) => String(value ?? '')
-            .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-            .replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 
-        const rows = requisition.items.map(item => {
-            const value = Number(item.invoiceItemValue) || 0;
-            const weightKg = weightToKg(item.weight, item.weightUnit);
-            const itemCostPerKg = weightKg > 0 ? value / weightKg : 0;
-            return `<tr>
-                <td>${html(item.description)}</td>
-                <td class="center">${number(Number(item.quantityRequested) || 0, 0)}</td>
-                <td class="right">${weightKg > 0 ? `${number(weightKg, 3)} kg` : '-'}</td>
-                <td class="right">${currency(value)}</td>
-                <td class="right">${weightKg > 0 ? `${currency(itemCostPerKg)}/kg` : '-'}</td>
-                <td>${html(item.supplierName || '-')}</td>
-                <td>${html(item.invoiceNumber || '-')}</td>
-                <td>${html(item.inspectionStatus || item.status || '-')}</td>
-            </tr>`;
-        }).join('');
+        try {
+            const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(16);
+            pdf.text(`RELACAO DE CUSTOS DE MATERIA-PRIMA - OS ${osNumber}`, 14, 15);
+            pdf.setFont('helvetica', 'normal');
+            pdf.setFontSize(9);
+            pdf.text(`Cliente: ${customerName || '-'}`, 14, 22);
+            pdf.text(`Requisicao: ${requisition.requisitionNumber} | Data: ${safeFormatDate(requisition.date, 'dd/MM/yyyy')}`, 14, 27);
 
-        const reportWindow = window.open('', '_blank', 'noopener,noreferrer');
-        if (!reportWindow) {
-            toast({ variant: 'destructive', title: 'Pop-up bloqueado', description: 'Permita pop-ups para exportar o relatório.' });
-            return;
+            autoTable(pdf, {
+                startY: 33,
+                head: [['Valor total pago', 'Peso total adquirido', 'Custo medio ponderado', 'Itens precificados']],
+                body: [[currency(totalValue), `${number(totalWeightKg, 3)} kg`, `${currency(averageCostPerKg)}/kg`, `${pricedItems}/${requisition.items.length}`]],
+                styles: { fontSize: 9, cellPadding: 3 },
+                headStyles: { fillColor: [30, 64, 175], textColor: 255 },
+            });
+
+            let nextY = (pdf as any).lastAutoTable.finalY + 6;
+            pdf.setFontSize(8);
+            pdf.text(`Calculo: ${currency(totalValue)} / ${number(totalWeightKg, 3)} kg = ${currency(averageCostPerKg)}/kg`, 14, nextY);
+            if (itemsWithoutWeight > 0) {
+                nextY += 5;
+                pdf.setTextColor(185, 28, 28);
+                pdf.text(`ATENCAO: ${itemsWithoutWeight} item(ns) com valor pago nao possuem peso informado.`, 14, nextY);
+                pdf.setTextColor(0, 0, 0);
+            }
+
+            autoTable(pdf, {
+                startY: nextY + 5,
+                head: [['Item', 'Qtd.', 'Peso em kg', 'Valor pago', 'R$/kg', 'Fornecedor', 'NF', 'Inspecao']],
+                body: requisition.items.map(item => {
+                    const value = Number(item.invoiceItemValue) || 0;
+                    const weightKg = weightToKg(item.weight, item.weightUnit);
+                    const itemCostPerKg = weightKg > 0 ? value / weightKg : 0;
+                    return [
+                        item.description,
+                        number(Number(item.quantityRequested) || 0, 0),
+                        weightKg > 0 ? number(weightKg, 3) : '-',
+                        currency(value),
+                        weightKg > 0 ? currency(itemCostPerKg) : '-',
+                        item.supplierName || '-',
+                        item.invoiceNumber || '-',
+                        item.inspectionStatus || item.status || '-',
+                    ];
+                }),
+                styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+                headStyles: { fillColor: [51, 65, 85], textColor: 255 },
+                columnStyles: { 0: { cellWidth: 60 }, 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+                didDrawPage: () => {
+                    const pageCount = pdf.getNumberOfPages();
+                    pdf.setFontSize(7);
+                    pdf.text(`Gerado em ${safeFormatDate(new Date(), 'dd/MM/yyyy HH:mm')} | Pagina ${pageCount}`, 14, 202);
+                },
+            });
+
+            const safeOS = String(osNumber).replace(/[^a-zA-Z0-9_-]+/g, '-');
+            const safeReq = String(requisition.requisitionNumber).replace(/[^a-zA-Z0-9_-]+/g, '-');
+            pdf.save(`Custos_OS_${safeOS}_Req_${safeReq}.pdf`);
+            toast({ title: 'PDF baixado', description: `Relatorio de custos da OS ${osNumber} gerado com sucesso.` });
+        } catch (error) {
+            console.error('Erro ao gerar PDF de custos:', error);
+            toast({ variant: 'destructive', title: 'Erro ao gerar PDF', description: 'Nao foi possivel gerar o arquivo.' });
         }
-
-        reportWindow.document.write(`<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Custos OS ${html(osNumber)}</title>
-            <style>
-                body{font-family:Arial,sans-serif;color:#111827;margin:28px;font-size:12px}h1{font-size:20px;margin:0 0 5px}h2{font-size:14px;margin:20px 0 8px}.meta{color:#475569;margin-bottom:16px}.summary{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:16px 0}.box{border:1px solid #cbd5e1;border-radius:6px;padding:10px}.label{font-size:10px;color:#64748b}.value{font-size:16px;font-weight:700;margin-top:4px}table{width:100%;border-collapse:collapse}th,td{border:1px solid #cbd5e1;padding:6px}th{background:#e2e8f0;text-align:left}.right{text-align:right}.center{text-align:center}.warning{color:#991b1b;background:#fee2e2;border:1px solid #fecaca;padding:8px;margin:10px 0}.formula{font-size:11px;color:#475569;margin-top:6px}@media print{button{display:none}body{margin:10mm}}
-            </style></head><body>
-            <h1>Relação de Custos de Matéria-Prima — OS ${html(osNumber)}</h1>
-            <div class="meta">Cliente: ${html(customerName || '-')} · Requisição: ${html(requisition.requisitionNumber)} · Data: ${html(safeFormatDate(requisition.date, 'dd/MM/yyyy'))}</div>
-            <div class="summary">
-                <div class="box"><div class="label">Valor total pago</div><div class="value">${currency(totalValue)}</div></div>
-                <div class="box"><div class="label">Peso total adquirido</div><div class="value">${number(totalWeightKg, 3)} kg</div></div>
-                <div class="box"><div class="label">Custo médio ponderado</div><div class="value">${currency(averageCostPerKg)}/kg</div></div>
-                <div class="box"><div class="label">Itens precificados</div><div class="value">${pricedItems}/${requisition.items.length}</div></div>
-            </div>
-            <div class="formula">Cálculo: ${currency(totalValue)} ÷ ${number(totalWeightKg, 3)} kg = ${currency(averageCostPerKg)}/kg</div>
-            ${itemsWithoutWeight > 0 ? `<div class="warning">Atenção: ${itemsWithoutWeight} item(ns) com valor pago não possuem peso informado. O R$/kg ficará superestimado até o preenchimento desses pesos.</div>` : ''}
-            <h2>Itens adquiridos</h2><table><thead><tr><th>Item</th><th>Qtd.</th><th>Peso em kg</th><th>Valor pago</th><th>R$/kg</th><th>Fornecedor</th><th>NF</th><th>Inspeção</th></tr></thead><tbody>${rows}</tbody></table>
-            <p class="meta">Relatório gerado em ${html(safeFormatDate(new Date(), 'dd/MM/yyyy HH:mm'))}.</p>
-            <button onclick="window.print()">Imprimir / Salvar em PDF</button>
-            <script>window.onload=()=>window.print();<\/script></body></html>`);
-        reportWindow.document.close();
     };
 
 
