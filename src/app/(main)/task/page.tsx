@@ -48,7 +48,8 @@ import {
   Plus,
   ListChecks,
   CheckSquare,
-  Trash2
+  Trash2,
+  Search
 } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -129,6 +130,8 @@ type CompanyData = {
   email?: string;
   celular?: string;
 };
+
+const UNASSIGNED_SELECT_VALUE = '__unassigned__';
 
 type TaskStatus =
   | 'Programada'
@@ -290,6 +293,7 @@ export default function TasksPage() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [filterResource, setFilterResource] = useState<string>('all');
   const [filterSupervisor, setFilterSupervisor] = useState<string>('all');
+  const [filterOrderNumber, setFilterOrderNumber] = useState<string>('');
   
   // Novos estados para alocação
   const [selectedTask, setSelectedTask] = useState<SimpleTask | null>(null);
@@ -302,6 +306,21 @@ export default function TasksPage() {
     estimatedHours: 0
   });
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+
+  const leadershipMembers = useMemo(() => {
+    const leadershipTerms = ['lider', 'supervisor', 'encarregado', 'coordenador', 'gerente', 'gestor', 'manager', 'leader'];
+
+    return teamMembers
+      .filter(member => Boolean(String(member.id || '').trim()))
+      .filter(member => {
+        const searchableRole = `${member.position || ''} ${member.permission || ''}`
+          .normalize('NFD')
+          .replace(/[\u0300-\u036f]/g, '')
+          .toLowerCase();
+        return leadershipTerms.some(term => searchableRole.includes(term));
+      })
+      .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
+  }, [teamMembers]);
 
   // Estados para tarefas do dia
   const [dailyTasks, setDailyTasks] = useState<DailyTask[]>([]);
@@ -467,12 +486,14 @@ export default function TasksPage() {
                     };
                   }
 
+                  const resolvedItemId = String(item.id || `item-${itemIndex}`);
+
                   tasksList.push({
-                    id: `${orderDoc.id}-${item.id || itemIndex}-${stageIndex}`,
+                    id: `${orderDoc.id}-${resolvedItemId}-${stageIndex}`,
                     orderId: orderDoc.id,
                     orderNumber: String(orderData.quotationNumber || orderData.orderNumber || 'N/A'),
                     customerName: String(orderData.customer?.name || 'Cliente não informado'),
-                    itemId: String(item.id || `item-${itemIndex}`),
+                    itemId: resolvedItemId,
                     itemDescription: String(item.description || 'Sem descrição'),
                     itemCode: String(item.code || item.product_code || ''),
                     itemNumber: item.itemNumber ? String(item.itemNumber) : undefined,
@@ -698,7 +719,23 @@ export default function TasksPage() {
       }
       
       // Filtro por período - verificar se startDate é válido
-      const isInPeriod = task.startDate && isWithinInterval(task.startDate, { start: periodStart, end: periodEnd });
+      const normalizedOrderQuery = filterOrderNumber
+        .trim()
+        .toLowerCase()
+        .replace(/^os\s*/i, '')
+        .replace(/\s+/g, '');
+      const normalizedTaskOrder = String(task.orderNumber || '')
+        .trim()
+        .toLowerCase()
+        .replace(/^os\s*/i, '')
+        .replace(/\s+/g, '');
+      const orderMatch = !normalizedOrderQuery || normalizedTaskOrder.includes(normalizedOrderQuery);
+
+      // Ao pesquisar uma OS, apresenta todas as pendências dela, mesmo que estejam
+      // fora da semana/mês atualmente selecionado.
+      const isInPeriod = normalizedOrderQuery
+        ? true
+        : Boolean(task.startDate && isWithinInterval(task.startDate, { start: periodStart, end: periodEnd }));
       
       // Filtros adicionais
       const statusMatch = filterStatus === 'all' || task.status === filterStatus;
@@ -707,9 +744,9 @@ export default function TasksPage() {
       const supervisorMatch = filterSupervisor === 'all' || 
         (filterSupervisor === 'unassigned' ? !task.supervisor : task.supervisor?.memberId === filterSupervisor);
 
-      return isInPeriod && statusMatch && resourceMatch && supervisorMatch;
+      return isInPeriod && orderMatch && statusMatch && resourceMatch && supervisorMatch;
     });
-  }, [tasks, currentDate, viewMode, filterStatus, filterResource, filterSupervisor]);
+  }, [tasks, currentDate, viewMode, filterStatus, filterResource, filterSupervisor, filterOrderNumber]);
 
   // Estatísticas simplificadas
   const tasksSummary = useMemo(() => {
@@ -1373,7 +1410,9 @@ export default function TasksPage() {
       setAllocationData({
         taskId: String(task.id),
         resourceId: task.assignedResource?.resourceId ? String(task.assignedResource.resourceId) : undefined,
-        supervisorId: task.supervisor?.memberId ? String(task.supervisor.memberId) : undefined,
+        supervisorId: task.supervisor?.memberId && leadershipMembers.some(member => member.id === task.supervisor?.memberId)
+          ? String(task.supervisor.memberId)
+          : undefined,
         notes: task.notes || '',
         estimatedHours: Number(task.estimatedHours) || 0
       });
@@ -1390,6 +1429,16 @@ export default function TasksPage() {
 
   const handleSaveAllocation = async () => {
     if (!selectedTask) return;
+
+    const selectedLeader = leadershipMembers.find(member => member.id === allocationData.supervisorId);
+    if (!selectedLeader) {
+      toast({
+        variant: "destructive",
+        title: "Selecione um líder",
+        description: "A tarefa precisa ser vinculada a um líder cadastrado na equipe.",
+      });
+      return;
+    }
     
     try {
       // Encontrar o documento do pedido
@@ -1399,12 +1448,17 @@ export default function TasksPage() {
       if (!orderSnap.exists()) return;
       
       const orderData = orderSnap.data();
-      const updatedItems = orderData.items.map((item: any) => {
-        if (item.id === selectedTask.itemId) {
+      if (!Array.isArray(orderData.items)) {
+        throw new Error('O pedido não possui uma lista de itens válida.');
+      }
+
+      const updatedItems = orderData.items.map((item: any, itemIndex: number) => {
+        const resolvedItemId = String(item.id || `item-${itemIndex}`);
+        if (resolvedItemId === selectedTask.itemId) {
           const updatedPlan = item.productionPlan.map((stage: any, index: number) => {
             if (`${selectedTask.orderId}-${selectedTask.itemId}-${index}` === selectedTask.id) {
               const selectedResource = resources.find(r => r.id === allocationData.resourceId);
-              const selectedSupervisor = teamMembers.find(m => m.id === allocationData.supervisorId);
+              const selectedSupervisor = selectedLeader;
               
               return {
                 ...stage,
@@ -1544,7 +1598,7 @@ export default function TasksPage() {
 
       autoTable(docPdf, {
         startY: yPos,
-        head: [['Pedido', 'Item', 'Etapa', 'Recurso', 'Supervisor', 'Prazo', 'Status']],
+        head: [['Pedido', 'Item', 'Etapa', 'Recurso', 'Líder', 'Prazo', 'Status']],
         body: tableBody,
         styles: { fontSize: 8, cellPadding: 2 },
         headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
@@ -1825,6 +1879,16 @@ export default function TasksPage() {
                   <span className="text-sm font-medium">Filtros:</span>
                 </div>
 
+                <div className="relative w-[220px]">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                  <Input
+                    value={filterOrderNumber}
+                    onChange={(event) => setFilterOrderNumber(event.target.value)}
+                    placeholder="Buscar OS: 790/26"
+                    className="pl-9"
+                  />
+                </div>
+
                 <Select value={filterStatus} onValueChange={setFilterStatus}>
                   <SelectTrigger className="w-[150px]">
                     <SelectValue placeholder="Status" />
@@ -1844,7 +1908,7 @@ export default function TasksPage() {
                   <SelectContent>
                     <SelectItem value="all">Todos os Recursos</SelectItem>
                     <SelectItem value="unassigned">Sem Recurso</SelectItem>
-                    {resources.map(resource => (
+                    {resources.filter(resource => Boolean(String(resource.id || '').trim())).map(resource => (
                       <SelectItem key={resource.id} value={resource.id}>
                         {resource.name}
                       </SelectItem>
@@ -1854,12 +1918,12 @@ export default function TasksPage() {
 
                 <Select value={filterSupervisor} onValueChange={setFilterSupervisor}>
                   <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Filtrar por Supervisor" />
+                    <SelectValue placeholder="Filtrar por Líder" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">Todos os Supervisores</SelectItem>
-                    <SelectItem value="unassigned">Sem Supervisor</SelectItem>
-                    {teamMembers.map(member => (
+                    <SelectItem value="all">Todos os Líderes</SelectItem>
+                    <SelectItem value="unassigned">Sem Líder</SelectItem>
+                    {leadershipMembers.map(member => (
                       <SelectItem key={member.id} value={member.id}>
                         {member.name}
                       </SelectItem>
@@ -1867,7 +1931,7 @@ export default function TasksPage() {
                   </SelectContent>
                 </Select>
 
-                {(filterStatus !== 'all' || filterResource !== 'all' || filterSupervisor !== 'all') && (
+                {(filterStatus !== 'all' || filterResource !== 'all' || filterSupervisor !== 'all' || filterOrderNumber) && (
                   <Button
                     variant="ghost"
                     size="sm"
@@ -1875,6 +1939,7 @@ export default function TasksPage() {
                       setFilterStatus('all');
                       setFilterResource('all');
                       setFilterSupervisor('all');
+                      setFilterOrderNumber('');
                     }}
                   >
                     Limpar Filtros
@@ -1913,7 +1978,7 @@ export default function TasksPage() {
                         <TableHead>Item</TableHead>
                         <TableHead>Etapa</TableHead>
                         <TableHead>Recurso</TableHead>
-                        <TableHead>Supervisor</TableHead>
+                        <TableHead>Líder</TableHead>
                         <TableHead>Prazo</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead>Prioridade</TableHead>
@@ -1943,7 +2008,7 @@ export default function TasksPage() {
                                 <span className="text-sm">{task.supervisor.memberName}</span>
                               </div>
                             ) : (
-                              <span className="text-xs text-muted-foreground">Sem supervisor</span>
+                              <span className="text-xs text-muted-foreground">Sem líder</span>
                             )}
                           </TableCell>
                           <TableCell>{task.endDate ? format(task.endDate, 'dd/MM/yyyy') : 'N/A'}</TableCell>
@@ -2372,7 +2437,7 @@ export default function TasksPage() {
                 <Select value={taskForm.resourceId} onValueChange={(v) => setTaskForm(p => ({ ...p, resourceId: v }))}>
                   <SelectTrigger><SelectValue placeholder="Selecione o recurso" /></SelectTrigger>
                   <SelectContent>
-                    {resources.map(r => (
+                    {resources.filter(r => Boolean(String(r.id || '').trim())).map(r => (
                       <SelectItem key={r.id} value={r.id}>{r.name} ({r.type})</SelectItem>
                     ))}
                   </SelectContent>
@@ -2383,7 +2448,7 @@ export default function TasksPage() {
                 <Select value={taskForm.responsibleId} onValueChange={(v) => setTaskForm(p => ({ ...p, responsibleId: v }))}>
                   <SelectTrigger><SelectValue placeholder="Selecione o responsável" /></SelectTrigger>
                   <SelectContent>
-                    {teamMembers.map(m => (
+                    {teamMembers.filter(m => Boolean(String(m.id || '').trim())).map(m => (
                       <SelectItem key={m.id} value={m.id}>{m.name} — {m.position}</SelectItem>
                     ))}
                   </SelectContent>
@@ -2485,9 +2550,9 @@ export default function TasksPage() {
       <Dialog open={isAllocationDialogOpen} onOpenChange={setIsAllocationDialogOpen}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Alocar Recurso e Supervisor</DialogTitle>
+            <DialogTitle>Alocar Recurso e Líder</DialogTitle>
             <DialogDescription>
-              Defina o recurso e supervisor responsáveis pela execução desta tarefa.
+              Defina o recurso produtivo e o líder responsável pela execução desta tarefa.
             </DialogDescription>
           </DialogHeader>
           
@@ -2505,11 +2570,11 @@ export default function TasksPage() {
               <div className="space-y-2">
                 <Label>Recurso Produtivo</Label>
                 <Select 
-                  value={allocationData.resourceId || ''} 
+                  value={allocationData.resourceId || UNASSIGNED_SELECT_VALUE}
                   onValueChange={(value) => 
                     setAllocationData(prev => ({ 
                       ...prev, 
-                      resourceId: value === '' ? undefined : value 
+                      resourceId: value === UNASSIGNED_SELECT_VALUE ? undefined : value
                     }))
                   }
                 >
@@ -2517,8 +2582,10 @@ export default function TasksPage() {
                     <SelectValue placeholder="Selecione um recurso" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Nenhum recurso</SelectItem>
-                    {resources.filter(r => r.status === 'disponivel').map(resource => (
+                    <SelectItem value={UNASSIGNED_SELECT_VALUE}>Nenhum recurso</SelectItem>
+                    {resources
+                      .filter(r => r.status === 'disponivel' && Boolean(String(r.id || '').trim()))
+                      .map(resource => (
                       <SelectItem key={resource.id} value={String(resource.id)}>
                         <div className="flex items-center gap-2">
                           <span>{resource.name}</span>
@@ -2527,29 +2594,29 @@ export default function TasksPage() {
                           </Badge>
                         </div>
                       </SelectItem>
-                    ))}
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
               
-              {/* Seleção de supervisor */}
+              {/* Seleção do líder */}
               <div className="space-y-2">
-                <Label>Supervisor</Label>
+                <Label>Líder Responsável</Label>
                 <Select 
-                  value={allocationData.supervisorId || ''} 
+                  value={allocationData.supervisorId || UNASSIGNED_SELECT_VALUE}
                   onValueChange={(value) => 
                     setAllocationData(prev => ({ 
                       ...prev, 
-                      supervisorId: value === '' ? undefined : value 
+                      supervisorId: value === UNASSIGNED_SELECT_VALUE ? undefined : value
                     }))
                   }
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione um supervisor" />
+                    <SelectValue placeholder="Selecione um líder" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Nenhum supervisor</SelectItem>
-                    {teamMembers.map(member => (
+                    <SelectItem value={UNASSIGNED_SELECT_VALUE}>Selecione um líder</SelectItem>
+                    {leadershipMembers.map(member => (
                       <SelectItem key={member.id} value={String(member.id)}>
                         <div className="flex items-center gap-2">
                           <span>{member.name}</span>
@@ -2561,6 +2628,11 @@ export default function TasksPage() {
                     ))}
                   </SelectContent>
                 </Select>
+                {leadershipMembers.length === 0 && (
+                  <p className="text-sm text-amber-600">
+                    Nenhum líder foi identificado. Cadastre na aba Empresa &gt; Equipe um cargo ou permissão como Líder, Supervisor, Encarregado, Coordenador, Gerente ou Gestor.
+                  </p>
+                )}
               </div>
               
               {/* Horas estimadas */}
