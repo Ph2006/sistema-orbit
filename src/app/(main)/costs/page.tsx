@@ -142,6 +142,8 @@ type Requisition = {
   date: Date;
   status: string;
   orderId?: string;
+  orderNumber?: string;
+  internalOS?: string;
   totalValue?: number;
   itemsWithPrice?: number;
   progress?: number;
@@ -151,6 +153,9 @@ type Requisition = {
 
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
 type OrderInfo = { id: string; internalOS: string; customerName: string; costEntries?: any[] };
+
+const normalizeOSNumber = (value?: string): string =>
+    (value || '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, '');
 
 // Função utilitária para formatação segura de datas
 const safeFormatDate = (date: any, formatString: string, fallback: string = 'Data inválida'): string => {
@@ -592,6 +597,20 @@ export default function CostsPage() {
         resolver: zodResolver(costEntrySchema),
     });
 
+    // Resolve o vínculo primeiro pelo ID e, como contingência, pelo número legível da OS.
+    // Isso mantém compatibilidade com requisições antigas e documentos migrados.
+    const resolveLinkedOrder = useCallback((requisition: Pick<Requisition, 'orderId' | 'orderNumber' | 'internalOS'>) => {
+        const orderById = requisition.orderId
+            ? orders.find(order => order.id === requisition.orderId)
+            : undefined;
+        if (orderById) return orderById;
+
+        const savedOSNumber = normalizeOSNumber(requisition.orderNumber || requisition.internalOS);
+        if (!savedOSNumber) return undefined;
+
+        return orders.find(order => normalizeOSNumber(order.internalOS) === savedOSNumber);
+    }, [orders]);
+
     const fetchRequisitions = useCallback(async () => {
         if (!user) return;
         setIsLoadingRequisitions(true);
@@ -616,6 +635,8 @@ export default function CostsPage() {
                     })(),
                     status: data.status,
                     orderId: data.orderId,
+                    orderNumber: data.orderNumber || data.internalOS || data.osNumber || undefined,
+                    internalOS: data.internalOS || data.orderNumber || data.osNumber || undefined,
                     totalValue: data.totalValue || 0,
                     itemsWithPrice: data.itemsWithPrice || 0,
                     progress: data.progress || 0,
@@ -749,7 +770,8 @@ export default function CostsPage() {
         try {
             const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList: OrderInfo[] = ordersSnapshot.docs
-                .filter(doc => !['Concluído', 'Cancelado'].includes(doc.data().status))
+                // Custos precisam localizar também OS concluídas ou canceladas,
+                // pois seus vínculos e históricos financeiros continuam válidos.
                 .map(doc => {
                     const data = doc.data();
                     return {
@@ -859,12 +881,26 @@ export default function CostsPage() {
             let hasChanges = false;
             
             for (const req of requisitions) {
-                if (req.orderId && req.totalValue && req.totalValue > 0) {
+                const hasOrderLink = Boolean(req.orderId || req.orderNumber || req.internalOS);
+                if (hasOrderLink && req.totalValue && req.totalValue > 0) {
                     console.log(`🔍 ===== VERIFICANDO REQUISIÇÃO ${req.requisitionNumber} =====`);
                     console.log(`💰 Valor: R$ ${req.totalValue} | Progresso: ${req.progress}% | OS ID: ${req.orderId}`);
                     
-                    const order = orders.find(o => o.id === req.orderId);
+                    const order = resolveLinkedOrder(req);
                     if (order) {
+                        // Migração automática: consolida ID atual e número da OS
+                        // nas requisições antigas assim que o vínculo é reconhecido.
+                        if (req.orderId !== order.id || req.orderNumber !== order.internalOS || req.internalOS !== order.internalOS) {
+                            await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", req.id), {
+                                orderId: order.id,
+                                orderNumber: order.internalOS,
+                                internalOS: order.internalOS,
+                            });
+                            req.orderId = order.id;
+                            req.orderNumber = order.internalOS;
+                            req.internalOS = order.internalOS;
+                            hasChanges = true;
+                        }
                         console.log(`📋 OS encontrada: ${order.internalOS} - ${order.customerName}`);
                         console.log(`💼 Lançamentos existentes na OS: ${(order.costEntries || []).length}`);
                         
@@ -899,7 +935,7 @@ export default function CostsPage() {
                         if (needsUpdate) {
                             console.log(`🚀 EXECUTANDO SINCRONIZAÇÃO: Requisição ${req.requisitionNumber} -> OS ${req.orderId}`);
                             try {
-                                await updateOrderCostFromRequisition(req.orderId, req.id, req.items);
+                                await updateOrderCostFromRequisition(order.id, req.id, req.items);
                                 hasChanges = true;
                                 console.log(`✅ Sincronização da requisição ${req.requisitionNumber} CONCLUÍDA`);
                             } catch (error) {
@@ -911,9 +947,9 @@ export default function CostsPage() {
                     } else {
                         console.error(`❌ OS ${req.orderId} NÃO ENCONTRADA para requisição ${req.requisitionNumber}!`);
                     }
-                } else if (req.orderId && (!req.totalValue || req.totalValue === 0)) {
+                } else if (hasOrderLink && (!req.totalValue || req.totalValue === 0)) {
                     // Requisição sem valores ainda - criar lançamento pendente
-                    const order = orders.find(o => o.id === req.orderId);
+                    const order = resolveLinkedOrder(req);
                     if (order) {
                         const existingReqCost = order.costEntries?.find((entry: any) => 
                             entry.requisitionId === req.id
@@ -921,7 +957,7 @@ export default function CostsPage() {
                         
                         if (!existingReqCost) {
                             console.log(`📝 Criando lançamento pendente para requisição ${req.requisitionNumber} na OS ${req.orderId}`);
-                            await createInitialOrderCostFromRequisition(req.orderId, req.id);
+                            await createInitialOrderCostFromRequisition(order.id, req.id);
                             hasChanges = true;
                         }
                     }
@@ -943,7 +979,7 @@ export default function CostsPage() {
         // Sincronizar quando dados mudam - aguardar um pouco para garantir que tudo foi carregado
         const timeoutId = setTimeout(syncRequisitionsWithOrders, 1000);
         return () => clearTimeout(timeoutId);
-    }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders]);
+    }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders, resolveLinkedOrder, fetchOrders]);
 
     // Função para forçar refresh dos dados de custos
     const forceRefreshCosts = useCallback(async () => {
@@ -1064,10 +1100,14 @@ export default function CostsPage() {
 
             // Atualizar custos da OS automaticamente se a requisição estiver vinculada a uma OS
             let costUpdateSuccess = false;
-            if (reqData.orderId) {
+            const requisitionForLink = requisitions.find(req => req.id === selectedItem.requisitionId);
+            const resolvedOrder = requisitionForLink ? resolveLinkedOrder(requisitionForLink) : undefined;
+            const resolvedOrderId = resolvedOrder?.id || reqData.orderId;
+
+            if (resolvedOrderId) {
                 console.log('🔗 Requisição vinculada à OS, atualizando custos...');
                 try {
-                    await updateOrderCostFromRequisition(reqData.orderId, selectedItem.requisitionId, updatedItems);
+                    await updateOrderCostFromRequisition(resolvedOrderId, selectedItem.requisitionId, updatedItems);
                     console.log('✅ Custos da OS atualizados com sucesso');
                     costUpdateSuccess = true;
                 } catch (costError) {
@@ -1079,7 +1119,7 @@ export default function CostsPage() {
             }
 
             // Toast mais informativo baseado nos valores
-            if (reqData.orderId) {
+            if (resolvedOrderId) {
                 const hasValues = values.invoiceItemValue && values.invoiceItemValue > 0;
                 if (hasValues && costUpdateSuccess) {
                     toast({ 
@@ -1876,10 +1916,13 @@ export default function CostsPage() {
                                                     </div>
                                                     <div className="flex items-center gap-4 text-sm text-muted-foreground mt-1">
                                                         <span>
-                                                            {req.orderId ? 
+                                                            {(req.orderId || req.orderNumber || req.internalOS) ? 
                                                                 (() => {
-                                                                    const order = orders.find(o => o.id === req.orderId);
-                                                                    return order ? `OS: ${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
+                                                                    const order = resolveLinkedOrder(req);
+                                                                    const savedNumber = req.orderNumber || req.internalOS;
+                                                                    return order
+                                                                        ? `OS: ${order.internalOS} - ${order.customerName}`
+                                                                        : savedNumber ? `OS: ${savedNumber}` : 'OS não encontrada';
                                                                 })() : 'Sem OS vinculada'
                                                             }
                                                         </span>
@@ -1910,10 +1953,13 @@ export default function CostsPage() {
                                                             <div>
                                                                 <span className="font-semibold text-muted-foreground">OS Vinculada:</span>
                                                                 <p className="font-medium">
-                                                                    {req.orderId ? 
+                                                                    {(req.orderId || req.orderNumber || req.internalOS) ? 
                                                                         (() => {
-                                                                            const order = orders.find(o => o.id === req.orderId);
-                                                                            return order ? `${order.internalOS} - ${order.customerName}` : 'OS não encontrada';
+                                                                            const order = resolveLinkedOrder(req);
+                                                                            const savedNumber = req.orderNumber || req.internalOS;
+                                                                            return order
+                                                                                ? `${order.internalOS} - ${order.customerName}`
+                                                                                : savedNumber || 'OS não encontrada';
                                                                         })() : 'Nenhuma OS vinculada'
                                                                     }
                                                                 </p>
@@ -1976,31 +2022,31 @@ export default function CostsPage() {
                                                             </div>
                                                         </div>
                                                         
-                                                        {req.orderId && totalValue > 0 && (
+                                                        {(req.orderId || req.orderNumber || req.internalOS) && totalValue > 0 && (
                                                             <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
                                                                 ✅ <strong>Este valor será automaticamente lançado como custo na OS {
                                                                     (() => {
-                                                                        const order = orders.find(o => o.id === req.orderId);
-                                                                        return order ? order.internalOS : req.orderId;
+                                                                        const order = resolveLinkedOrder(req);
+                                                                        return order?.internalOS || req.orderNumber || req.internalOS || req.orderId;
                                                                     })()
                                                                 }</strong>
                                                             </div>
                                                         )}
                                                         
-                                                        {req.orderId && totalValue === 0 && (
+                                                        {(req.orderId || req.orderNumber || req.internalOS) && totalValue === 0 && (
                                                             <div className="mt-3 p-2 bg-orange-100 border border-orange-300 rounded text-sm text-orange-800">
                                                                 ⏳ Adicione os valores dos itens para que sejam lançados automaticamente na OS {
                                                                     (() => {
-                                                                        const order = orders.find(o => o.id === req.orderId);
-                                                                        return order ? order.internalOS : req.orderId;
+                                                                        const order = resolveLinkedOrder(req);
+                                                                        return order?.internalOS || req.orderNumber || req.internalOS || req.orderId;
                                                                     })()
                                                                 }
                                                             </div>
                                                         )}
                                                         
-                                                        {req.orderId && !orders.find(o => o.id === req.orderId) && (
+                                                        {(req.orderId || req.orderNumber || req.internalOS) && !resolveLinkedOrder(req) && (
                                                             <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
-                                                                ⚠️ <strong>Problema de vinculação:</strong> A OS vinculada (ID: {req.orderId}) não foi encontrada. 
+                                                                ⚠️ <strong>Problema de vinculação:</strong> A OS vinculada ({req.orderNumber || req.internalOS || `ID: ${req.orderId}`}) não foi encontrada. 
                                                                 Verifique se a OS ainda existe ou se houve erro na vinculação.
                                                             </div>
                                                         )}
@@ -2428,9 +2474,11 @@ export default function CostsPage() {
                                     
                                     {/* Aviso se há requisições com valores que ainda não apareceram nos custos */}
                                     {(() => {
-                                        const reqsWithValues = requisitions.filter(req => req.orderId && req.totalValue && req.totalValue > 0);
+                                        const reqsWithValues = requisitions.filter(req =>
+                                            (req.orderId || req.orderNumber || req.internalOS) && req.totalValue && req.totalValue > 0
+                                        );
                                         const osWithoutCosts = reqsWithValues.filter(req => {
-                                            const order = orders.find(o => o.id === req.orderId);
+                                            const order = resolveLinkedOrder(req);
                                             const hasReqCost = order?.costEntries?.find((entry: any) => 
                                                 entry.requisitionId === req.id && entry.totalCost > 0
                                             );
