@@ -1,3 +1,4 @@
+// IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
 import React from "react";
@@ -518,6 +519,10 @@ export default function ProductsPage() {
     const [csllRate, setCsllRate] = useState<number>(2.88);
     const [machiningHours, setMachiningHours] = useState<number>(0);
     const [pricingProductSearch, setPricingProductSearch] = useState<string>("");
+    const [isCopyPricingDialogOpen, setIsCopyPricingDialogOpen] = useState(false);
+    const [copyPricingSearch, setCopyPricingSearch] = useState("");
+    const [copyPricingSourceId, setCopyPricingSourceId] = useState("");
+    const [isCopyingPricing, setIsCopyingPricing] = useState(false);
     
     // Estados para materiais personalizados
     const [customMaterials, setCustomMaterials] = useState<Material[]>([]);
@@ -774,6 +779,110 @@ export default function ProductsPage() {
       console.error("Error loading saved pricing:", error);
     }
   }, [toast]);
+
+  const copySavedPricingToSelectedProduct = useCallback(async () => {
+    if (!selectedProductForPricing || !copyPricingSourceId) {
+      toast({
+        variant: "destructive",
+        title: "Seleção incompleta",
+        description: "Selecione o produto de origem da precificação.",
+      });
+      return;
+    }
+
+    const sourceProduct = products.find(product => product.id === copyPricingSourceId);
+    if (!sourceProduct) return;
+
+    setIsCopyingPricing(true);
+    try {
+      const sourceRef = doc(db, "companies", "mecald", "pricingCalculations", sourceProduct.code);
+      const sourceSnapshot = await getDoc(sourceRef);
+
+      if (!sourceSnapshot.exists()) {
+        throw new Error(`O produto ${sourceProduct.code} não possui precificação salva.`);
+      }
+
+      const sourceData = sourceSnapshot.data() as PricingCalculation & {
+        materialComposition?: MaterialCompositionItem[];
+        machiningHours?: number;
+      };
+      const copiedMaterials = sourceData.materialComposition || sourceData.materialCosts || [];
+      const copiedCalculation: PricingCalculation = {
+        ...sourceData,
+        productId: selectedProductForPricing.id,
+        productCode: selectedProductForPricing.code,
+        productDescription: selectedProductForPricing.description,
+        productWeight: selectedProductForPricing.unitWeight || sourceData.productWeight || 0,
+        createdAt: new Date(),
+      };
+
+      const targetRef = doc(db, "companies", "mecald", "pricingCalculations", selectedProductForPricing.code);
+      await setDoc(targetRef, {
+        ...copiedCalculation,
+        materialComposition: copiedMaterials,
+        machiningHours: sourceData.machiningHours || 0,
+        copiedFromProductId: sourceProduct.id,
+        copiedFromProductCode: sourceProduct.code,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      });
+
+      // Mantém o preço unitário do catálogo sincronizado com a cópia.
+      const targetProductRef = doc(db, "companies", "mecald", "products", selectedProductForPricing.id);
+      await setDoc(targetProductRef, {
+        unitPrice: Number(sourceData.finalPrice) || 0,
+        pricingUpdatedAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+      }, { merge: true });
+
+      setMaterialComposition(copiedMaterials);
+      setPricingCalculation(copiedCalculation);
+      setProfitMargin(sourceData.profitMargin ?? 30);
+      setIrpjRate(sourceData.irpjRate ?? 4.8);
+      setCsllRate(sourceData.csllRate ?? 2.88);
+      setMachiningHours(sourceData.machiningHours ?? 0);
+
+      const copiedWeight = copiedCalculation.productWeight || 0;
+      setConsumablesCostPerKg(copiedWeight > 0
+        ? (Number(sourceData.consumablesCost) || 0) / copiedWeight
+        : 0
+      );
+      setStageCosts((sourceData.stageCosts || []).reduce((result, stage) => ({
+        ...result,
+        [stage.stageName]: copiedWeight > 0
+          ? (Number(stage.totalCost) || 0) / copiedWeight
+          : Number(stage.costPerDay) || 0,
+      }), {} as Record<string, number>));
+
+      if ((sourceData.machiningHours || 0) > 0) {
+        setMachineHourRate((Number(sourceData.machiningCost) || 0) / Number(sourceData.machiningHours));
+      }
+
+      setProducts(current => current.map(product =>
+        product.id === selectedProductForPricing.id
+          ? { ...product, unitPrice: Number(sourceData.finalPrice) || 0 }
+          : product
+      ));
+      setSavedPricingCodes(current => new Set([...current, selectedProductForPricing.code]));
+      setIsCopyPricingDialogOpen(false);
+      setCopyPricingSourceId("");
+      setCopyPricingSearch("");
+
+      toast({
+        title: "Precificação copiada!",
+        description: `${sourceProduct.code} foi copiado para ${selectedProductForPricing.code}. A análise de custos dos pedidos já usará os novos valores.`,
+      });
+    } catch (error) {
+      console.error("Erro ao copiar precificação:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao copiar precificação",
+        description: error instanceof Error ? error.message : "Não foi possível concluir a cópia.",
+      });
+    } finally {
+      setIsCopyingPricing(false);
+    }
+  }, [selectedProductForPricing, copyPricingSourceId, products, toast]);
 
   const saveMaterial = async (values: z.infer<typeof materialSchema>) => {
     try {
@@ -2869,6 +2978,20 @@ export default function ProductsPage() {
                                                 </div>
                                             </div>
 
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                className="w-full border-blue-500/50 text-blue-700 hover:bg-blue-50"
+                                                onClick={() => {
+                                                    setCopyPricingSourceId("");
+                                                    setCopyPricingSearch("");
+                                                    setIsCopyPricingDialogOpen(true);
+                                                }}
+                                            >
+                                                <Copy className="mr-2 h-4 w-4" />
+                                                Copiar precificação de outro produto
+                                            </Button>
+
                                             <Separator />
 
                                             <div>
@@ -4319,6 +4442,95 @@ export default function ProductsPage() {
             </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={isCopyPricingDialogOpen} onOpenChange={setIsCopyPricingDialogOpen}>
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-5 w-5 text-primary" />
+              Copiar precificação
+            </DialogTitle>
+            <DialogDescription>
+              Copie todos os materiais, custos de produção, usinagem, insumos, margem e impostos para o produto selecionado.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="rounded-lg border bg-muted/40 p-4">
+              <p className="text-xs text-muted-foreground">Produto que receberá a cópia</p>
+              <p className="font-mono font-bold text-primary">{selectedProductForPricing?.code}</p>
+              <p className="text-sm">{selectedProductForPricing?.description}</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Buscar produto de origem</Label>
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  value={copyPricingSearch}
+                  onChange={event => setCopyPricingSearch(event.target.value)}
+                  placeholder="Digite o código ou a descrição..."
+                  className="pl-10"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Precificação que será copiada</Label>
+              <Select value={copyPricingSourceId} onValueChange={setCopyPricingSourceId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione um produto já precificado" />
+                </SelectTrigger>
+                <SelectContent className="max-h-[320px]">
+                  {products
+                    .filter(product => product.id !== selectedProductForPricing?.id)
+                    .filter(product => savedPricingCodes.has(product.code))
+                    .filter(product => {
+                      const query = copyPricingSearch.trim().toLowerCase();
+                      return !query
+                        || product.code.toLowerCase().includes(query)
+                        || product.description.toLowerCase().includes(query);
+                    })
+                    .map(product => (
+                      <SelectItem key={product.id} value={product.id}>
+                        <div className="flex flex-col py-1">
+                          <span className="font-mono font-semibold">{product.code}</span>
+                          <span className="text-xs text-muted-foreground">{product.description}</span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Apenas produtos que possuem precificação salva são apresentados.
+              </p>
+            </div>
+
+            {copyPricingSourceId && (() => {
+              const source = products.find(product => product.id === copyPricingSourceId);
+              if (!source || !selectedProductForPricing) return null;
+              const weightDifference = Math.abs((source.unitWeight || 0) - (selectedProductForPricing.unitWeight || 0));
+              return (
+                <div className={`rounded-md border p-3 text-sm ${weightDifference > 0.01 ? 'border-amber-500 bg-amber-50 text-amber-900' : 'border-green-500 bg-green-50 text-green-900'}`}>
+                  {weightDifference > 0.01
+                    ? `Atenção: o peso do produto de origem é ${source.unitWeight || 0} kg e o destino possui ${selectedProductForPricing.unitWeight || 0} kg. Revise os valores após copiar.`
+                    : 'Os pesos dos produtos são iguais. A precificação pode ser copiada diretamente.'}
+                </div>
+              );
+            })()}
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setIsCopyPricingDialogOpen(false)} disabled={isCopyingPricing}>
+              Cancelar
+            </Button>
+            <Button type="button" onClick={copySavedPricingToSelectedProduct} disabled={!copyPricingSourceId || isCopyingPricing}>
+              <Copy className="mr-2 h-4 w-4" />
+              {isCopyingPricing ? 'Copiando...' : 'Copiar e salvar precificação'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog de Material */}
       <Dialog open={isMaterialDialogOpen} onOpenChange={setIsMaterialDialogOpen}>
