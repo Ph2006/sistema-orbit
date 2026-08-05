@@ -1,4 +1,3 @@
-// IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
 import React from "react";
@@ -328,6 +327,83 @@ const getLeadTimeBadge = (leadTime: number) => {
     { id: "arruela-m10", category: "Parafusos e Fixadores", description: "Arruela M10 - Zincada", pricePerKg: 20.00, unit: "kg" },
     ];
 
+// Converte medidas comerciais (frações, polegadas, milímetros, M e SCH)
+// em uma chave numérica para ordenar tecnicamente cada classe de material.
+const parseCommercialMeasure = (rawValue: string): number => {
+  const value = rawValue.trim().replace(',', '.');
+  const mixedFraction = value.match(/^(\d+)(?:\s+|\.)(\d+)\/(\d+)$/);
+  if (mixedFraction) {
+    return Number(mixedFraction[1]) + Number(mixedFraction[2]) / Number(mixedFraction[3]);
+  }
+
+  const fraction = value.match(/^(\d+)\/(\d+)$/);
+  if (fraction) return Number(fraction[1]) / Number(fraction[2]);
+
+  return Number(value) || 0;
+};
+
+const getMaterialDimensionKey = (material: Material): number[] => {
+  const description = material.description.normalize('NFKC');
+  const dimensions: number[] = [];
+
+  // Polegadas: 1/8", 1 1/2", 1.3/4", 2,5" etc.
+  const inchPattern = /(\d+(?:[.,]\d+)?(?:\s+|\.)\d+\/\d+|\d+\/\d+|\d+(?:[.,]\d+)?)\s*(?:"|pol\b)/gi;
+  for (const match of description.matchAll(inchPattern)) {
+    dimensions.push(parseCommercialMeasure(match[1]) * 25.4);
+  }
+
+  // Medidas explicitamente cadastradas em milímetros.
+  const millimeterPattern = /(\d+(?:[.,]\d+)?)\s*mm\b/gi;
+  for (const match of description.matchAll(millimeterPattern)) {
+    dimensions.push(Number(match[1].replace(',', '.')));
+  }
+
+  // Perfis no padrão 50x25 mm ou W 250 x 22,5 kg/m.
+  if (dimensions.length === 0) {
+    const dimensionalPair = description.match(/(\d+(?:[.,]\d+)?)\s*[xX]\s*(\d+(?:[.,]\d+)?)/);
+    if (dimensionalPair) {
+      dimensions.push(
+        Number(dimensionalPair[1].replace(',', '.')),
+        Number(dimensionalPair[2].replace(',', '.'))
+      );
+    }
+  }
+
+  // Tubos que foram cadastrados sem o símbolo de polegada: TUBO 3 SCH 160.
+  if (dimensions.length === 0 && /tubo/i.test(description)) {
+    const tubeDiameter = description.match(/tubo\s+(\d+(?:[.,]\d+)?(?:\s+\d+\/\d+|\.\d+\/\d+|\/\d+)?)/i);
+    if (tubeDiameter) dimensions.push(parseCommercialMeasure(tubeDiameter[1]) * 25.4);
+  }
+
+  // Roscas e fixadores métricos: M6, M8, M10, M12...
+  if (dimensions.length === 0) {
+    const metricThread = description.match(/\bM\s*(\d+(?:[.,]\d+)?)/i);
+    if (metricThread) dimensions.push(Number(metricThread[1].replace(',', '.')));
+  }
+
+  // Schedule fica como critério secundário após o diâmetro do tubo.
+  const schedule = description.match(/\bSCH\s*(\d+)/i);
+  if (schedule) dimensions.push(Number(schedule[1]));
+
+  return dimensions.length > 0 ? dimensions : [Number.MAX_SAFE_INTEGER];
+};
+
+const compareMaterialsByDimension = (a: Material, b: Material): number => {
+  const aKey = getMaterialDimensionKey(a);
+  const bKey = getMaterialDimensionKey(b);
+  const keyLength = Math.max(aKey.length, bKey.length);
+
+  for (let index = 0; index < keyLength; index += 1) {
+    const difference = (aKey[index] ?? 0) - (bKey[index] ?? 0);
+    if (Math.abs(difference) > 0.000001) return difference;
+  }
+
+  return a.description.localeCompare(b.description, 'pt-BR', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+};
+
 // Função para exportar relatório em PDF usando canvas e jsPDF
 const exportCalculatorReportPDF = (
   calculatorItems: Array<{
@@ -563,7 +639,15 @@ export default function ProductsPage() {
     
     const activeCustom = customMaterials.filter((m: any) => m.deleted !== true);
     
-    return [...filteredDefaults, ...activeCustom];
+    return [...filteredDefaults, ...activeCustom].sort((a, b) => {
+      const aCategoryIndex = MATERIAL_CATEGORIES.indexOf(a.category);
+      const bCategoryIndex = MATERIAL_CATEGORIES.indexOf(b.category);
+      const categoryDifference =
+        (aCategoryIndex === -1 ? Number.MAX_SAFE_INTEGER : aCategoryIndex)
+        - (bCategoryIndex === -1 ? Number.MAX_SAFE_INTEGER : bCategoryIndex);
+
+      return categoryDifference || compareMaterialsByDimension(a, b);
+    });
   }, [customMaterials]);
 
   // Função para simular carga de trabalho dos setores
