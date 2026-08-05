@@ -817,10 +817,6 @@ export default function TasksPage() {
     return getFilteredTasks.slice(start, start + TASKS_PER_PAGE);
   }, [getFilteredTasks, taskPage, totalTaskPages]);
 
-  useEffect(() => {
-    setTaskPage(1);
-  }, [currentDate, viewMode, filterStatus, filterResource, filterSupervisor, filterOrderNumber, filterPriority]);
-
   // Estatísticas simplificadas
   const tasksSummary = useMemo(() => {
     const total = getFilteredTasks.length;
