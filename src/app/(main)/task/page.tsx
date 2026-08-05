@@ -337,6 +337,7 @@ export default function TasksPage() {
   const [filterResource, setFilterResource] = useState<string>('all');
   const [filterSupervisor, setFilterSupervisor] = useState<string>('all');
   const [filterOrderNumber, setFilterOrderNumber] = useState<string>('');
+  const [filterPriority, setFilterPriority] = useState<string>('all');
   
   // Novos estados para alocação
   const [selectedTask, setSelectedTask] = useState<SimpleTask | null>(null);
@@ -351,17 +352,8 @@ export default function TasksPage() {
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
 
   const leadershipMembers = useMemo(() => {
-    const leadershipTerms = ['lider', 'supervisor', 'encarregado', 'coordenador', 'gerente', 'gestor', 'manager', 'leader'];
-
     return teamMembers
       .filter(member => Boolean(String(member.id || '').trim()))
-      .filter(member => {
-        const searchableRole = `${member.position || ''} ${member.permission || ''}`
-          .normalize('NFD')
-          .replace(/[\u0300-\u036f]/g, '')
-          .toLowerCase();
-        return leadershipTerms.some(term => searchableRole.includes(term));
-      })
       .sort((a, b) => a.name.localeCompare(b.name, 'pt-BR', { sensitivity: 'base' }));
   }, [teamMembers]);
 
@@ -805,10 +797,11 @@ export default function TasksPage() {
         (filterResource === 'unassigned' ? !task.assignedResource : task.assignedResource?.resourceId === filterResource);
       const supervisorMatch = filterSupervisor === 'all' || 
         (filterSupervisor === 'unassigned' ? !task.supervisor : task.supervisor?.memberId === filterSupervisor);
+      const priorityMatch = filterPriority === 'all' || normalizeStatus(task.priority) === filterPriority;
 
-      return isInPeriod && orderMatch && statusMatch && resourceMatch && supervisorMatch;
+      return isInPeriod && orderMatch && statusMatch && resourceMatch && supervisorMatch && priorityMatch;
     });
-  }, [tasks, currentDate, viewMode, filterStatus, filterResource, filterSupervisor, filterOrderNumber]);
+  }, [tasks, currentDate, viewMode, filterStatus, filterResource, filterSupervisor, filterOrderNumber, filterPriority]);
 
   // Estatísticas simplificadas
   const tasksSummary = useMemo(() => {
@@ -829,6 +822,34 @@ export default function TasksPage() {
       completionRate: total > 0 ? (completed / total) * 100 : 0,
     };
   }, [getFilteredTasks]);
+
+  // A análise considera somente membros que já foram designados como líderes.
+  // Assim a equipe operacional não é misturada com a responsabilidade de liderança.
+  const leaderPerformance = useMemo(() => {
+    const assignedLeaderIds = new Set(
+      tasks
+        .map(task => task.supervisor?.memberId)
+        .filter((id): id is string => Boolean(id))
+    );
+
+    return leadershipMembers
+      .filter(member => assignedLeaderIds.has(member.id))
+      .map(member => {
+        const leaderTasks = tasks.filter(task => task.supervisor?.memberId === member.id);
+        const inProgress = leaderTasks.filter(task => task.status === 'Em Andamento').length;
+        const overdue = leaderTasks.filter(task =>
+          task.status !== 'Concluído' && Boolean(task.endDate) && new Date() > task.endDate!
+        ).length;
+
+        return {
+          ...member,
+          total: leaderTasks.length,
+          inProgress,
+          overdue,
+        };
+      })
+      .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'pt-BR'));
+  }, [tasks, leadershipMembers]);
 
 
   // Opções em cascata reaproveitando "tasks" (pedidos -> produto -> etapa)
@@ -1975,6 +1996,19 @@ export default function TasksPage() {
                   </SelectContent>
                 </Select>
 
+                <Select value={filterPriority} onValueChange={setFilterPriority}>
+                  <SelectTrigger className="w-[170px]">
+                    <SelectValue placeholder="Prioridade" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todas as Prioridades</SelectItem>
+                    <SelectItem value="baixa">Baixa</SelectItem>
+                    <SelectItem value="media">Média</SelectItem>
+                    <SelectItem value="alta">Alta</SelectItem>
+                    <SelectItem value="urgente">Urgente</SelectItem>
+                  </SelectContent>
+                </Select>
+
                 <Select value={filterResource} onValueChange={setFilterResource}>
                   <SelectTrigger className="w-[200px]">
                     <SelectValue placeholder="Filtrar por Setor" />
@@ -2005,12 +2039,13 @@ export default function TasksPage() {
                   </SelectContent>
                 </Select>
 
-                {(filterStatus !== 'all' || filterResource !== 'all' || filterSupervisor !== 'all' || filterOrderNumber) && (
+                {(filterStatus !== 'all' || filterPriority !== 'all' || filterResource !== 'all' || filterSupervisor !== 'all' || filterOrderNumber) && (
                   <Button
                     variant="ghost"
                     size="sm"
                     onClick={() => {
                       setFilterStatus('all');
+                      setFilterPriority('all');
                       setFilterResource('all');
                       setFilterSupervisor('all');
                       setFilterOrderNumber('');
@@ -2369,24 +2404,30 @@ export default function TasksPage() {
 
             <Card>
               <CardHeader>
-                <CardTitle>Recursos mais Utilizados</CardTitle>
+                <CardTitle>Desempenho por Líder</CardTitle>
+                <CardDescription>
+                  Somente membros designados como líderes nas tarefas ativas.
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {resources
-                    .map(resource => ({
-                      ...resource,
-                      taskCount: getFilteredTasks.filter(task => task.assignedResource?.resourceId === resource.id).length
-                    }))
-                    .sort((a, b) => b.taskCount - a.taskCount)
-                    .slice(0, 5)
-                    .map(resource => (
-                      <div key={resource.id} className="flex items-center justify-between">
+                  {leaderPerformance.length === 0 ? (
+                    <div className="py-8 text-center text-sm text-muted-foreground">
+                      Nenhum líder possui tarefas alocadas ainda.
+                    </div>
+                  ) : leaderPerformance.map(leader => (
+                      <div key={leader.id} className="flex items-center justify-between gap-4 rounded-lg border p-3">
                         <div>
-                          <p className="font-medium">{resource.name}</p>
-                          <p className="text-sm text-muted-foreground">{resource.type}</p>
+                          <p className="font-medium">{leader.name}</p>
+                          <p className="text-sm text-muted-foreground">{leader.position}</p>
                         </div>
-                        <Badge variant="secondary">{resource.taskCount} tarefas</Badge>
+                        <div className="flex flex-wrap justify-end gap-2 text-xs">
+                          <Badge variant="secondary">{leader.total} tarefas</Badge>
+                          <Badge className="bg-blue-600">{leader.inProgress} em andamento</Badge>
+                          <Badge variant={leader.overdue > 0 ? "destructive" : "outline"}>
+                            {leader.overdue} atrasadas
+                          </Badge>
+                        </div>
                       </div>
                     ))}
                 </div>
