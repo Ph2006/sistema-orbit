@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -26,7 +26,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText } from "lucide-react";
+import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText, Search, Link2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -152,10 +152,19 @@ type Requisition = {
 };
 
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
-type OrderInfo = { id: string; internalOS: string; customerName: string; costEntries?: any[] };
+type OrderInfo = { id: string; internalOS: string; customerName: string; customerId?: string; costEntries?: any[] };
 
 const normalizeOSNumber = (value?: string): string =>
     (value || '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, '');
+
+const requisitionSequence = (value?: string): number => {
+    const digits = (value || '').replace(/\D/g, '');
+    return digits ? Number(digits) : Number.MAX_SAFE_INTEGER;
+};
+
+const compareRequisitionsAscending = (a: Requisition, b: Requisition): number =>
+    requisitionSequence(a.requisitionNumber) - requisitionSequence(b.requisitionNumber)
+    || a.requisitionNumber.localeCompare(b.requisitionNumber, 'pt-BR', { numeric: true });
 
 // Função utilitária para formatação segura de datas
 const safeFormatDate = (date: any, formatString: string, fallback: string = 'Data inválida'): string => {
@@ -583,6 +592,10 @@ export default function CostsPage() {
     const [lastUpdateTime, setLastUpdateTime] = useState<Date | null>(null);
     const [isReportModalOpen, setIsReportModalOpen] = useState(false);
     const [selectedOrderForReport, setSelectedOrderForReport] = useState<OrderInfo | null>(null);
+    const [receiptSearchTerm, setReceiptSearchTerm] = useState("");
+    const [relinkSearchByRequisition, setRelinkSearchByRequisition] = useState<Record<string, string>>({});
+    const [selectedOrderByRequisition, setSelectedOrderByRequisition] = useState<Record<string, string>>({});
+    const [relinkingRequisitionId, setRelinkingRequisitionId] = useState<string | null>(null);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -610,6 +623,28 @@ export default function CostsPage() {
 
         return orders.find(order => normalizeOSNumber(order.internalOS) === savedOSNumber);
     }, [orders]);
+
+    const filteredReceiptRequisitions = useMemo(() => {
+        const query = receiptSearchTerm.trim().toLocaleLowerCase('pt-BR');
+        const filtered = query ? requisitions.filter(requisition => {
+            const linkedOrder = resolveLinkedOrder(requisition);
+            const searchableText = [
+                requisition.requisitionNumber,
+                requisition.orderId,
+                requisition.orderNumber,
+                requisition.internalOS,
+                linkedOrder?.internalOS,
+                linkedOrder?.customerName,
+                ...requisition.items.map(item => item.description),
+                ...requisition.items.map(item => item.supplierName || ''),
+                ...requisition.items.map(item => item.invoiceNumber || ''),
+            ].filter(Boolean).join(' ').toLocaleLowerCase('pt-BR');
+
+            return searchableText.includes(query);
+        }) : [...requisitions];
+
+        return filtered.sort(compareRequisitionsAscending);
+    }, [requisitions, receiptSearchTerm, resolveLinkedOrder]);
 
     const fetchRequisitions = useCallback(async () => {
         if (!user) return;
@@ -707,7 +742,7 @@ export default function CostsPage() {
                 
                 return requisition;
             });
-            setRequisitions(reqsList.sort((a, b) => b.date.getTime() - a.date.getTime()));
+            setRequisitions(reqsList.sort(compareRequisitionsAscending));
         } catch (error) {
             console.error("Error fetching requisitions:", error);
             toast({ variant: "destructive", title: "Erro ao buscar requisições" });
@@ -778,6 +813,7 @@ export default function CostsPage() {
                         id: doc.id,
                         internalOS: data.internalOS || 'N/A',
                         customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
+                        customerId: data.customer?.id || data.customerId || undefined,
                         costEntries: (data.costEntries || []).map((entry: any) => ({
                             ...entry,
                             entryDate: (() => {
@@ -868,6 +904,56 @@ export default function CostsPage() {
             fetchOrders();
         }
     }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
+
+    // Algumas consultas/versões antigas não retornavam OS concluídas. Se a requisição
+    // possui um ID válido, carregamos esse documento diretamente para preservar o vínculo.
+    useEffect(() => {
+        if (isLoadingRequisitions || isLoadingOrders || !requisitions.length) return;
+
+        const loadedIds = new Set(orders.map(order => order.id));
+        const missingOrderIds = [...new Set(
+            requisitions
+                .map(requisition => requisition.orderId)
+                .filter((orderId): orderId is string => Boolean(orderId) && !loadedIds.has(orderId as string))
+        )];
+
+        if (!missingOrderIds.length) return;
+        let cancelled = false;
+
+        const hydrateLinkedOrders = async () => {
+            const linkedOrders = await Promise.all(missingOrderIds.map(async orderId => {
+                try {
+                    const orderSnapshot = await getDoc(doc(db, "companies", "mecald", "orders", orderId));
+                    if (!orderSnapshot.exists()) return null;
+
+                    const data = orderSnapshot.data();
+                    return {
+                        id: orderSnapshot.id,
+                        internalOS: data.internalOS || data.orderNumber || data.osNumber || 'N/A',
+                        customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
+                        customerId: data.customer?.id || data.customerId || undefined,
+                        costEntries: data.costEntries || [],
+                    } as OrderInfo;
+                } catch (error) {
+                    console.error(`Erro ao carregar diretamente a OS ${orderId}:`, error);
+                    return null;
+                }
+            }));
+
+            if (cancelled) return;
+            const validOrders = linkedOrders.filter((order): order is OrderInfo => Boolean(order));
+            if (!validOrders.length) return;
+
+            setOrders(currentOrders => {
+                const merged = new Map(currentOrders.map(order => [order.id, order]));
+                validOrders.forEach(order => merged.set(order.id, order));
+                return [...merged.values()];
+            });
+        };
+
+        hydrateLinkedOrders();
+        return () => { cancelled = true; };
+    }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders]);
 
     // Sincronizar requisições com OS automaticamente
     useEffect(() => {
@@ -1823,6 +1909,72 @@ export default function CostsPage() {
         }
     };
 
+    // Reparo manual e permanente para vínculos antigos ou IDs inválidos.
+    const handleRelinkRequisition = async (requisition: Requisition) => {
+        const selectedOrderId = selectedOrderByRequisition[requisition.id];
+        const selectedOrder = orders.find(order => order.id === selectedOrderId);
+
+        if (!selectedOrder) {
+            toast({
+                variant: "destructive",
+                title: "Selecione uma OS",
+                description: "Busque e selecione a OS correta antes de confirmar o vínculo.",
+            });
+            return;
+        }
+
+        setRelinkingRequisitionId(requisition.id);
+        try {
+            const requisitionRef = doc(db, "companies", "mecald", "materialRequisitions", requisition.id);
+            await updateDoc(requisitionRef, {
+                orderId: selectedOrder.id,
+                orderNumber: selectedOrder.internalOS,
+                internalOS: selectedOrder.internalOS,
+                customer: {
+                    id: selectedOrder.customerId || '',
+                    name: selectedOrder.customerName,
+                },
+                linkUpdatedAt: Timestamp.now(),
+                linkUpdatedBy: user?.email || 'Sistema',
+            });
+
+            // Se a requisição já possui valores, lança o custo imediatamente.
+            if ((requisition.totalValue || 0) > 0) {
+                await updateOrderCostFromRequisition(selectedOrder.id, requisition.id, requisition.items);
+            } else {
+                await createInitialOrderCostFromRequisition(selectedOrder.id, requisition.id);
+            }
+
+            toast({
+                title: "OS vinculada com sucesso",
+                description: `A requisição ${requisition.requisitionNumber} foi vinculada à OS ${selectedOrder.internalOS}.`,
+            });
+
+            setSelectedOrderByRequisition(current => {
+                const next = { ...current };
+                delete next[requisition.id];
+                return next;
+            });
+            setRelinkSearchByRequisition(current => {
+                const next = { ...current };
+                delete next[requisition.id];
+                return next;
+            });
+
+            await fetchRequisitions();
+            await fetchOrders();
+        } catch (error) {
+            console.error('Erro ao corrigir vínculo da requisição:', error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao vincular OS",
+                description: "Não foi possível salvar o vínculo. Tente novamente.",
+            });
+        } finally {
+            setRelinkingRequisitionId(null);
+        }
+    };
+
     const getStatusVariant = (status?: string) => {
         if (!status) return "outline";
         const lowerStatus = status.toLowerCase();
@@ -1891,11 +2043,29 @@ export default function CostsPage() {
                     </Button>
                   </CardHeader>
                   <CardContent>
+                    <div className="mb-4 space-y-2">
+                        <Label htmlFor="receipt-search">Buscar no recebimento de materiais</Label>
+                        <div className="relative max-w-2xl">
+                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <Input
+                                id="receipt-search"
+                                value={receiptSearchTerm}
+                                onChange={(event) => setReceiptSearchTerm(event.target.value)}
+                                placeholder="Buscar por OS, requisição, cliente, item, fornecedor ou NF..."
+                                className="pl-9"
+                            />
+                        </div>
+                        {receiptSearchTerm && (
+                            <p className="text-xs text-muted-foreground">
+                                {filteredReceiptRequisitions.length} de {requisitions.length} requisições encontradas
+                            </p>
+                        )}
+                    </div>
                     {isLoadingRequisitions ? (
                         <Skeleton className="h-64 w-full" />
-                    ) : requisitions.length > 0 ? (
+                    ) : filteredReceiptRequisitions.length > 0 ? (
                         <Accordion type="single" collapsible className="w-full">
-                            {requisitions.map((req) => (
+                            {filteredReceiptRequisitions.map((req) => (
                                 <AccordionItem value={req.id} key={req.id}>
                                     <AccordionTrigger className="hover:bg-muted/50 px-4">
                                         {(() => {
@@ -2044,10 +2214,63 @@ export default function CostsPage() {
                                                             </div>
                                                         )}
                                                         
-                                                        {(req.orderId || req.orderNumber || req.internalOS) && !resolveLinkedOrder(req) && (
-                                                            <div className="mt-3 p-2 bg-red-100 border border-red-300 rounded text-sm text-red-800">
-                                                                ⚠️ <strong>Problema de vinculação:</strong> A OS vinculada ({req.orderNumber || req.internalOS || `ID: ${req.orderId}`}) não foi encontrada. 
-                                                                Verifique se a OS ainda existe ou se houve erro na vinculação.
+                                                        {!resolveLinkedOrder(req) && (
+                                                            <div className="mt-3 space-y-3 rounded border border-red-300 bg-red-100 p-3 text-sm text-red-800">
+                                                                <div>
+                                                                    ⚠️ <strong>Problema de vinculação:</strong> {(req.orderId || req.orderNumber || req.internalOS)
+                                                                        ? `A OS vinculada (${req.orderNumber || req.internalOS || `ID: ${req.orderId}`}) não foi encontrada.`
+                                                                        : 'Esta requisição não possui uma OS vinculada.'}
+                                                                    Selecione abaixo a OS correta para reparar permanentemente o vínculo.
+                                                                </div>
+                                                                <div className="grid gap-2 md:grid-cols-[1fr_1.4fr_auto]">
+                                                                    <div className="relative">
+                                                                        <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                                                        <Input
+                                                                            value={relinkSearchByRequisition[req.id] || ''}
+                                                                            onChange={(event) => setRelinkSearchByRequisition(current => ({
+                                                                                ...current,
+                                                                                [req.id]: event.target.value,
+                                                                            }))}
+                                                                            placeholder="Buscar número da OS ou cliente..."
+                                                                            className="border-red-200 bg-white pl-9 text-foreground"
+                                                                        />
+                                                                    </div>
+                                                                    <Select
+                                                                        value={selectedOrderByRequisition[req.id] || ''}
+                                                                        onValueChange={(orderId) => setSelectedOrderByRequisition(current => ({
+                                                                            ...current,
+                                                                            [req.id]: orderId,
+                                                                        }))}
+                                                                    >
+                                                                        <SelectTrigger className="border-red-200 bg-white text-foreground">
+                                                                            <SelectValue placeholder="Selecione a OS correta" />
+                                                                        </SelectTrigger>
+                                                                        <SelectContent className="max-h-72">
+                                                                            {orders
+                                                                                .filter(order => {
+                                                                                    const query = (relinkSearchByRequisition[req.id] || '').trim().toLocaleLowerCase('pt-BR');
+                                                                                    if (!query) return true;
+                                                                                    return order.internalOS.toLocaleLowerCase('pt-BR').includes(query) ||
+                                                                                        order.customerName.toLocaleLowerCase('pt-BR').includes(query);
+                                                                                })
+                                                                                .slice(0, 100)
+                                                                                .map(order => (
+                                                                                    <SelectItem key={order.id} value={order.id}>
+                                                                                        OS {order.internalOS} — {order.customerName}
+                                                                                    </SelectItem>
+                                                                                ))}
+                                                                        </SelectContent>
+                                                                    </Select>
+                                                                    <Button
+                                                                        type="button"
+                                                                        onClick={() => handleRelinkRequisition(req)}
+                                                                        disabled={!selectedOrderByRequisition[req.id] || relinkingRequisitionId === req.id}
+                                                                        className="whitespace-nowrap"
+                                                                    >
+                                                                        <Link2 className="mr-2 h-4 w-4" />
+                                                                        {relinkingRequisitionId === req.id ? 'Vinculando...' : 'Vincular OS'}
+                                                                    </Button>
+                                                                </div>
                                                             </div>
                                                         )}
                                                     </div>
@@ -2139,8 +2362,14 @@ export default function CostsPage() {
                     ) : (
                         <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64 border-dashed border-2 rounded-lg">
                             <PackageSearch className="h-12 w-12 mb-4" />
-                            <h3 className="text-lg font-semibold">Nenhuma Requisição Encontrada</h3>
-                            <p className="text-sm">Quando novas requisições de material forem criadas, elas aparecerão aqui.</p>
+                            <h3 className="text-lg font-semibold">
+                                {receiptSearchTerm ? 'Nenhum resultado para esta busca' : 'Nenhuma Requisição Encontrada'}
+                            </h3>
+                            <p className="text-sm">
+                                {receiptSearchTerm
+                                    ? 'Tente pesquisar por outro número de OS, requisição, item ou fornecedor.'
+                                    : 'Quando novas requisições de material forem criadas, elas aparecerão aqui.'}
+                            </p>
                         </div>
                     )}
                   </CardContent>
