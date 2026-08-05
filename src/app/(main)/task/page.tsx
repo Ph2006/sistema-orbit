@@ -1,3 +1,4 @@
+// IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -79,6 +80,7 @@ type TaskAllocation = {
   taskId: string;
   resourceId?: string;
   supervisorId?: string;
+  scheduledDate?: string;
   notes?: string;
   estimatedHours?: number;
 };
@@ -182,6 +184,7 @@ type TaskStatus =
   | 'Em execução'
   | 'Bloqueada'
   | 'Parcialmente concluída'
+  | 'Não concluída'
   | 'Concluída'
   | 'Cancelada';
 
@@ -194,6 +197,7 @@ type ReleaseChecklist = {
 
 type DailyTask = {
   id: string;
+  sourceTaskId?: string;
   executionDate: Date;
   orderId: string;
   orderNumber: string;
@@ -621,6 +625,7 @@ export default function TasksPage() {
         const data = d.data();
         return {
           id: d.id,
+          sourceTaskId: data.sourceTaskId || undefined,
           executionDate: safeToDate(data.executionDate) || new Date(),
           orderId: data.orderId || '',
           orderNumber: data.orderNumber || '',
@@ -881,7 +886,7 @@ export default function TasksPage() {
 
   const dailyTasksForDate = useMemo(() => {
     return dailyTasks
-      .filter(t => isSameDay(t.executionDate, dailyFilterDate))
+      .filter(t => isSameDay(t.executionDate, dailyFilterDate) && Boolean(t.resourceId) && Boolean(t.responsibleId))
       .sort((a, b) => priorityRank(b.priority) - priorityRank(a.priority));
   }, [dailyTasks, dailyFilterDate]);
 
@@ -968,6 +973,7 @@ export default function TasksPage() {
     weekDays.forEach(d => m.set(format(d, 'yyyy-MM-dd'), []));
 
     dailyTasks.forEach(t => {
+      if (!t.resourceId || !t.responsibleId) return;
       const key = format(t.executionDate, 'yyyy-MM-dd');
       if (m.has(key)) m.get(key)!.push(t);
     });
@@ -1104,7 +1110,7 @@ export default function TasksPage() {
     t.status,
   ]);
 
-  const TASK_HEAD = [['Pedido', 'Produto', 'Etapa', 'Recurso', 'Responsável', 'Horas', 'IPP', 'Status']];
+  const TASK_HEAD = [['Pedido', 'Produto', 'Etapa', 'Setor', 'Líder', 'Horas', 'IPP', 'Status']];
 
   const exportDailyPDF = async () => {
     const list = dailyTasksForDate;
@@ -1180,7 +1186,8 @@ export default function TasksPage() {
     const weekStart = startOfWeek(weekAnchor, { locale: ptBR });
     const weekEnd = endOfWeek(weekAnchor, { locale: ptBR });
     const weekTasks = dailyTasks.filter(t =>
-      isWithinInterval(t.executionDate, { start: weekStart, end: weekEnd }) && t.status !== 'Cancelada'
+      isWithinInterval(t.executionDate, { start: weekStart, end: weekEnd }) &&
+      t.status !== 'Cancelada' && Boolean(t.resourceId) && Boolean(t.responsibleId)
     );
 
     if (weekTasks.length === 0) {
@@ -1295,6 +1302,54 @@ export default function TasksPage() {
       activeSince: null,
       progress: 100,
       completedAt: Timestamp.now(),
+    });
+
+    // Concluir na programação diária também conclui a etapa no pedido de origem.
+    try {
+      const orderRef = doc(db, "companies", "mecald", "orders", t.orderId);
+      const orderSnap = await getDoc(orderRef);
+      if (orderSnap.exists()) {
+        const orderData = orderSnap.data();
+        if (Array.isArray(orderData.items)) {
+          const updatedItems = orderData.items.map((item: any, itemIndex: number) => {
+            const resolvedItemId = String(item.id || `item-${itemIndex}`);
+            if (resolvedItemId !== t.itemId || !Array.isArray(item.productionPlan)) return item;
+            return {
+              ...item,
+              productionPlan: item.productionPlan.map((stage: any, stageIndex: number) =>
+                stageIndex === t.stageOrder
+                  ? { ...stage, status: 'Concluído', progress: 100, completedDate: Timestamp.now(), updatedAt: Timestamp.now() }
+                  : stage
+              ),
+            };
+          });
+          await updateDoc(orderRef, { items: updatedItems, lastUpdate: Timestamp.now() });
+          await fetchTasksFromOrders();
+        }
+      }
+    } catch (error) {
+      console.error('Erro ao concluir a etapa no pedido:', error);
+      toast({
+        variant: "destructive",
+        title: "Tarefa concluída, mas a etapa não foi sincronizada",
+        description: "Atualize a página e tente novamente.",
+      });
+    }
+  };
+
+  const handleNotCompleteTask = async (t: DailyTask) => {
+    const reason = window.prompt('Informe o motivo da não conclusão:', t.blockReason || '');
+    if (reason === null) return;
+    if (!reason.trim()) {
+      toast({ variant: "destructive", title: "Informe o motivo da não conclusão" });
+      return;
+    }
+    await persistTask(t.id, {
+      status: 'Não concluída',
+      blockReason: reason.trim(),
+      executedHours: Number(liveExecutedHours(t).toFixed(2)),
+      activeSince: null,
+      completedAt: null,
     });
   };
 
@@ -1478,6 +1533,7 @@ export default function TasksPage() {
       case 'Em execução': return <Badge className="bg-blue-600 animate-pulse"><Play className="mr-1 h-3 w-3" />Em execução</Badge>;
       case 'Bloqueada': return <Badge variant="destructive"><Ban className="mr-1 h-3 w-3" />Bloqueada</Badge>;
       case 'Parcialmente concluída': return <Badge className="bg-amber-500"><Pause className="mr-1 h-3 w-3" />Parcial</Badge>;
+      case 'Não concluída': return <Badge variant="destructive"><AlertTriangle className="mr-1 h-3 w-3" />Não concluída</Badge>;
       case 'Concluída': return <Badge className="bg-green-600"><CheckCircle className="mr-1 h-3 w-3" />Concluída</Badge>;
       case 'Cancelada': return <Badge variant="outline" className="text-muted-foreground">Cancelada</Badge>;
       default: return <Badge variant="outline">{status}</Badge>;
@@ -1489,6 +1545,10 @@ export default function TasksPage() {
     console.log('Alocando tarefa:', task);
     
     try {
+      const existingDailyTask = dailyTasks.find(dailyTask =>
+        dailyTask.sourceTaskId === task.id ||
+        (dailyTask.orderId === task.orderId && dailyTask.itemId === task.itemId && dailyTask.stageName === task.stageName)
+      );
       setSelectedTask(task);
       setAllocationData({
         taskId: String(task.id),
@@ -1498,6 +1558,9 @@ export default function TasksPage() {
         supervisorId: task.supervisor?.memberId && leadershipMembers.some(member => member.id === task.supervisor?.memberId)
           ? String(task.supervisor.memberId)
           : undefined,
+        scheduledDate: existingDailyTask
+          ? format(existingDailyTask.executionDate, 'yyyy-MM-dd')
+          : format(task.startDate || new Date(), 'yyyy-MM-dd'),
         notes: task.notes || '',
         estimatedHours: Number(task.estimatedHours) || 0
       });
@@ -1514,6 +1577,22 @@ export default function TasksPage() {
 
   const handleSaveAllocation = async () => {
     if (!selectedTask) return;
+
+    if (!allocationData.scheduledDate) {
+      toast({
+        variant: "destructive",
+        title: "Informe a data programada",
+        description: "A tarefa precisa de uma data para aparecer em Tarefas do Dia.",
+      });
+      return;
+    }
+
+    const [scheduledYear, scheduledMonth, scheduledDay] = allocationData.scheduledDate.split('-').map(Number);
+    const scheduledExecutionDate = new Date(scheduledYear, scheduledMonth - 1, scheduledDay);
+    if (isNaN(scheduledExecutionDate.getTime())) {
+      toast({ variant: "destructive", title: "Data programada inválida" });
+      return;
+    }
 
     const selectedSector = RESPONSIBLE_SECTORS.find(sector => sector.id === allocationData.resourceId);
     if (!selectedSector) {
@@ -1584,6 +1663,52 @@ export default function TasksPage() {
         items: updatedItems,
         lastUpdate: Timestamp.now()
       });
+
+      // A alocação da tarefa ativa alimenta automaticamente a programação do dia.
+      const existingDailyTask = dailyTasks.find(dailyTask =>
+        dailyTask.sourceTaskId === selectedTask.id ||
+        (dailyTask.orderId === selectedTask.orderId &&
+          dailyTask.itemId === selectedTask.itemId &&
+          dailyTask.stageName === selectedTask.stageName)
+      );
+      const stageOrder = Number(selectedTask.id.split('-').pop()) || 0;
+      const dailyTaskData = {
+        sourceTaskId: selectedTask.id,
+        executionDate: Timestamp.fromDate(scheduledExecutionDate),
+        orderId: selectedTask.orderId,
+        orderNumber: selectedTask.orderNumber,
+        customerName: selectedTask.customerName,
+        itemId: selectedTask.itemId,
+        itemDescription: selectedTask.itemDescription,
+        itemCode: selectedTask.itemCode || '',
+        stageName: selectedTask.stageName,
+        stageOrder,
+        resourceId: selectedSector.id,
+        resourceName: selectedSector.name,
+        responsibleId: selectedLeader.id,
+        responsibleName: selectedLeader.name,
+        plannedQuantity: 0,
+        plannedHours: Number(allocationData.estimatedHours) || 0,
+        priority: selectedTask.priority || 'media',
+        updatedAt: Timestamp.now(),
+      };
+
+      if (existingDailyTask) {
+        await updateDoc(doc(db, "companies", "mecald", "dailyTasks", existingDailyTask.id), dailyTaskData);
+      } else {
+        await addDoc(collection(db, "companies", "mecald", "dailyTasks"), {
+          ...dailyTaskData,
+          checklist: { ...EMPTY_CHECKLIST },
+          blockReason: '',
+          status: 'Programada',
+          executedHours: 0,
+          progress: 0,
+          createdAt: Timestamp.now(),
+          startedAt: null,
+          completedAt: null,
+          activeSince: null,
+        });
+      }
       
       toast({
         title: "Alocação salva!",
@@ -1591,7 +1716,7 @@ export default function TasksPage() {
       });
       
       setIsAllocationDialogOpen(false);
-      fetchTasksFromOrders(); // Recarregar dados
+      await Promise.all([fetchTasksFromOrders(), fetchDailyTasks()]);
     } catch (error) {
       console.error("Erro ao salvar alocação:", error);
       toast({
@@ -1647,6 +1772,15 @@ export default function TasksPage() {
     if (viewMode === 'week') {
       const weekStart = startOfWeek(currentDate, { locale: ptBR });
       const weekEnd = endOfWeek(currentDate, { locale: ptBR });
+      const allocatedTasks = dailyTasks.filter(task =>
+        isWithinInterval(task.executionDate, { start: weekStart, end: weekEnd }) &&
+        Boolean(task.resourceId) && Boolean(task.responsibleId) && task.status !== 'Cancelada'
+      );
+
+      if (allocatedTasks.length === 0) {
+        toast({ variant: "destructive", title: "Sem tarefas alocadas", description: "Não há tarefas alocadas neste período." });
+        return;
+      }
       return `${format(weekStart, "dd/MM", { locale: ptBR })} - ${format(weekEnd, "dd/MM/yyyy", { locale: ptBR })}`;
     } else {
       return format(currentDate, "MMMM 'de' yyyy", { locale: ptBR });
@@ -1681,19 +1815,19 @@ export default function TasksPage() {
       yPos += 20;
 
       // Tabela de tarefas
-      const tableBody = getFilteredTasks.map(task => [
+      const tableBody = allocatedTasks.map(task => [
         task.orderNumber,
         task.itemDescription.length > 30 ? task.itemDescription.substring(0, 30) + '...' : task.itemDescription,
         task.stageName,
-        task.assignedResource?.resourceName || 'N/A',
-        task.supervisor?.memberName || 'N/A',
-        format(task.endDate, 'dd/MM', { locale: ptBR }),
+        task.resourceName || 'N/A',
+        task.responsibleName || 'N/A',
+        format(task.executionDate, 'dd/MM', { locale: ptBR }),
         task.status
       ]);
 
       autoTable(docPdf, {
         startY: yPos,
-        head: [['Pedido', 'Item', 'Etapa', 'Setor', 'Líder', 'Prazo', 'Status']],
+        head: [['Pedido', 'Item', 'Etapa', 'Setor', 'Líder', 'Data', 'Status']],
         body: tableBody,
         styles: { fontSize: 8, cellPadding: 2 },
         headStyles: { fillColor: [37, 99, 235], fontSize: 9, textColor: 255 },
@@ -1734,6 +1868,7 @@ export default function TasksPage() {
             t.status === 'Concluída' ? '#16a34a' :
             t.status === 'Em execução' ? '#2563eb' :
             t.status === 'Bloqueada' ? '#dc2626' :
+            t.status === 'Não concluída' ? '#dc2626' :
             t.status === 'Parcialmente concluída' ? '#f59e0b' :
             t.status === 'Cancelada' ? '#9ca3af' : '#06b6d4'
         }}
@@ -1750,7 +1885,8 @@ export default function TasksPage() {
 
         <div className="space-y-0.5 text-xs">
           <p className="truncate"><span className="text-muted-foreground">Etapa:</span> <span className="font-medium">{t.stageName}</span></p>
-          <p className="truncate"><span className="text-muted-foreground">Recurso:</span> <span className="font-medium">{t.resourceName || '—'}</span></p>
+          <p className="truncate"><span className="text-muted-foreground">Setor:</span> <span className="font-medium">{t.resourceName || '—'}</span></p>
+          <p className="truncate"><span className="text-muted-foreground">Líder:</span> <span className="font-medium">{t.responsibleName || '—'}</span></p>
           <div className="flex items-center justify-between">
             <span className="text-[11px] text-muted-foreground">{isToday ? 'Hoje' : format(t.executionDate, 'dd/MM')}</span>
             {getPriorityBadge(t.priority)}
@@ -1805,6 +1941,11 @@ export default function TasksPage() {
             </Button>
           )}
           {t.status !== 'Cancelada' && t.status !== 'Concluída' && (
+            <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-red-600" onClick={() => handleNotCompleteTask(t)}>
+              <AlertTriangle className="h-3 w-3 mr-1" /> Não concluída
+            </Button>
+          )}
+          {t.status !== 'Cancelada' && t.status !== 'Concluída' && t.status !== 'Não concluída' && (
             <Button size="sm" variant="ghost" className="h-7 px-2 text-xs text-muted-foreground" onClick={() => handleCancelTask(t)}>
               Cancelar
             </Button>
@@ -2640,6 +2781,7 @@ export default function TasksPage() {
                   </SelectItem>
                   <SelectItem value="Bloqueada">Bloqueada</SelectItem>
                   <SelectItem value="Parcialmente concluída">Parcialmente concluída</SelectItem>
+                  <SelectItem value="Não concluída">Não concluída</SelectItem>
                   <SelectItem value="Concluída">Concluída</SelectItem>
                   <SelectItem value="Cancelada">Cancelada</SelectItem>
                 </SelectContent>
@@ -2678,6 +2820,21 @@ export default function TasksPage() {
                 <h4 className="font-semibold mb-2">{selectedTask.stageName}</h4>
                 <p className="text-sm text-muted-foreground">
                   Pedido: {selectedTask.orderNumber} | Item: {selectedTask.itemDescription}
+                </p>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Data Programada</Label>
+                <Input
+                  type="date"
+                  value={allocationData.scheduledDate || ''}
+                  onChange={(e) => setAllocationData(prev => ({
+                    ...prev,
+                    scheduledDate: e.target.value,
+                  }))}
+                />
+                <p className="text-xs text-muted-foreground">
+                  A tarefa será incluída automaticamente em Tarefas do Dia nesta data.
                 </p>
               </div>
               
