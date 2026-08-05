@@ -66,6 +66,8 @@ const quotationSchema = z.object({
   deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
   notes: z.string().optional(),
   discount: z.coerce.number().min(0).max(100).optional(),
+  isEmergency: z.boolean().optional().default(false),
+  emergencyRate: z.coerce.number().min(0).max(500).optional().default(30),
   items: z.array(itemSchema).min(1, "Adicione pelo menos um item ao orçamento."),
   includedServices: z.array(z.string()).optional(),
 });
@@ -106,16 +108,18 @@ type Product = {
 const serviceOptions = [
     { id: 'materialSupply', label: 'Fornecimento de Material' },
     { id: 'machining', label: 'Usinagem' },
-    { id: 'heatTreatment', label: 'Tratamento Térmico' },
+    { id: 'heatTreatment', label: 'Alívio de Tensão' },
     { id: 'certification', label: 'Documentação para Data Book' },
-    { id: 'manufacture', label: 'Fabricação' },
-    { id: 'nonDestructiveTest', label: 'Ensaio Não Destrutivo' },
-    { id: 'surfaceTreatment', label: 'Tratamento de Superfície' },
+    { id: 'manufacture', label: 'Fabricação (Caldeiraria)' },
+    { id: 'liquidPenetrantTest', label: 'Ensaio de LP' },
+    { id: 'magneticParticleTest', label: 'Ensaio de PM' },
+    { id: 'ultrasonicTest', label: 'Ensaio de US' },
+    { id: 'surfaceTreatment', label: 'Jateamento e Pintura' },
     { id: 'beneficiamento', label: 'Beneficiamento (Emborrachamento e Galvanização)' },
     { id: 'fasteners', label: 'Itens de fixação' },
 ];
 
-const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
+const calculateItemTotals = (item: Item | any, discountPercent: number = 0, emergencyPercent: number = 0) => {
     const quantity = Number(item.quantity) || 0;
     const unitPrice = Number(item.unitPrice) || 0;
     const totalPrice = quantity * unitPrice;
@@ -131,8 +135,11 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
     if (!hasSeparatedTaxes) {
         const legacyTaxRate = Number(item.taxRate) || 0;
         const taxAmount = priceAfterDiscount * (legacyTaxRate / 100);
-        const totalWithTax = priceAfterDiscount + taxAmount;
-        const originalTotalWithTax = totalPrice * (1 + legacyTaxRate / 100);
+        const baseTotalWithTax = priceAfterDiscount + taxAmount;
+        const emergencyAmount = baseTotalWithTax * ((Number(emergencyPercent) || 0) / 100);
+        const totalWithTax = baseTotalWithTax + emergencyAmount;
+        const originalBaseTotalWithTax = totalPrice * (1 + legacyTaxRate / 100);
+        const originalTotalWithTax = originalBaseTotalWithTax * (1 + ((Number(emergencyPercent) || 0) / 100));
 
         return {
             totalPrice,
@@ -142,6 +149,7 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
             pisAmount: 0,
             cofinsAmount: 0,
             taxAmount,
+            emergencyAmount,
             totalWithTax,
             isLegacyCalculation: true,
         };
@@ -158,12 +166,15 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
         throw new Error('As alíquotas informadas resultam em um preço inválido.');
     }
 
-    const totalWithTax = priceAfterDiscount / denominator;
-    const icmsAmount = totalWithTax * icmsRate;
-    const pisCofinsBase = totalWithTax - icmsAmount;
+    const baseTotalWithTax = priceAfterDiscount / denominator;
+    const icmsAmount = baseTotalWithTax * icmsRate;
+    const pisCofinsBase = baseTotalWithTax - icmsAmount;
     const pisAmount = pisCofinsBase * pisRate;
     const cofinsAmount = pisCofinsBase * cofinsRate;
     const taxAmount = icmsAmount + pisAmount + cofinsAmount;
+
+    const emergencyAmount = baseTotalWithTax * ((Number(emergencyPercent) || 0) / 100);
+    const totalWithTax = baseTotalWithTax + emergencyAmount;
 
     return {
         totalPrice,
@@ -173,13 +184,14 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0) => {
         pisAmount,
         cofinsAmount,
         taxAmount,
+        emergencyAmount,
         totalWithTax,
         isLegacyCalculation: false,
     };
 };
 
-const calculateGrandTotal = (items: Item[] | any[], discountPercent: number = 0) => {
-    if (!items) return { total: 0, totalDiscount: 0, originalTotal: 0, totalIcms: 0, totalPis: 0, totalCofins: 0 };
+const calculateGrandTotal = (items: Item[] | any[], discountPercent: number = 0, emergencyPercent: number = 0) => {
+    if (!items) return { total: 0, totalDiscount: 0, originalTotal: 0, totalIcms: 0, totalPis: 0, totalCofins: 0, totalEmergency: 0 };
     
     let originalTotal = 0;
     let totalDiscount = 0;
@@ -187,19 +199,21 @@ const calculateGrandTotal = (items: Item[] | any[], discountPercent: number = 0)
     let totalIcms = 0;
     let totalPis = 0;
     let totalCofins = 0;
+    let totalEmergency = 0;
     
     items.forEach(item => {
-        const original = calculateItemTotals(item, 0);
-        const discounted = calculateItemTotals(item, discountPercent);
+        const original = calculateItemTotals(item, 0, emergencyPercent);
+        const discounted = calculateItemTotals(item, discountPercent, emergencyPercent);
         originalTotal += original.totalWithTax;
         totalDiscount += original.totalWithTax - discounted.totalWithTax;
         total += discounted.totalWithTax;
         totalIcms += discounted.icmsAmount;
         totalPis += discounted.pisAmount;
         totalCofins += discounted.cofinsAmount;
+        totalEmergency += discounted.emergencyAmount;
     });
     
-    return { total, totalDiscount, originalTotal, totalIcms, totalPis, totalCofins };
+    return { total, totalDiscount, originalTotal, totalIcms, totalPis, totalCofins, totalEmergency };
 };
 
 // Função para calcular o lead time total de um produto
@@ -328,6 +342,8 @@ export default function QuotationsPage() {
             items: [],
             includedServices: [],
             discount: 0,
+            isEmergency: false,
+            emergencyRate: 30,
         }
     });
 
@@ -345,9 +361,12 @@ export default function QuotationsPage() {
     
     const watchedItems = form.watch("items");
     const watchedDiscount = form.watch("discount") || 0;
+    const watchedIsEmergency = form.watch("isEmergency") || false;
+    const watchedEmergencyRate = form.watch("emergencyRate") || 0;
+    const activeEmergencyRate = watchedIsEmergency ? watchedEmergencyRate : 0;
     const grandTotalCalcs = useMemo(() => 
-        calculateGrandTotal(watchedItems, watchedDiscount), 
-        [watchedItems, watchedDiscount]
+        calculateGrandTotal(watchedItems, watchedDiscount, activeEmergencyRate), 
+        [watchedItems, watchedDiscount, activeEmergencyRate]
     );
 
     // Busca produtos filtrados para o modal
@@ -485,6 +504,8 @@ export default function QuotationsPage() {
                     deliveryTime: data.deliveryTerms || data.deliveryTime || 'A combinar',
                     notes: data.notes || '',
                     discount: data.discount || 0,
+                    isEmergency: Boolean(data.isEmergency),
+                    emergencyRate: Number(data.emergencyRate) || 30,
                     items: finalItems,
                     includedServices: data.includedServices || [],
                     createdAt: getCreatedAt(),
@@ -586,7 +607,8 @@ export default function QuotationsPage() {
         try {
             const discount = values.discount || 0;
             const itemsWithTotals = values.items.map(item => {
-                const totals = calculateItemTotals(item, discount);
+                const emergencyRate = values.isEmergency ? (values.emergencyRate || 0) : 0;
+                const totals = calculateItemTotals(item, discount, emergencyRate);
                 // Explicitly create the object to save, excluding the react-hook-form 'id'
                 return {
                     code: item.code || '',
@@ -608,6 +630,7 @@ export default function QuotationsPage() {
                     cofinsAmount: totals.cofinsAmount,
                     taxAmount: totals.taxAmount,
                     totalWithTax: totals.totalWithTax,
+                    emergencyAmount: totals.emergencyAmount,
                     totalWeight: (item.quantity || 0) * (item.unitWeight || 0)
                 };
             });
@@ -830,6 +853,8 @@ export default function QuotationsPage() {
             items: [],
             includedServices: [],
             discount: 0,
+            isEmergency: false,
+            emergencyRate: 30,
         });
         setCurrentItem(emptyItem);
         setEditIndex(null);
@@ -1001,7 +1026,16 @@ export default function QuotationsPage() {
                     ...item,
                     itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
                 })),
-                totalValue: calculateGrandTotal(quotationToConvert.items, quotationToConvert.discount || 0).total,
+                totalValue: calculateGrandTotal(
+                    quotationToConvert.items,
+                    quotationToConvert.discount || 0,
+                    quotationToConvert.isEmergency ? (quotationToConvert.emergencyRate || 0) : 0
+                ).total,
+                isEmergency: Boolean(quotationToConvert.isEmergency),
+                emergencyRate: quotationToConvert.isEmergency ? (quotationToConvert.emergencyRate || 0) : 0,
+                priorityNote: quotationToConvert.isEmergency
+                    ? 'Fabricação emergencial para atendimento urgente'
+                    : '',
                 status: "Aguardando Produção",
                 createdAt: Timestamp.now(),
                 deliveryDate: Timestamp.fromDate(quotationToConvert.validity),
@@ -1042,7 +1076,8 @@ export default function QuotationsPage() {
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
             const { items, customer, number, validity, paymentTerms, deliveryTime, notes, includedServices } = selectedQuotation;
             const discount = selectedQuotation.discount || 0;
-            const grandTotalCalcs = calculateGrandTotal(items, discount);
+            const emergencyRate = selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0;
+            const grandTotalCalcs = calculateGrandTotal(items, discount, emergencyRate);
     
             if (formatType === 'pdf') {
                 const docPdf = new jsPDF({ orientation: "landscape" });
@@ -1091,6 +1126,21 @@ export default function QuotationsPage() {
                 }
                 docPdf.text(`Validade: ${format(validity, "dd/MM/yyyy")}`, rightColX, y, { align: 'right' });
                 y += 10;
+
+                if (selectedQuotation.isEmergency) {
+                    docPdf.setFillColor(255, 237, 213);
+                    docPdf.setDrawColor(234, 88, 12);
+                    docPdf.roundedRect(15, y - 4, pageWidth - 30, 12, 2, 2, 'FD');
+                    docPdf.setTextColor(154, 52, 18).setFont(undefined, 'bold').setFontSize(11);
+                    docPdf.text(
+                        `FABRICAÇÃO EMERGENCIAL — Atendimento urgente com adicional de ${emergencyRate}% no valor final de cada produto.`,
+                        pageWidth / 2,
+                        y + 3,
+                        { align: 'center' }
+                    );
+                    docPdf.setTextColor(0, 0, 0).setFont(undefined, 'normal');
+                    y += 14;
+                }
     
                 // Calcular peso total
                 const totalWeight = items.reduce((acc, item) => {
@@ -1102,7 +1152,7 @@ export default function QuotationsPage() {
                 const body = items.map(item => {
                     const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
                     const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
-                    const unitPriceWithTax = calculateItemTotals({ ...item, quantity: 1 }, discount).totalWithTax;
+                    const unitPriceWithTax = calculateItemTotals({ ...item, quantity: 1 }, discount, emergencyRate).totalWithTax;
                     return [
                         item.code || '-',
                         item.description,
@@ -1115,7 +1165,7 @@ export default function QuotationsPage() {
                             ? `${item.icmsRate ?? 0} / ${item.pisRate ?? 0} / ${item.cofinsRate ?? 0}`
                             : `Legado ${item.taxRate ?? 0}`,
                         unitPriceWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-                        calculateItemTotals(item, discount).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+                        calculateItemTotals(item, discount, emergencyRate).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
                     ];
                 });
 
@@ -1160,7 +1210,7 @@ export default function QuotationsPage() {
                 });
                 y = (docPdf as any).lastAutoTable.finalY + 10;
 
-                const publicTaxTotals = calculateGrandTotal(items, discount);
+                const publicTaxTotals = calculateGrandTotal(items, discount, emergencyRate);
                 docPdf.setFontSize(10).setFont(undefined, 'normal');
                 docPdf.text('ICMS:', rightColX - 80, y, { align: 'right' });
                 docPdf.text(publicTaxTotals.totalIcms.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), rightColX, y, { align: 'right' });
@@ -1172,8 +1222,16 @@ export default function QuotationsPage() {
                 docPdf.text(publicTaxTotals.totalCofins.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), rightColX, y, { align: 'right' });
                 y += 8;
 
+                if (selectedQuotation.isEmergency) {
+                    docPdf.setTextColor(234, 88, 12).setFont(undefined, 'bold');
+                    docPdf.text(`Adicional emergencial (${emergencyRate}%):`, rightColX - 80, y, { align: 'right' });
+                    docPdf.text(publicTaxTotals.totalEmergency.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }), rightColX, y, { align: 'right' });
+                    docPdf.setTextColor(0, 0, 0).setFont(undefined, 'normal');
+                    y += 8;
+                }
+
                 if (discount && discount > 0) {
-                    const totals = calculateGrandTotal(items, discount);
+                    const totals = calculateGrandTotal(items, discount, emergencyRate);
                     
                     docPdf.setFontSize(11).setFont(undefined, 'normal');
                     docPdf.text(`Subtotal Original:`, rightColX - 80, y, { align: 'right' });
@@ -1247,12 +1305,13 @@ export default function QuotationsPage() {
                     [`Orçamento Nº ${number}`],
                     [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
                     ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
+                    ...(selectedQuotation.isEmergency ? [[`FABRICAÇÃO EMERGENCIAL — Atendimento urgente`, `Adicional: ${emergencyRate}%`]] : []),
                     [],
                     ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ ICMS/PIS/COFINS', 'ICMS/PIS/COFINS (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.'],
                     ...items.map(item => {
                         const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
                         const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
-                        const unitPriceWithTax = calculateItemTotals({ ...item, quantity: 1 }, discount).totalWithTax;
+                        const unitPriceWithTax = calculateItemTotals({ ...item, quantity: 1 }, discount, emergencyRate).totalWithTax;
                         return [
                             item.description,
                             item.code,
@@ -1265,7 +1324,7 @@ export default function QuotationsPage() {
                                 ? `${item.icmsRate ?? 0} / ${item.pisRate ?? 0} / ${item.cofinsRate ?? 0}`
                                 : `Legado ${item.taxRate ?? 0}`,
                             unitPriceWithTax,
-                            calculateItemTotals(item, discount).totalWithTax
+                            calculateItemTotals(item, discount, emergencyRate).totalWithTax
                         ];
                     }),
                     [],
@@ -1277,6 +1336,7 @@ export default function QuotationsPage() {
                     ['ICMS:', '', '', '', '', '', '', '', '', grandTotalCalcs.totalIcms],
                     ['PIS:', '', '', '', '', '', '', '', '', grandTotalCalcs.totalPis],
                     ['COFINS:', '', '', '', '', '', '', '', '', grandTotalCalcs.totalCofins],
+                    ...(selectedQuotation.isEmergency ? [['Adicional emergencial:', '', '', '', '', '', '', '', `${emergencyRate}%`, grandTotalCalcs.totalEmergency]] : []),
                     [],
                     ['Serviços Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
@@ -1387,11 +1447,16 @@ export default function QuotationsPage() {
         const approvalRate = totalCount > 0 ? (approvedCount / totalCount) * 100 : 0;
 
         // Valores
-        const issuedValue = relevantQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
-        const approvedValue = approvedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
-        const rejectedValue = rejectedQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
-        const pendingValue = pendingQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
-        const informativeValue = informativeQuotations.reduce((acc, q) => acc + calculateGrandTotal(q.items, q.discount || 0).total, 0);
+        const quotationTotal = (q: Quotation) => calculateGrandTotal(
+            q.items,
+            q.discount || 0,
+            q.isEmergency ? (q.emergencyRate || 0) : 0
+        ).total;
+        const issuedValue = relevantQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
+        const approvedValue = approvedQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
+        const rejectedValue = rejectedQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
+        const pendingValue = pendingQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
+        const informativeValue = informativeQuotations.reduce((acc, q) => acc + quotationTotal(q), 0);
         
         // Pesos
         const totalWeight = relevantQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
@@ -1581,7 +1646,7 @@ export default function QuotationsPage() {
                                                 <TableCell>{q.customer.name}</TableCell>
                                                 <TableCell>{format(q.createdAt.toDate(), "dd/MM/yyyy")}</TableCell>
                                                 <TableCell>
-                                                    {calculateGrandTotal(q.items, q.discount || 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    {calculateGrandTotal(q.items, q.discount || 0, q.isEmergency ? (q.emergencyRate || 0) : 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </TableCell>
                                                 <TableCell>
                                                     <Badge variant={getStatusVariant(q.status)} className={cn((q.status === 'Aprovado' || q.status === 'Pedido Gerado') && 'bg-green-600 hover:bg-green-700 text-primary-foreground')}>{q.status}</Badge>
@@ -1837,7 +1902,7 @@ export default function QuotationsPage() {
                                                     </TableHeader>
                                                     <TableBody>
                                                         {watchedItems.map((item, index) => {
-                                                            const { totalWithTax } = calculateItemTotals(item, watchedDiscount);
+                                                            const { totalWithTax } = calculateItemTotals(item, watchedDiscount, activeEmergencyRate);
                                                             
                                                             return (
                                                                 <TableRow 
@@ -1955,6 +2020,12 @@ export default function QuotationsPage() {
                                                             </div>
                                                         </>
                                                     )}
+                                                    {watchedIsEmergency && (
+                                                        <div className="flex justify-end items-center gap-4 text-sm font-medium text-orange-600">
+                                                            <span>Adicional emergencial ({watchedEmergencyRate}%):</span>
+                                                            <span>+ {grandTotalCalcs.totalEmergency.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                        </div>
+                                                    )}
                                                     <div className="flex justify-end items-center gap-4 text-lg font-bold">
                                                         <span>Total Geral:</span>
                                                         <span className="text-primary">
@@ -1965,6 +2036,55 @@ export default function QuotationsPage() {
                                             </CardContent>
                                         </Card>
                                     )}
+
+                                    <Card className={watchedIsEmergency ? "border-orange-500 bg-orange-50/50" : ""}>
+                                        <CardHeader>
+                                            <CardTitle>Prioridade de Fabricação</CardTitle>
+                                            <CardDescription>
+                                                Ative quando o orçamento exigir fabricação emergencial para atendimento urgente.
+                                            </CardDescription>
+                                        </CardHeader>
+                                        <CardContent className="space-y-4">
+                                            <FormField
+                                                control={form.control}
+                                                name="isEmergency"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <Button
+                                                            type="button"
+                                                            variant={field.value ? "default" : "outline"}
+                                                            className={field.value ? "w-full bg-orange-600 hover:bg-orange-700" : "w-full"}
+                                                            onClick={() => field.onChange(!field.value)}
+                                                        >
+                                                            <Percent className="mr-2 h-4 w-4" />
+                                                            {field.value ? "Fabricação Emergencial Ativada" : "Fabricação Emergencial"}
+                                                        </Button>
+                                                    </FormItem>
+                                                )}
+                                            />
+
+                                            {watchedIsEmergency && (
+                                                <>
+                                                    <FormField
+                                                        control={form.control}
+                                                        name="emergencyRate"
+                                                        render={({ field }) => (
+                                                            <FormItem>
+                                                                <FormLabel>Adicional de fabricação emergencial (%)</FormLabel>
+                                                                <FormControl>
+                                                                    <Input type="number" min="0" max="500" step="0.01" {...field} />
+                                                                </FormControl>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}
+                                                    />
+                                                    <div className="rounded-md border border-orange-400 bg-orange-100 p-3 text-sm font-medium text-orange-900">
+                                                        Atendimento urgente: será acrescentado {watchedEmergencyRate}% ao valor final de cada produto.
+                                                    </div>
+                                                </>
+                                            )}
+                                        </CardContent>
+                                    </Card>
 
                                     <Card>
                                         <CardHeader><CardTitle>Serviços Inclusos</CardTitle></CardHeader>
@@ -2206,7 +2326,8 @@ export default function QuotationsPage() {
                                             <TableBody>
                                                 {selectedQuotation.items.map((item, index) => {
                                                     const discount = selectedQuotation.discount || 0;
-                                                    const { totalPrice, discountAmount, totalWithTax } = calculateItemTotals(item, discount);
+                                                    const selectedEmergencyRate = selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0;
+                                                    const { totalPrice, discountAmount, totalWithTax } = calculateItemTotals(item, discount, selectedEmergencyRate);
                                                     return (
                                                         <TableRow key={index}>
                                                             <TableCell className="font-mono text-sm">{item.code || '-'}</TableCell>
@@ -2228,7 +2349,7 @@ export default function QuotationsPage() {
                                                             <TableCell className="text-right font-semibold">
                                                                 {discount > 0 && (
                                                                     <div className="text-xs text-muted-foreground line-through">
-                                                                        {calculateItemTotals(item, 0).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                        {calculateItemTotals(item, 0, selectedEmergencyRate).totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                                     </div>
                                                                 )}
                                                                 {totalWithTax.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
@@ -2244,23 +2365,37 @@ export default function QuotationsPage() {
                                                 <>
                                                     <div className="flex justify-end items-center gap-4 text-sm text-muted-foreground">
                                                         <span>Subtotal Original:</span>
-                                                        <span>{calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount).originalTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                        <span>{calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount, selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0).originalTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                                     </div>
                                                     <div className="flex justify-end items-center gap-4 text-sm text-red-600">
                                                         <span>Desconto ({selectedQuotation.discount}%):</span>
-                                                        <span>- {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount).totalDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                        <span>- {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount, selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0).totalDiscount.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                                     </div>
                                                 </>
                                             )}
                                             <div className="flex justify-end items-center gap-4 text-xl font-bold">
                                                 <span>Total Geral:</span>
                                                 <span className="text-primary">
-                                                    {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount || 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                    {calculateGrandTotal(selectedQuotation.items, selectedQuotation.discount || 0, selectedQuotation.isEmergency ? (selectedQuotation.emergencyRate || 0) : 0).total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 </span>
                                             </div>
                                         </div>
                                     </CardContent>
                                 </Card>
+
+                                {selectedQuotation.isEmergency && (
+                                    <Card className="border-orange-500 bg-orange-50">
+                                        <CardContent className="p-4 text-orange-900">
+                                            <div className="flex items-center gap-2 font-bold">
+                                                <Percent className="h-5 w-5" />
+                                                FABRICAÇÃO EMERGENCIAL
+                                            </div>
+                                            <p className="mt-1 text-sm">
+                                                Este orçamento considera atendimento urgente com adicional de {selectedQuotation.emergencyRate || 0}% no valor final de cada produto.
+                                            </p>
+                                        </CardContent>
+                                    </Card>
+                                )}
 
                                 {selectedQuotation.includedServices && selectedQuotation.includedServices.length > 0 && (
                                     <Card>
