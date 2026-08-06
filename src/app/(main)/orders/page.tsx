@@ -7,7 +7,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL } from "firebase/storage";
 import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
@@ -36,7 +35,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock, MoreHorizontal, ChevronUp, ChevronDown, Send, DollarSign, Download, Link2, RefreshCw } from "lucide-react";
+import { Search, Package, CheckCircle, XCircle, Hourglass, PlayCircle, Weight, CalendarDays, Edit, X, CalendarIcon, Truck, AlertTriangle, FolderGit2, FileText, File, ClipboardCheck, Palette, ListChecks, GanttChart, Trash2, Copy, ClipboardPaste, ReceiptText, CalendarClock, ClipboardList, PlusCircle, XCircle as XCircleIcon, ArrowDown, CalendarCheck, QrCode, TrendingUp, TrendingDown, Clock, MoreHorizontal, ChevronUp, ChevronDown, Send, DollarSign, Download } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -144,8 +143,6 @@ type Order = {
     dataBookSent: boolean;
     dataBookSentAt?: Date;
     driveLink?: string;
-    schedulePublicUrl?: string;
-    scheduleShareToken?: string;
     documents: {
         drawings: boolean;
         inspectionTestPlan: boolean;
@@ -651,7 +648,6 @@ export default function OrdersPage() {
     const [isFetchingPlan, setIsFetchingPlan] = useState(false);
     const [expandedRow, setExpandedRow] = useState<number | null>(null);
     const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
-    const [isPublishingSchedule, setIsPublishingSchedule] = useState(false);
     const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
     
     
@@ -918,8 +914,6 @@ export default function OrdersPage() {
                     dataBookSentAt: safeToDate(data.dataBookSentAt),
                     totalWeight: calculateTotalWeight(enrichedItems),
                     driveLink: data.driveLink || '',
-                    schedulePublicUrl: data.schedulePublicUrl || '',
-                    scheduleShareToken: data.scheduleShareToken || '',
                     documents: data.documents || { drawings: false, inspectionTestPlan: false, paintPlan: false },
                 } as Order;
                 } catch (error) {
@@ -942,8 +936,6 @@ export default function OrdersPage() {
                         dataBookSentAt: undefined,
                         totalWeight: 0,
                         driveLink: '',
-                        schedulePublicUrl: '',
-                        scheduleShareToken: '',
                         documents: { drawings: false, inspectionTestPlan: false, paintPlan: false },
                     } as Order;
                 }
@@ -1329,9 +1321,6 @@ export default function OrdersPage() {
                         ...updatedOrderInList,
                         status: updatedOrderInList.status as any,
                     });
-                    if (updatedOrderInList.schedulePublicUrl) {
-                        await publishAndCopyScheduleLink(updatedOrderInList, { silent: true, copy: false });
-                    }
                 } else {
                     console.warn('⚠️ [DEBUG] Pedido não encontrado na lista após recarregamento');
                 }
@@ -2954,9 +2943,8 @@ export default function OrdersPage() {
         }
     };
 
-    const handleExportSchedule = async (options?: { download?: boolean; order?: Order }) => {
-        const scheduleOrder = options?.order || selectedOrder;
-        if (!scheduleOrder) return null;
+    const handleExportSchedule = async () => {
+        if (!selectedOrder) return;
 
         toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
 
@@ -3020,33 +3008,32 @@ export default function OrdersPage() {
             docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
             leftColumnY += 6;
             docPdf.setFont('helvetica', 'normal');
-            docPdf.text(`Pedido Nº: ${scheduleOrder.quotationNumber}`, leftColumnX, leftColumnY);
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
             leftColumnY += 5;
-            const customerLines = docPdf.splitTextToSize(`Cliente: ${scheduleOrder.customer.name}`, 88);
-            docPdf.text(customerLines, leftColumnX, leftColumnY);
-            leftColumnY += Math.max(5, customerLines.length * 4);
-            if (scheduleOrder.projectName) {
-                docPdf.text(`Projeto: ${scheduleOrder.projectName}`, leftColumnX, leftColumnY);
+            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
+            leftColumnY += 5;
+            if (selectedOrder.projectName) {
+                docPdf.text(`Projeto: ${selectedOrder.projectName}`, leftColumnX, leftColumnY);
                 leftColumnY += 5;
             }
             
             // Coluna direita
             const rightColumnX = pageWidth / 2 + 10;
             let rightColumnY = yPos + 6; // Alinha com o início dos dados
-            docPdf.text(`OS Interna: ${scheduleOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
+            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
             rightColumnY += 5;
             docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
             rightColumnY += 5;
-            if (scheduleOrder.deliveryDate) {
-                docPdf.text(`Data de Entrega: ${format(scheduleOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+            if (selectedOrder.deliveryDate) {
+                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
                 rightColumnY += 5;
             }
-            docPdf.text(`Status: ${scheduleOrder.status}`, rightColumnX, rightColumnY);
+            docPdf.text(`Status: ${selectedOrder.status}`, rightColumnX, rightColumnY);
             
             yPos = Math.max(leftColumnY, rightColumnY) + 10;
 
             // Progresso geral do pedido
-            const orderProgress = calculateOrderProgress(scheduleOrder);
+            const orderProgress = calculateOrderProgress(selectedOrder);
             
             // Título do progresso geral
             docPdf.setFontSize(10).setFont('helvetica', 'bold');
@@ -3087,7 +3074,7 @@ export default function OrdersPage() {
 
             // Tabela do cronograma
             const tableBody: any[][] = [];
-            scheduleOrder.items.forEach(item => {
+            selectedOrder.items.forEach(item => {
                 if (item.productionPlan && item.productionPlan.length > 0) {
                     // Cabeçalho do item com código, descrição e quantidade na mesma linha
                     const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
@@ -3133,15 +3120,9 @@ export default function OrdersPage() {
                 startY: yPos,
                 head: [['Etapa', 'Início Previsto', 'Fim Previsto', 'Duração', 'Status']],
                 body: tableBody,
-                theme: 'striped',
-                showHead: 'everyPage',
-                rowPageBreak: 'avoid',
                 styles: { 
                     fontSize: 8,
-                    cellPadding: 2.2,
-                    lineColor: [226, 232, 240],
-                    lineWidth: 0.1,
-                    valign: 'middle'
+                    cellPadding: 2
                 },
                 headStyles: { 
                     fillColor: [37, 99, 235], 
@@ -3159,15 +3140,6 @@ export default function OrdersPage() {
                 didParseCell: (data) => {
                     if (data.cell.raw && (data.cell.raw as any).colSpan) {
                         data.cell.styles.halign = 'left';
-                    }
-                    if (data.section === 'body' && data.column.index === 4) {
-                        const status = String(data.cell.raw || '');
-                        if (status === 'Concluído') data.cell.styles.textColor = [22, 163, 74];
-                        if (status === 'Em Andamento') {
-                            data.cell.styles.textColor = [37, 99, 235];
-                            data.cell.styles.fontStyle = 'bold';
-                        }
-                        if (status === 'Pendente') data.cell.styles.textColor = [100, 116, 139];
                     }
                 },
                 didDrawCell: (data) => {
@@ -3209,20 +3181,7 @@ export default function OrdersPage() {
                         }
                     }
                 },
-                didDrawPage: (data) => {
-                    const pageNumber = docPdf.getNumberOfPages();
-                    docPdf.setDrawColor(226, 232, 240);
-                    docPdf.line(15, 284, pageWidth - 15, 284);
-                    docPdf.setFontSize(7).setFont('helvetica', 'normal').setTextColor(100, 116, 139);
-                    docPdf.text(
-                        `Atualizado em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm")} - Página ${pageNumber}`,
-                        pageWidth / 2,
-                        289,
-                        { align: 'center' }
-                    );
-                    docPdf.setTextColor(0, 0, 0);
-                },
-                margin: { top: 15, bottom: 16, left: 15, right: 15 }
+                margin: { left: 15, right: 15 }
             });
 
             // Rodapé com informações adicionais
@@ -3240,11 +3199,7 @@ export default function OrdersPage() {
                 );
             }
 
-            const safeOrderNumber = String(scheduleOrder.quotationNumber || scheduleOrder.id).replace(/[^a-zA-Z0-9_-]/g, '-');
-            if (options?.download !== false) {
-                docPdf.save(`Cronograma_Pedido_${safeOrderNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
-            }
-            return docPdf.output('blob');
+            docPdf.save(`Cronograma_Pedido_${selectedOrder.quotationNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
 
         } catch (error) {
             console.error("Error generating schedule PDF:", error);
@@ -3253,76 +3208,6 @@ export default function OrdersPage() {
                 title: "Erro ao gerar cronograma",
                 description: "Não foi possível gerar o arquivo PDF.",
             });
-            return null;
-        }
-    };
-
-    const publishAndCopyScheduleLink = async (
-        order: Order | null = selectedOrder,
-        options?: { silent?: boolean; copy?: boolean }
-    ) => {
-        if (!order || isPublishingSchedule) return null;
-
-        setIsPublishingSchedule(true);
-        try {
-            const pdfBlob = await handleExportSchedule({ download: false, order });
-            if (!pdfBlob) throw new Error('Não foi possível montar o cronograma.');
-
-            // O token é criado uma única vez e reutilizado em todas as atualizações.
-            // Com isso, o endereço enviado ao cliente nunca muda.
-            const shareToken = order.scheduleShareToken || crypto.randomUUID();
-            const fileRef = storageRef(
-                getStorage(),
-                `public-schedules/${order.id}/cronograma-${order.id}.pdf`
-            );
-
-            await uploadBytes(fileRef, pdfBlob, {
-                contentType: 'application/pdf',
-                cacheControl: 'no-store, max-age=0',
-                contentDisposition: `attachment; filename="Cronograma_Pedido_${String(order.quotationNumber || order.id).replace(/[^a-zA-Z0-9_-]/g, '-')}.pdf"`,
-                customMetadata: {
-                    firebaseStorageDownloadTokens: shareToken,
-                    orderId: order.id,
-                    orderNumber: String(order.quotationNumber || ''),
-                    generatedAt: new Date().toISOString(),
-                },
-            });
-
-            const publicUrl = await getDownloadURL(fileRef);
-            await updateDoc(doc(db, 'companies', 'mecald', 'orders', order.id), {
-                schedulePublicUrl: publicUrl,
-                scheduleShareToken: shareToken,
-                schedulePublishedAt: Timestamp.now(),
-            });
-
-            if (options?.copy !== false && navigator.clipboard) {
-                await navigator.clipboard.writeText(publicUrl);
-            }
-
-            setSelectedOrder(current => current?.id === order.id
-                ? { ...current, schedulePublicUrl: publicUrl, scheduleShareToken: shareToken }
-                : current
-            );
-
-            if (!options?.silent) {
-                toast({
-                    title: order.schedulePublicUrl ? 'Cronograma atualizado e link copiado!' : 'Link permanente criado!',
-                    description: 'O cliente poderá baixar o cronograma por este mesmo endereço.',
-                });
-            }
-            return publicUrl;
-        } catch (error) {
-            console.error('Erro ao publicar cronograma:', error);
-            if (!options?.silent) {
-                toast({
-                    variant: 'destructive',
-                    title: 'Erro ao gerar o link',
-                    description: 'Não foi possível publicar o cronograma. Verifique o Firebase Storage.',
-                });
-            }
-            return null;
-        } finally {
-            setIsPublishingSchedule(false);
         }
     };
 
@@ -3665,11 +3550,6 @@ export default function OrdersPage() {
                     ...updatedOrderInList,
                     status: updatedOrderInList.status as any,
                 });
-                // Se o pedido já possui link público, substitui o PDF no mesmo
-                // endereço sempre que o progresso for alterado.
-                if (updatedOrderInList.schedulePublicUrl) {
-                    await publishAndCopyScheduleLink(updatedOrderInList, { silent: true, copy: false });
-                }
                 console.log('✅ [handleSaveProgress] Estado local atualizado com sucesso');
             } else {
                 console.warn('⚠️ [handleSaveProgress] Pedido não encontrado após recarregamento');
@@ -5073,26 +4953,9 @@ export default function OrdersPage() {
                             Gerar Romaneio ({selectedItems.size} {selectedItems.size === 1 ? 'item' : 'itens'})
                         </Button>
                     )}
-                    <Button onClick={() => handleExportSchedule()} variant="outline">
+                    <Button onClick={handleExportSchedule} variant="outline">
                         <CalendarClock className="mr-2 h-4 w-4" />
                         Exportar Cronograma
-                    </Button>
-
-                    <Button
-                        onClick={() => publishAndCopyScheduleLink(selectedOrder)}
-                        variant={selectedOrder.schedulePublicUrl ? 'secondary' : 'outline'}
-                        disabled={isPublishingSchedule}
-                    >
-                        {isPublishingSchedule ? (
-                            <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                        ) : selectedOrder.schedulePublicUrl ? (
-                            <Copy className="mr-2 h-4 w-4" />
-                        ) : (
-                            <Link2 className="mr-2 h-4 w-4" />
-                        )}
-                        {selectedOrder.schedulePublicUrl
-                            ? 'Atualizar e copiar link do cronograma'
-                            : 'Gerar link do cronograma'}
                     </Button>
 
                     <Button
