@@ -1,3 +1,4 @@
+// IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
 import React, { useState, useEffect, useMemo } from "react";
@@ -1785,15 +1786,6 @@ export default function TasksPage() {
     if (viewMode === 'week') {
       const weekStart = startOfWeek(currentDate, { locale: ptBR });
       const weekEnd = endOfWeek(currentDate, { locale: ptBR });
-      const allocatedTasks = dailyTasks.filter(task =>
-        isWithinInterval(task.executionDate, { start: weekStart, end: weekEnd }) &&
-        Boolean(task.resourceId) && Boolean(task.responsibleId) && task.status !== 'Cancelada'
-      );
-
-      if (allocatedTasks.length === 0) {
-        toast({ variant: "destructive", title: "Sem tarefas alocadas", description: "Não há tarefas alocadas neste período." });
-        return;
-      }
       return `${format(weekStart, "dd/MM", { locale: ptBR })} - ${format(weekEnd, "dd/MM/yyyy", { locale: ptBR })}`;
     } else {
       return format(currentDate, "MMMM 'de' yyyy", { locale: ptBR });
@@ -1815,6 +1807,19 @@ export default function TasksPage() {
       // Título do documento
       const weekStart = startOfWeek(currentDate, { locale: ptBR });
       const weekEnd = endOfWeek(currentDate, { locale: ptBR });
+      const allocatedTasks = dailyTasks.filter(task =>
+        isWithinInterval(task.executionDate, { start: weekStart, end: weekEnd }) &&
+        Boolean(task.resourceId) && Boolean(task.responsibleId) && task.status !== 'Cancelada'
+      );
+
+      if (allocatedTasks.length === 0) {
+        toast({
+          variant: "destructive",
+          title: "Sem tarefas alocadas",
+          description: "Não há tarefas alocadas neste período.",
+        });
+        return;
+      }
       
       docPdf.setFontSize(16).setFont('helvetica', 'bold');
       docPdf.text('PROGRAMAÇÃO SEMANAL DE TAREFAS', pageWidth / 2, yPos, { align: 'center' });
