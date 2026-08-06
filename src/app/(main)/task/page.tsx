@@ -86,6 +86,8 @@ type TaskAllocation = {
 
 type SimpleTask = {
   id: string;
+  itemIndex: number;
+  stageIndex: number;
   orderId: string;
   orderNumber: string;
   customerName: string;
@@ -530,7 +532,9 @@ export default function TasksPage() {
                   const resolvedItemId = String(item.id || `item-${itemIndex}`);
 
                   tasksList.push({
-                    id: `${orderDoc.id}-${resolvedItemId}-${stageIndex}`,
+                    id: `${orderDoc.id}-${itemIndex}-${resolvedItemId}-${stageIndex}`,
+                    itemIndex,
+                    stageIndex,
                     orderId: orderDoc.id,
                     orderNumber: String(orderData.quotationNumber || orderData.orderNumber || 'N/A'),
                     customerName: String(orderData.customer?.name || 'Cliente não informado'),
@@ -1637,9 +1641,9 @@ export default function TasksPage() {
 
       const updatedItems = orderData.items.map((item: any, itemIndex: number) => {
         const resolvedItemId = String(item.id || `item-${itemIndex}`);
-        if (resolvedItemId === selectedTask.itemId) {
+        if (itemIndex === selectedTask.itemIndex && resolvedItemId === selectedTask.itemId) {
           const updatedPlan = item.productionPlan.map((stage: any, index: number) => {
-            if (`${selectedTask.orderId}-${selectedTask.itemId}-${index}` === selectedTask.id) {
+            if (index === selectedTask.stageIndex) {
               const selectedResource = selectedSector;
               const selectedSupervisor = selectedLeader;
               
@@ -1680,7 +1684,7 @@ export default function TasksPage() {
           dailyTask.itemId === selectedTask.itemId &&
           dailyTask.stageName === selectedTask.stageName)
       );
-      const stageOrder = Number(selectedTask.id.split('-').pop()) || 0;
+      const stageOrder = selectedTask.stageIndex;
       const dailyTaskData = {
         sourceTaskId: selectedTask.id,
         executionDate: Timestamp.fromDate(scheduledExecutionDate),
@@ -2134,60 +2138,32 @@ export default function TasksPage() {
                   />
                 </div>
 
-                <Select value={filterStatus} onValueChange={setFilterStatus}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os Status</SelectItem>
-                    <SelectItem value="Pendente">Pendente</SelectItem>
-                    <SelectItem value="Em Andamento">Em Andamento</SelectItem>
-                    <SelectItem value="Concluído">Concluído</SelectItem>
-                  </SelectContent>
-                </Select>
+                <select className="h-10 w-[150px] rounded-md border border-input bg-background px-3 text-sm" value={filterStatus} onChange={(event) => setFilterStatus(event.target.value)}>
+                  <option value="all">Todos os Status</option>
+                  <option value="Pendente">Pendente</option>
+                  <option value="Em Andamento">Em Andamento</option>
+                  <option value="Concluído">Concluído</option>
+                </select>
 
-                <Select value={filterPriority} onValueChange={setFilterPriority}>
-                  <SelectTrigger className="w-[170px]">
-                    <SelectValue placeholder="Prioridade" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as Prioridades</SelectItem>
-                    <SelectItem value="baixa">Baixa</SelectItem>
-                    <SelectItem value="media">Média</SelectItem>
-                    <SelectItem value="alta">Alta</SelectItem>
-                    <SelectItem value="urgente">Urgente</SelectItem>
-                  </SelectContent>
-                </Select>
+                <select className="h-10 w-[170px] rounded-md border border-input bg-background px-3 text-sm" value={filterPriority} onChange={(event) => setFilterPriority(event.target.value)}>
+                  <option value="all">Todas as Prioridades</option>
+                  <option value="baixa">Baixa</option>
+                  <option value="media">Média</option>
+                  <option value="alta">Alta</option>
+                  <option value="urgente">Urgente</option>
+                </select>
 
-                <Select value={filterResource} onValueChange={setFilterResource}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Filtrar por Setor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os Setores</SelectItem>
-                    <SelectItem value="unassigned">Sem Setor</SelectItem>
-                    {RESPONSIBLE_SECTORS.map(sector => (
-                      <SelectItem key={sector.id} value={sector.id}>
-                        {sector.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select className="h-10 w-[200px] rounded-md border border-input bg-background px-3 text-sm" value={filterResource} onChange={(event) => setFilterResource(event.target.value)}>
+                  <option value="all">Todos os Setores</option>
+                  <option value="unassigned">Sem Setor</option>
+                  {RESPONSIBLE_SECTORS.map(sector => <option key={sector.id} value={sector.id}>{sector.name}</option>)}
+                </select>
 
-                <Select value={filterSupervisor} onValueChange={setFilterSupervisor}>
-                  <SelectTrigger className="w-[200px]">
-                    <SelectValue placeholder="Filtrar por Líder" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todos os Líderes</SelectItem>
-                    <SelectItem value="unassigned">Sem Líder</SelectItem>
-                    {leadershipMembers.map(member => (
-                      <SelectItem key={member.id} value={member.id}>
-                        {member.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <select className="h-10 w-[200px] rounded-md border border-input bg-background px-3 text-sm" value={filterSupervisor} onChange={(event) => setFilterSupervisor(event.target.value)}>
+                  <option value="all">Todos os Líderes</option>
+                  <option value="unassigned">Sem Líder</option>
+                  {leadershipMembers.map(member => <option key={member.id} value={member.id}>{member.name}</option>)}
+                </select>
 
                 {(filterStatus !== 'all' || filterPriority !== 'all' || filterResource !== 'all' || filterSupervisor !== 'all' || filterOrderNumber) && (
                   <Button
