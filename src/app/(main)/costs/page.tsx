@@ -65,6 +65,10 @@ const requisitionItemSchema = z.object({
   inspectionStatus: z.enum(inspectionStatuses).optional(),
   weight: z.number().optional(),
   weightUnit: z.string().optional(),
+  material: z.string().optional(),
+  code: z.string().optional(),
+  dimensao: z.string().optional(),
+  unit: z.string().optional(),
 });
 
 const segmentOptions = [
@@ -186,6 +190,22 @@ const requisitionFinancialSummary = (requisition: Requisition) => {
         totalWeightKg,
         averageCostPerKg: totalWeightKg > 0 ? totalValue / totalWeightKg : 0,
     };
+};
+
+// Mantém a especificação cadastrada na requisição e oferece uma identificação
+// segura para registros antigos cuja liga/norma esteja apenas na descrição.
+const resolveMaterialDescription = (item: RequisitionItem): string => {
+    const savedMaterial = String(item.material || '').trim();
+    if (savedMaterial) return savedMaterial;
+
+    const description = String(item.description || '');
+    const knownSpecification = description.match(
+        /\b(?:ASTM\s*)?(?:A\s*36|A\s*572(?:\s*(?:GR(?:AU)?\.?\s*)?\d+)?|A\s*516(?:\s*(?:GR(?:AU)?\.?\s*)?\d+)?|A\s*240|SAE\s*\d{4}|INOX\s*(?:304|316|310)|HARDOX\s*\d{3}|AR\s*\d{3})\b/i
+    );
+
+    return knownSpecification
+        ? knownSpecification[0].replace(/\s+/g, ' ').toUpperCase()
+        : 'Não especificado';
 };
 
 // Função utilitária para formatação segura de datas
@@ -739,8 +759,12 @@ export default function CostsPage() {
                             }
                         })(),
                         inspectionStatus: item.inspectionStatus || "Pendente",
-                            weight: weight,
-                            weightUnit: weightUnit,
+                        weight: weight,
+                        weightUnit: weightUnit,
+                        material: item.material || item.materialType || item.materialGrade || item.grade || "",
+                        code: item.code || item.codigo || "",
+                        dimensao: item.dimensao || item.dimension || item.dimensions || "",
+                        unit: item.unit || item.unidade || "",
                         };
                     }),
                 };
@@ -2074,25 +2098,38 @@ export default function CostsPage() {
 
             autoTable(pdf, {
                 startY: nextY + 5,
-                head: [['Item', 'Qtd.', 'Peso em kg', 'Valor pago', 'R$/kg', 'Fornecedor', 'NF', 'Inspecao']],
+                head: [['Item', 'Material', 'Qtd.', 'Peso em kg', 'Valor pago', 'R$/kg', 'Fornecedor', 'NF', 'Entrada NF', 'Inspecao']],
                 body: requisition.items.map(item => {
                     const value = Number(item.invoiceItemValue) || 0;
                     const weightKg = weightToKg(item.weight, item.weightUnit);
                     const itemCostPerKg = weightKg > 0 ? value / weightKg : 0;
                     return [
                         item.description,
+                        resolveMaterialDescription(item),
                         number(Number(item.quantityRequested) || 0, 0),
                         weightKg > 0 ? number(weightKg, 3) : '-',
                         currency(value),
                         weightKg > 0 ? currency(itemCostPerKg) : '-',
                         item.supplierName || '-',
                         item.invoiceNumber || '-',
+                        safeFormatDate(item.deliveryReceiptDate, 'dd/MM/yyyy', 'Nao informada'),
                         item.inspectionStatus || item.status || '-',
                     ];
                 }),
-                styles: { fontSize: 7, cellPadding: 2, overflow: 'linebreak' },
+                styles: { fontSize: 6.5, cellPadding: 1.7, overflow: 'linebreak', valign: 'middle' },
                 headStyles: { fillColor: [51, 65, 85], textColor: 255 },
-                columnStyles: { 0: { cellWidth: 60 }, 1: { halign: 'center' }, 2: { halign: 'right' }, 3: { halign: 'right' }, 4: { halign: 'right' } },
+                columnStyles: {
+                    0: { cellWidth: 46 },
+                    1: { cellWidth: 27 },
+                    2: { cellWidth: 12, halign: 'center' },
+                    3: { cellWidth: 20, halign: 'right' },
+                    4: { cellWidth: 24, halign: 'right' },
+                    5: { cellWidth: 20, halign: 'right' },
+                    6: { cellWidth: 30 },
+                    7: { cellWidth: 18 },
+                    8: { cellWidth: 22, halign: 'center' },
+                    9: { cellWidth: 30 },
+                },
                 didDrawPage: () => {
                     const pageCount = pdf.getNumberOfPages();
                     pdf.setFontSize(7);
@@ -2388,11 +2425,13 @@ export default function CostsPage() {
                                             <TableHeader>
                                                 <TableRow>
                                                     <TableHead>Item</TableHead>
+                                                    <TableHead>Material</TableHead>
                                                     <TableHead>Qtd</TableHead>
                                                     <TableHead>Peso</TableHead>
                                                     <TableHead>Valor (R$)</TableHead>
                                                     <TableHead>Fornecedor</TableHead>
                                                     <TableHead>NF</TableHead>
+                                                    <TableHead>Entrada da NF</TableHead>
                                                     <TableHead>Status</TableHead>
                                                     <TableHead className="text-right">Ações</TableHead>
                                                 </TableRow>
@@ -2407,6 +2446,9 @@ export default function CostsPage() {
                                                                     <div className="text-xs text-green-600 mt-1">✓ Precificado</div>
                                                                 )}
                                                             </div>
+                                                        </TableCell>
+                                                        <TableCell className="text-sm font-medium whitespace-nowrap">
+                                                            {resolveMaterialDescription(item)}
                                                         </TableCell>
                                                         <TableCell className="text-center">
                                                             <Badge variant="outline" className="text-xs">
@@ -2442,6 +2484,9 @@ export default function CostsPage() {
                                                         </TableCell>
                                                         <TableCell className="text-sm">{item.supplierName || '-'}</TableCell>
                                                         <TableCell className="text-sm">{item.invoiceNumber || '-'}</TableCell>
+                                                        <TableCell className="text-sm whitespace-nowrap">
+                                                            {safeFormatDate(item.deliveryReceiptDate, 'dd/MM/yyyy', 'Não informada')}
+                                                        </TableCell>
                                                         <TableCell>
                                                             <div className="space-y-1">
                                                                 <Badge variant={getStatusVariant(item.status)} className="text-xs block text-center">
