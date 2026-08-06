@@ -347,6 +347,7 @@ export default function TasksPage() {
   const [filterPriority, setFilterPriority] = useState<string>('all');
   const [taskPage, setTaskPage] = useState(1);
   const TASKS_PER_PAGE = 100;
+  const [activeTab, setActiveTab] = useState<'tasks' | 'daily' | 'analytics'>('tasks');
   
   // Novos estados para alocação
   const [selectedTask, setSelectedTask] = useState<SimpleTask | null>(null);
@@ -846,29 +847,37 @@ export default function TasksPage() {
   // Assim a equipe operacional não é misturada com a responsabilidade de liderança.
   const leaderPerformance = useMemo(() => {
     const assignedLeaderIds = new Set(
-      tasks
-        .map(task => task.supervisor?.memberId)
+      dailyTasks
+        .filter(task => task.status !== 'Cancelada')
+        .map(task => task.responsibleId)
         .filter((id): id is string => Boolean(id))
     );
 
     return leadershipMembers
       .filter(member => assignedLeaderIds.has(member.id))
       .map(member => {
-        const leaderTasks = tasks.filter(task => task.supervisor?.memberId === member.id);
-        const inProgress = leaderTasks.filter(task => task.status === 'Em Andamento').length;
+        const leaderTasks = dailyTasks.filter(
+          task => task.responsibleId === member.id && task.status !== 'Cancelada'
+        );
+        const completed = leaderTasks.filter(task => task.status === 'Concluída').length;
+        const inProgress = leaderTasks.filter(task => task.status === 'Em execução').length;
         const overdue = leaderTasks.filter(task =>
-          task.status !== 'Concluído' && Boolean(task.endDate) && new Date() > task.endDate!
+          task.status !== 'Concluída' &&
+          task.status !== 'Não concluída' &&
+          task.executionDate < new Date() &&
+          !isSameDay(task.executionDate, new Date())
         ).length;
 
         return {
           ...member,
           total: leaderTasks.length,
+          completed,
           inProgress,
           overdue,
         };
       })
       .sort((a, b) => b.total - a.total || a.name.localeCompare(b.name, 'pt-BR'));
-  }, [tasks, leadershipMembers]);
+  }, [dailyTasks, leadershipMembers]);
 
 
   // Opções em cascata reaproveitando "tasks" (pedidos -> produto -> etapa)
@@ -1728,7 +1737,10 @@ export default function TasksPage() {
         title: "Alocação salva!",
         description: "A tarefa foi alocada com sucesso.",
       });
-      
+
+      setDailyFilterDate(scheduledExecutionDate);
+      setScheduleViewMode('day');
+      setActiveTab('daily');
       setIsAllocationDialogOpen(false);
       await Promise.all([fetchTasksFromOrders(), fetchDailyTasks()]);
     } catch (error) {
@@ -1807,16 +1819,22 @@ export default function TasksPage() {
       // Título do documento
       const weekStart = startOfWeek(currentDate, { locale: ptBR });
       const weekEnd = endOfWeek(currentDate, { locale: ptBR });
+      const allowedTaskKeys = new Set(
+        getFilteredTasks.map(task => `${task.orderId}__${task.itemId}__${task.stageName}`)
+      );
       const allocatedTasks = dailyTasks.filter(task =>
         isWithinInterval(task.executionDate, { start: weekStart, end: weekEnd }) &&
-        Boolean(task.resourceId) && Boolean(task.responsibleId) && task.status !== 'Cancelada'
+        Boolean(task.resourceId) &&
+        Boolean(task.responsibleId) &&
+        task.status !== 'Cancelada' &&
+        allowedTaskKeys.has(`${task.orderId}__${task.itemId}__${task.stageName}`)
       );
 
       if (allocatedTasks.length === 0) {
         toast({
           variant: "destructive",
           title: "Sem tarefas alocadas",
-          description: "Não há tarefas alocadas neste período.",
+          description: "Não há tarefas alocadas neste período com os filtros atuais.",
         });
         return;
       }
@@ -2065,7 +2083,7 @@ export default function TasksPage() {
         />
       </div>
 
-      <Tabs defaultValue="tasks" className="space-y-4">
+      <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as 'tasks' | 'daily' | 'analytics')} className="space-y-4">
         <TabsList>
           <TabsTrigger value="tasks">Tarefas Ativas</TabsTrigger>
           <TabsTrigger value="daily">Tarefas do Dia</TabsTrigger>
@@ -2569,7 +2587,8 @@ export default function TasksPage() {
                         </div>
                         <div className="flex flex-wrap justify-end gap-2 text-xs">
                           <Badge variant="secondary">{leader.total} tarefas</Badge>
-                          <Badge className="bg-blue-600">{leader.inProgress} em andamento</Badge>
+                          <Badge className="bg-green-600">{leader.completed} concluídas</Badge>
+                          <Badge className="bg-blue-600">{leader.inProgress} em execução</Badge>
                           <Badge variant={leader.overdue > 0 ? "destructive" : "outline"}>
                             {leader.overdue} atrasadas
                           </Badge>
