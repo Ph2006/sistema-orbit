@@ -3837,4 +3837,3 @@ export default function CostsPage() {
         );
     }
 }
-
