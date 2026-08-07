@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo, useCallback, useRef } from "react"
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc, setDoc } from "firebase/firestore";
+import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc, setDoc, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
@@ -149,6 +149,27 @@ type Order = {
         paintPlan: boolean;
     };
 };
+
+type EngineeringTicketAlert = {
+    id: string;
+    ticketNumber: string;
+    title: string;
+    orderId: string;
+    itemId?: string | null;
+    priority: 'Baixa' | 'Média' | 'Alta' | 'Crítica';
+    status: 'Aberto' | 'Em Análise' | 'Aguardando Cliente';
+    category?: string;
+    requestedBy?: string;
+    assignedTo?: string;
+    createdDate?: Date | null;
+    dueDate?: Date | null;
+};
+
+const ACTIVE_ENGINEERING_TICKET_STATUSES = new Set([
+    'Aberto',
+    'Em Análise',
+    'Aguardando Cliente',
+]);
 
 type OrderCostAnalysisItem = {
     itemId: string;
@@ -615,6 +636,7 @@ export default function OrdersPage() {
     const [isLoading, setIsLoading] = useState(true);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+    const [activeEngineeringTickets, setActiveEngineeringTickets] = useState<EngineeringTicketAlert[]>([]);
     const [isCostAnalysisOpen, setIsCostAnalysisOpen] = useState(false);
     const [isLoadingCostAnalysis, setIsLoadingCostAnalysis] = useState(false);
     const [costAnalysis, setCostAnalysis] = useState<OrderCostAnalysis | null>(null);
@@ -649,6 +671,75 @@ export default function OrdersPage() {
     const [expandedRow, setExpandedRow] = useState<number | null>(null);
     const [progressClipboard, setProgressClipboard] = useState<OrderItem | null>(null);
     const [newStageNameForPlan, setNewStageNameForPlan] = useState("");
+
+    // Escuta somente os chamados da OS aberta. A atualização em tempo real evita
+    // que um chamado resolvido continue aparecendo no pedido até um novo F5.
+    useEffect(() => {
+        if (!isSheetOpen || !selectedOrder?.id) {
+            setActiveEngineeringTickets([]);
+            return;
+        }
+
+        const ticketsQuery = query(
+            collection(db, "companies", "mecald", "engineeringTickets"),
+            where("orderId", "==", selectedOrder.id)
+        );
+
+        const unsubscribe = onSnapshot(
+            ticketsQuery,
+            snapshot => {
+                const tickets = snapshot.docs
+                    .map(ticketDoc => {
+                        const data = ticketDoc.data();
+                        if (!ACTIVE_ENGINEERING_TICKET_STATUSES.has(String(data.status || 'Aberto'))) {
+                            return null;
+                        }
+
+                        const toDate = (value: any): Date | null => {
+                            if (!value) return null;
+                            if (typeof value.toDate === 'function') return value.toDate();
+                            const parsed = new Date(value);
+                            return Number.isNaN(parsed.getTime()) ? null : parsed;
+                        };
+
+                        return {
+                            id: ticketDoc.id,
+                            ticketNumber: data.ticketNumber || `ENG-${ticketDoc.id.slice(0, 6).toUpperCase()}`,
+                            title: data.title || 'Chamado de engenharia sem título',
+                            orderId: data.orderId,
+                            itemId: data.itemId || null,
+                            priority: data.priority || 'Média',
+                            status: data.status || 'Aberto',
+                            category: data.category || '',
+                            requestedBy: data.requestedBy || '',
+                            assignedTo: data.assignedTo || '',
+                            createdDate: toDate(data.createdDate),
+                            dueDate: toDate(data.dueDate),
+                        } as EngineeringTicketAlert;
+                    })
+                    .filter((ticket): ticket is EngineeringTicketAlert => Boolean(ticket));
+
+                const priorityWeight: Record<EngineeringTicketAlert['priority'], number> = {
+                    'Crítica': 4,
+                    'Alta': 3,
+                    'Média': 2,
+                    'Baixa': 1,
+                };
+
+                tickets.sort((a, b) =>
+                    priorityWeight[b.priority] - priorityWeight[a.priority]
+                    || (b.createdDate?.getTime() || 0) - (a.createdDate?.getTime() || 0)
+                );
+                setActiveEngineeringTickets(tickets);
+            },
+            error => {
+                console.error('Erro ao acompanhar chamados de engenharia do pedido:', error);
+                setActiveEngineeringTickets([]);
+            }
+        );
+
+        return unsubscribe;
+    }, [isSheetOpen, selectedOrder?.id]);
     
     
     // Filter states
@@ -6518,6 +6609,32 @@ return (
                     )}
                   </Card>
 
+                  {activeEngineeringTickets.length > 0 && (
+                    <Card className="border-amber-400 bg-amber-50/70 dark:bg-amber-950/20">
+                      <CardHeader className="pb-3">
+                        <CardTitle className="flex items-center gap-2 text-amber-900 dark:text-amber-200">
+                          <AlertTriangle className="h-5 w-5" />
+                          Chamado aberto para a Engenharia do Cliente
+                        </CardTitle>
+                        <CardDescription className="text-amber-800/80 dark:text-amber-300/80">
+                          Esta OS possui {activeEngineeringTickets.length} chamado{activeEngineeringTickets.length !== 1 ? 's' : ''} ativo{activeEngineeringTickets.length !== 1 ? 's' : ''}.
+                          Verifique os itens destacados antes de avançar a fabricação.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="flex flex-wrap gap-2">
+                        {activeEngineeringTickets.map(ticket => (
+                          <Badge
+                            key={ticket.id}
+                            variant={ticket.priority === 'Crítica' ? 'destructive' : 'outline'}
+                            className={ticket.priority === 'Alta' ? 'border-orange-500 text-orange-700' : ''}
+                          >
+                            {ticket.ticketNumber} · {ticket.status} · Prioridade {ticket.priority}
+                          </Badge>
+                        ))}
+                      </CardContent>
+                    </Card>
+                  )}
+
                   {/* Documentos */}
                   <Card>
                     <CardHeader><CardTitle>Status dos Documentos</CardTitle></CardHeader>
@@ -6582,8 +6699,11 @@ return (
                       {selectedOrder.items.map((item, index) => {
                         const itemProgress = calculateItemProgress(item);
                         const totalItemWeight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                        const itemEngineeringTickets = activeEngineeringTickets.filter(
+                          ticket => Boolean(ticket.itemId) && ticket.itemId === item.id
+                        );
                         return (
-                          <Card key={item.id} className={`p-4 ${selectedItems.has(item.id!) ? 'ring-2 ring-primary' : ''}`}>
+                          <Card key={item.id} className={`p-4 ${selectedItems.has(item.id!) ? 'ring-2 ring-primary' : ''} ${itemEngineeringTickets.length > 0 ? 'border-amber-500 border-2' : ''}`}>
                             <div className="flex items-start justify-between mb-3">
                               <div className="flex items-center space-x-3">
                                 <Checkbox
@@ -6644,6 +6764,34 @@ return (
                                 )}
                               </div>
                             </div>
+                            {itemEngineeringTickets.length > 0 && (
+                              <div className="mb-4 space-y-2 rounded-md border border-amber-300 bg-amber-50 p-3 dark:bg-amber-950/20">
+                                <div className="flex items-center gap-2 font-semibold text-amber-900 dark:text-amber-200">
+                                  <AlertTriangle className="h-4 w-4" />
+                                  {itemEngineeringTickets.length === 1
+                                    ? 'Este item possui chamado aberto para a Engenharia do Cliente'
+                                    : `Este item possui ${itemEngineeringTickets.length} chamados abertos para a Engenharia do Cliente`}
+                                </div>
+                                {itemEngineeringTickets.map(ticket => (
+                                  <div key={ticket.id} className="rounded border border-amber-200 bg-white/80 p-2 text-sm dark:bg-background/60">
+                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                      <span className="font-medium">{ticket.ticketNumber} — {ticket.title}</span>
+                                      <div className="flex flex-wrap gap-1">
+                                        <Badge variant="outline">{ticket.status}</Badge>
+                                        <Badge variant={ticket.priority === 'Crítica' ? 'destructive' : 'secondary'}>
+                                          {ticket.priority}
+                                        </Badge>
+                                      </div>
+                                    </div>
+                                    <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+                                      {ticket.category && <span>Categoria: {ticket.category}</span>}
+                                      {ticket.createdDate && <span>Aberto em: {format(ticket.createdDate, 'dd/MM/yyyy')}</span>}
+                                      {ticket.dueDate && <span>Prazo: {format(ticket.dueDate, 'dd/MM/yyyy')}</span>}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                               <div>
                                 <span className="text-muted-foreground">Nº Item PC:</span>
