@@ -2409,8 +2409,74 @@ export default function CostsPage() {
             pdf.setFont('helvetica', 'bold');
             pdf.setFontSize(16);
             pdf.text(`RELATÓRIO DE APONTAMENTO E CUSTO DE PRODUÇÃO - OS ${osNumber}`, 14, 15);
+
+            // Resumo por centro de custo (setor/etapa)
+            const costCenterSummaryMap = new Map<string, {
+                hours: number;
+                cost: number;
+                count: number;
+                rate: number;
+            }>();
+
+            list.forEach(appointment => {
+                const key = appointment.stageName || 'Não informado';
+                const current = costCenterSummaryMap.get(key) || {
+                    hours: 0,
+                    cost: 0,
+                    count: 0,
+                    rate: Number(appointment.hourlyRate) || 0,
+                };
+
+                current.hours += Number(appointment.totalHours) || 0;
+                current.cost += Number(appointment.totalCost) || 0;
+                current.count += 1;
+
+                // Mantém a tarifa mais recente conhecida apenas como referência.
+                if (Number(appointment.hourlyRate) > 0) {
+                    current.rate = Number(appointment.hourlyRate);
+                }
+
+                costCenterSummaryMap.set(key, current);
+            });
+
+            const costCenterSummary = Array.from(costCenterSummaryMap.entries())
+                .sort((a, b) => b[1].cost - a[1].cost);
+
             autoTable(pdf, {
-                startY: 25,
+                startY: 22,
+                head: [['Centro de Custo (Setor)', 'Apontamentos', 'R$/h', 'Total de Horas', 'Total Gasto', '% do Total']],
+                body: costCenterSummary.map(([sector, data]) => [
+                    sector,
+                    String(data.count),
+                    currency(data.rate),
+                    `${data.hours.toFixed(2)}h`,
+                    currency(data.cost),
+                    totalCost > 0 ? `${((data.cost / totalCost) * 100).toFixed(1)}%` : '-',
+                ]),
+                foot: [[
+                    'TOTAL GERAL',
+                    String(list.length),
+                    '-',
+                    `${totalHours.toFixed(2)}h`,
+                    currency(totalCost),
+                    totalCost > 0 ? '100%' : '-',
+                ]],
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [30, 64, 175], textColor: 255 },
+                footStyles: {
+                    fillColor: [239, 246, 255],
+                    textColor: [30, 64, 175],
+                    fontStyle: 'bold',
+                },
+            });
+
+            const detailStartY = (pdf as any).lastAutoTable.finalY + 10;
+            pdf.setFontSize(11);
+            pdf.setFont('helvetica', 'bold');
+            pdf.text('DETALHAMENTO DOS APONTAMENTOS', 14, detailStartY);
+
+            autoTable(pdf, {
+                startY: detailStartY + 4,
                 head: [['Item', 'Etapa', 'Operador', 'Início', 'Fim', 'Status', 'Horas', 'R$/h', 'Custo']],
                 body: list.map(appointment => [
                     appointment.itemDescription,
