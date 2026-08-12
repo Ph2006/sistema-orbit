@@ -1165,29 +1165,27 @@ export default function CostsPage() {
     const confirmDeleteAppointment = async () => {
         if (!appointmentToDelete) return;
         try {
-            // Apontamentos abertos/pausados ainda não geraram custo na OS.
-            // Excluí-los diretamente evita uma leitura desnecessária da OS e funciona mesmo
-            // quando a cota de leituras do Firestore está temporariamente esgotada.
-            if (appointmentToDelete.status !== 'Concluído') {
-                await deleteDoc(doc(db, "companies", "mecald", "productionAppointments", appointmentToDelete.id));
-                setAppointments(current => current.filter(appointment => appointment.id !== appointmentToDelete.id));
-                setAppointmentToDelete(null);
-                toast({ title: 'Apontamento excluído' });
-                return;
+            const appointmentRef = doc(db, "companies", "mecald", "productionAppointments", appointmentToDelete.id);
+            const loadedOrder = orders.find(order => order.id === appointmentToDelete.orderId);
+
+            // Não usa runTransaction/getDoc: o Firestore repete automaticamente leituras
+            // de transações com falha, agravando o erro 429. Aproveitamos a OS já carregada.
+            if (appointmentToDelete.status === 'Concluído' && loadedOrder) {
+                const updatedCostEntries = (Array.isArray(loadedOrder.costEntries) ? loadedOrder.costEntries : [])
+                    .filter((entry: any) => entry.appointmentId !== appointmentToDelete.id);
+                const batch = writeBatch(db);
+                batch.update(doc(db, "companies", "mecald", "orders", appointmentToDelete.orderId), {
+                    costEntries: updatedCostEntries,
+                });
+                batch.delete(appointmentRef);
+                await batch.commit();
+                setOrders(current => current.map(order => order.id === loadedOrder.id ? { ...order, costEntries: updatedCostEntries } : order));
+            } else {
+                await deleteDoc(appointmentRef);
             }
 
-            await runTransaction(db, async transaction => {
-                const appointmentRef = doc(db, "companies", "mecald", "productionAppointments", appointmentToDelete.id);
-                const orderRef = doc(db, "companies", "mecald", "orders", appointmentToDelete.orderId);
-                const orderSnapshot = await transaction.get(orderRef);
-                if (orderSnapshot.exists()) {
-                    const costEntries = Array.isArray(orderSnapshot.data().costEntries) ? orderSnapshot.data().costEntries : [];
-                    transaction.update(orderRef, { costEntries: costEntries.filter((entry: any) => entry.appointmentId !== appointmentToDelete.id) });
-                }
-                transaction.delete(appointmentRef);
-            });
+            setAppointments(current => current.filter(appointment => appointment.id !== appointmentToDelete.id));
             setAppointmentToDelete(null);
-            await fetchAppointments();
             toast({ title: 'Apontamento excluído', description: 'O custo correspondente também foi removido da OS.' });
         } catch (error) {
             console.error('Erro ao excluir apontamento:', error);
@@ -1249,6 +1247,9 @@ export default function CostsPage() {
     useEffect(() => {
         const syncRequisitionsWithOrders = async () => {
             if (isSyncingRequisitionsRef.current) return;
+            // Apontamentos não dependem da sincronização de requisições. Evita consumir
+            // leituras/escritas do Firestore enquanto esta aba está sendo utilizada.
+            if (activeTab === 'appointments') return;
             if (!requisitions.length || !orders.length || isLoadingRequisitions || isLoadingOrders) return;
 
             isSyncingRequisitionsRef.current = true;
@@ -1361,7 +1362,7 @@ export default function CostsPage() {
         // Sincronizar quando dados mudam - aguardar um pouco para garantir que tudo foi carregado
         const timeoutId = setTimeout(syncRequisitionsWithOrders, 1000);
         return () => clearTimeout(timeoutId);
-    }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders, resolveLinkedOrder, fetchOrders]);
+    }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders, resolveLinkedOrder, fetchOrders, activeTab]);
 
     // Função para forçar refresh dos dados de custos
     const forceRefreshCosts = useCallback(async () => {
