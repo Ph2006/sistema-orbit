@@ -28,7 +28,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
-import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText, Search, Link2, Download, QrCode, Play, Pause, Square, Timer, RotateCcw } from "lucide-react";
+import { CalendarIcon, PackageSearch, FilePen, PlusCircle, Pencil, Trash2, FileText, Search, Link2, Download } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -158,70 +158,7 @@ type Requisition = {
 };
 
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
-type OrderStage = { stageName: string; status?: string };
-type OrderItemForPointing = {
-    id: string;
-    code?: string;
-    description: string;
-    productionPlan: OrderStage[];
-};
-type OrderInfo = {
-    id: string;
-    internalOS: string;
-    customerName: string;
-    customerId?: string;
-    status?: string;
-    items?: OrderItemForPointing[];
-    costEntries?: any[];
-};
-
-type LaborPointingStatus = 'running' | 'paused' | 'completed';
-type LaborPointing = {
-    id: string;
-    orderId: string;
-    internalOS: string;
-    customerName: string;
-    stageName: string;
-    status: LaborPointingStatus;
-    hourlyRate: number;
-    accumulatedSeconds: number;
-    startedAt: Date;
-    lastResumedAt?: Date;
-    pausedAt?: Date;
-    completedAt?: Date;
-    operatorId?: string;
-    operatorName: string;
-    operatorEmail?: string;
-    totalHours?: number;
-    totalCost?: number;
-};
-
-const normalizeStageName = (value?: string): string => (value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLocaleLowerCase('pt-BR')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-
-const HOURLY_POINTING_STAGES = new Set([
-    'listagem de materia prima', 'compra de materia prima', 'recebimento de materia prima',
-    'preparacao', 'montagem', 'controle dimensional de montagem', 'soldagem',
-    'ensaio visual de solda', 'desempeno', 'acabamento para ensaio de lp', 'ensaio de lp',
-    'usinagem', 'furacao', 'pre montagem dos componentes', 'acabamento final', 'jateamento',
-    'inspecao em jato', 'pintura de fundo', 'inspecao de pintura', 'pintura de acabamento',
-    'montagem mecanica final', 'controle final', 'embalagem para expedicao', 'expedicao',
-]);
-
-const isHourlyPointingStage = (stageName?: string): boolean => {
-    const normalized = normalizeStageName(stageName);
-    return normalized.startsWith('engenharia do produto') || HOURLY_POINTING_STAGES.has(normalized);
-};
-
-const toDateSafe = (value: any): Date | undefined => {
-    if (!value) return undefined;
-    const parsed = value?.toDate ? value.toDate() : new Date(value);
-    return parsed instanceof Date && !isNaN(parsed.getTime()) ? parsed : undefined;
-};
+type OrderInfo = { id: string; internalOS: string; customerName: string; customerId?: string; costEntries?: any[] };
 
 const normalizeOSNumber = (value?: string): string =>
     (value || '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, '');
@@ -701,17 +638,6 @@ export default function CostsPage() {
     const [relinkSearchByRequisition, setRelinkSearchByRequisition] = useState<Record<string, string>>({});
     const [selectedOrderByRequisition, setSelectedOrderByRequisition] = useState<Record<string, string>>({});
     const [relinkingRequisitionId, setRelinkingRequisitionId] = useState<string | null>(null);
-    const [laborPointings, setLaborPointings] = useState<LaborPointing[]>([]);
-    const [stageHourlyRates, setStageHourlyRates] = useState<Record<string, number>>({});
-    const [pointingMode, setPointingMode] = useState<'overview' | 'start' | 'close'>('overview');
-    const [pointingOrderId, setPointingOrderId] = useState('');
-    const [pointingStageName, setPointingStageName] = useState('');
-    const [pointingOrderSearch, setPointingOrderSearch] = useState('');
-    const [pointingReportOrderId, setPointingReportOrderId] = useState('');
-    const [isSavingPointing, setIsSavingPointing] = useState(false);
-    const [qrStartUrl, setQrStartUrl] = useState('');
-    const [qrCloseUrl, setQrCloseUrl] = useState('');
-    const [clockTick, setClockTick] = useState(0);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -934,16 +860,6 @@ export default function CostsPage() {
                         internalOS: data.internalOS || 'N/A',
                         customerName: data.customer?.name || data.customerName || 'Cliente Desconhecido',
                         customerId: data.customer?.id || data.customerId || undefined,
-                        status: data.status || '',
-                        items: (data.items || []).map((item: any, itemIndex: number) => ({
-                            id: item.id || `${doc.id}-item-${itemIndex}`,
-                            code: item.code || item.productCode || '',
-                            description: item.description || `Item ${itemIndex + 1}`,
-                            productionPlan: (item.productionPlan || item.productionPlanTemplate || []).map((stage: any) => ({
-                                stageName: typeof stage === 'string' ? stage : (stage.stageName || stage.name || ''),
-                                status: typeof stage === 'string' ? undefined : stage.status,
-                            })).filter((stage: OrderStage) => Boolean(stage.stageName)),
-                        })),
                         costEntries: (data.costEntries || []).map((entry: any) => ({
                             ...entry,
                             entryDate: (() => {
@@ -1034,361 +950,6 @@ export default function CostsPage() {
             fetchOrders();
         }
     }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
-
-    const fetchLaborPointings = useCallback(async () => {
-        if (!user) return;
-        try {
-            const snapshot = await getDocs(collection(db, "companies", "mecald", "laborPointings"));
-            const entries = snapshot.docs.map(pointingDoc => {
-                const data = pointingDoc.data();
-                return {
-                    id: pointingDoc.id,
-                    orderId: data.orderId || '',
-                    internalOS: data.internalOS || 'N/A',
-                    customerName: data.customerName || '',
-                    stageName: data.stageName || '',
-                    status: data.status || 'paused',
-                    hourlyRate: Number(data.hourlyRate) || 0,
-                    accumulatedSeconds: Number(data.accumulatedSeconds) || 0,
-                    startedAt: toDateSafe(data.startedAt) || new Date(),
-                    lastResumedAt: toDateSafe(data.lastResumedAt),
-                    pausedAt: toDateSafe(data.pausedAt),
-                    completedAt: toDateSafe(data.completedAt),
-                    operatorId: data.operatorId || '',
-                    operatorName: data.operatorName || 'Usuário não identificado',
-                    operatorEmail: data.operatorEmail || '',
-                    totalHours: Number(data.totalHours) || undefined,
-                    totalCost: Number(data.totalCost) || undefined,
-                } as LaborPointing;
-            }).sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime());
-            setLaborPointings(entries);
-        } catch (error) {
-            console.error('Erro ao buscar apontamentos:', error);
-            toast({ variant: 'destructive', title: 'Erro ao carregar apontamentos' });
-        }
-    }, [user, toast]);
-
-    const loadStageHourlyRates = useCallback(async () => {
-        try {
-            const settingsSnapshot = await getDoc(doc(db, "companies", "mecald", "settings", "stageCosts"));
-            setStageHourlyRates(settingsSnapshot.exists() ? (settingsSnapshot.data().costs || {}) : {});
-        } catch (error) {
-            console.error('Erro ao carregar taxas horárias:', error);
-            setStageHourlyRates({});
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!authLoading && user) {
-            fetchLaborPointings();
-            loadStageHourlyRates();
-        }
-    }, [user, authLoading, fetchLaborPointings, loadStageHourlyRates]);
-
-    useEffect(() => {
-        if (typeof window === 'undefined') return;
-        const baseUrl = new URL(window.location.href);
-        baseUrl.search = '';
-        baseUrl.hash = '';
-        const startUrl = new URL(baseUrl.toString());
-        startUrl.searchParams.set('tab', 'pointings');
-        startUrl.searchParams.set('mode', 'start');
-        const closeUrl = new URL(baseUrl.toString());
-        closeUrl.searchParams.set('tab', 'pointings');
-        closeUrl.searchParams.set('mode', 'close');
-        setQrStartUrl(startUrl.toString());
-        setQrCloseUrl(closeUrl.toString());
-
-        const params = new URLSearchParams(window.location.search);
-        if (params.get('tab') === 'pointings') {
-            setActiveTab('pointings');
-            setPointingMode(params.get('mode') === 'close' ? 'close' : 'start');
-        }
-    }, []);
-
-    useEffect(() => {
-        if (!laborPointings.some(entry => entry.status === 'running')) return;
-        const timerId = window.setInterval(() => setClockTick(value => value + 1), 1000);
-        return () => window.clearInterval(timerId);
-    }, [laborPointings]);
-
-    const availablePointingOrders = useMemo(() => {
-        const queryText = pointingOrderSearch.trim().toLocaleLowerCase('pt-BR');
-        return orders
-            .filter(order => !['concluido', 'cancelado'].includes(normalizeStageName(order.status)))
-            .filter(order => !queryText || `${order.internalOS} ${order.customerName}`.toLocaleLowerCase('pt-BR').includes(queryText))
-            .sort((a, b) => a.internalOS.localeCompare(b.internalOS, 'pt-BR', { numeric: true }));
-    }, [orders, pointingOrderSearch]);
-
-    const selectedPointingOrder = useMemo(
-        () => orders.find(order => order.id === pointingOrderId),
-        [orders, pointingOrderId]
-    );
-
-    const availableOrderStages = useMemo(() => {
-        if (!selectedPointingOrder) return [];
-        const uniqueStages = new Map<string, string>();
-        (selectedPointingOrder.items || []).forEach(item => {
-            (item.productionPlan || []).forEach(stage => {
-                if (!stage.stageName || !isHourlyPointingStage(stage.stageName)) return;
-                if (normalizeStageName(stage.status).includes('conclu')) return;
-                const key = normalizeStageName(stage.stageName);
-                if (!uniqueStages.has(key)) uniqueStages.set(key, stage.stageName);
-            });
-        });
-        return Array.from(uniqueStages.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
-    }, [selectedPointingOrder]);
-
-    const openPointingsForSelectedOrder = useMemo(() => laborPointings.filter(entry =>
-        entry.orderId === pointingOrderId && entry.status !== 'completed'
-    ), [laborPointings, pointingOrderId]);
-
-    const closingStageOptions = useMemo(() => Array.from(new Set(
-        openPointingsForSelectedOrder.map(entry => entry.stageName)
-    )).sort((a, b) => a.localeCompare(b, 'pt-BR')), [openPointingsForSelectedOrder]);
-
-    const selectedOpenPointing = useMemo(() => openPointingsForSelectedOrder.find(entry =>
-        normalizeStageName(entry.stageName) === normalizeStageName(pointingStageName)
-    ), [openPointingsForSelectedOrder, pointingStageName]);
-
-    const resolveHourlyRate = useCallback((stageName: string): number => {
-        const exactRate = Number(stageHourlyRates[stageName]);
-        if (Number.isFinite(exactRate) && exactRate > 0) return exactRate;
-        const normalizedName = normalizeStageName(stageName);
-        const matchedKey = Object.keys(stageHourlyRates).find(key => normalizeStageName(key) === normalizedName);
-        return matchedKey ? (Number(stageHourlyRates[matchedKey]) || 0) : 0;
-    }, [stageHourlyRates]);
-
-    const getElapsedSeconds = useCallback((entry: LaborPointing): number => {
-        void clockTick;
-        const accumulated = Number(entry.accumulatedSeconds) || 0;
-        if (entry.status !== 'running' || !entry.lastResumedAt) return accumulated;
-        return accumulated + Math.max(0, Math.floor((Date.now() - entry.lastResumedAt.getTime()) / 1000));
-    }, [clockTick]);
-
-    const formatElapsedTime = useCallback((totalSeconds: number): string => {
-        const seconds = Math.max(0, Math.floor(totalSeconds));
-        const hours = Math.floor(seconds / 3600);
-        const minutes = Math.floor((seconds % 3600) / 60);
-        const remainingSeconds = seconds % 60;
-        return [hours, minutes, remainingSeconds].map(value => String(value).padStart(2, '0')).join(':');
-    }, []);
-
-    const resetPointingSelection = () => {
-        setPointingOrderId('');
-        setPointingStageName('');
-        setPointingOrderSearch('');
-    };
-
-    const handleStartOrResumePointing = async () => {
-        if (!selectedPointingOrder || !pointingStageName || isSavingPointing) return;
-        const existing = laborPointings.find(entry =>
-            entry.orderId === selectedPointingOrder.id &&
-            normalizeStageName(entry.stageName) === normalizeStageName(pointingStageName) &&
-            entry.status !== 'completed'
-        );
-        const hourlyRate = existing?.hourlyRate || resolveHourlyRate(pointingStageName);
-        if (hourlyRate <= 0) {
-            toast({
-                variant: 'destructive',
-                title: 'Taxa horária não configurada',
-                description: `Cadastre o valor R$/h da etapa “${pointingStageName}” na página de Produtos.`,
-            });
-            return;
-        }
-
-        if (existing?.status === 'running') {
-            toast({ variant: 'destructive', title: 'Etapa já está em execução', description: 'Use o QR Code de fechamento para pausar ou encerrar.' });
-            return;
-        }
-
-        setIsSavingPointing(true);
-        try {
-            const now = Timestamp.now();
-            const operatorName = (user as any)?.displayName || user?.email || 'Usuário Orbit';
-            if (existing?.status === 'paused') {
-                await updateDoc(doc(db, "companies", "mecald", "laborPointings", existing.id), {
-                    status: 'running',
-                    lastResumedAt: now,
-                    pausedAt: null,
-                    updatedAt: now,
-                    events: arrayUnion({ type: 'resumed', at: now, user: operatorName }),
-                });
-                toast({ title: 'Apontamento retomado!', description: `${selectedPointingOrder.internalOS} • ${pointingStageName}` });
-            } else {
-                await addDoc(collection(db, "companies", "mecald", "laborPointings"), {
-                    orderId: selectedPointingOrder.id,
-                    internalOS: selectedPointingOrder.internalOS,
-                    customerName: selectedPointingOrder.customerName,
-                    stageName: pointingStageName,
-                    status: 'running',
-                    hourlyRate,
-                    accumulatedSeconds: 0,
-                    startedAt: now,
-                    lastResumedAt: now,
-                    operatorId: user?.uid || '',
-                    operatorName,
-                    operatorEmail: user?.email || '',
-                    createdAt: now,
-                    updatedAt: now,
-                    events: [{ type: 'started', at: now, user: operatorName }],
-                });
-                toast({ title: 'Apontamento iniciado!', description: `${selectedPointingOrder.internalOS} • ${pointingStageName} • R$ ${hourlyRate.toFixed(2)}/h` });
-            }
-            resetPointingSelection();
-            await fetchLaborPointings();
-        } catch (error) {
-            console.error('Erro ao iniciar apontamento:', error);
-            toast({ variant: 'destructive', title: 'Erro ao iniciar apontamento' });
-        } finally {
-            setIsSavingPointing(false);
-        }
-    };
-
-    const handlePausePointing = async () => {
-        if (!selectedOpenPointing || selectedOpenPointing.status !== 'running' || isSavingPointing) return;
-        setIsSavingPointing(true);
-        try {
-            const nowDate = new Date();
-            const accumulatedSeconds = getElapsedSeconds(selectedOpenPointing);
-            const now = Timestamp.fromDate(nowDate);
-            await updateDoc(doc(db, "companies", "mecald", "laborPointings", selectedOpenPointing.id), {
-                status: 'paused', accumulatedSeconds, pausedAt: now, lastResumedAt: null, updatedAt: now,
-                events: arrayUnion({ type: 'paused', at: now, user: (user as any)?.displayName || user?.email || 'Usuário Orbit' }),
-            });
-            toast({ title: 'Apontamento pausado', description: `${formatElapsedTime(accumulatedSeconds)} acumulados.` });
-            resetPointingSelection();
-            await fetchLaborPointings();
-        } catch (error) {
-            console.error('Erro ao pausar apontamento:', error);
-            toast({ variant: 'destructive', title: 'Erro ao pausar apontamento' });
-        } finally {
-            setIsSavingPointing(false);
-        }
-    };
-
-    const handleCompletePointing = async () => {
-        if (!selectedOpenPointing || isSavingPointing) return;
-        setIsSavingPointing(true);
-        try {
-            const nowDate = new Date();
-            const totalSeconds = getElapsedSeconds(selectedOpenPointing);
-            const totalHours = totalSeconds / 3600;
-            const totalCost = totalHours * selectedOpenPointing.hourlyRate;
-            const now = Timestamp.fromDate(nowDate);
-            const pointingRef = doc(db, "companies", "mecald", "laborPointings", selectedOpenPointing.id);
-            const orderRef = doc(db, "companies", "mecald", "orders", selectedOpenPointing.orderId);
-            const batch = writeBatch(db);
-            batch.update(pointingRef, {
-                status: 'completed', accumulatedSeconds: totalSeconds, totalHours, totalCost,
-                completedAt: now, lastResumedAt: null, pausedAt: null, updatedAt: now,
-                events: arrayUnion({ type: 'completed', at: now, user: (user as any)?.displayName || user?.email || 'Usuário Orbit' }),
-            });
-            batch.update(orderRef, {
-                costEntries: arrayUnion({
-                    id: `labor-${selectedOpenPointing.id}`,
-                    laborPointingId: selectedOpenPointing.id,
-                    sourceType: 'labor_time_pointing',
-                    description: `Mão de obra – ${selectedOpenPointing.stageName}`,
-                    quantity: Number(totalHours.toFixed(4)),
-                    unitCost: selectedOpenPointing.hourlyRate,
-                    totalCost: Number(totalCost.toFixed(2)),
-                    entryDate: now,
-                    enteredBy: selectedOpenPointing.operatorName,
-                    isAutomatic: true,
-                }),
-                lastUpdate: now,
-            });
-            await batch.commit();
-
-            toast({
-                title: 'Apontamento encerrado!',
-                description: `${totalHours.toFixed(2)} h × R$ ${selectedOpenPointing.hourlyRate.toFixed(2)}/h = R$ ${totalCost.toFixed(2)}.`,
-            });
-            resetPointingSelection();
-            await Promise.all([fetchLaborPointings(), fetchOrders()]);
-        } catch (error) {
-            console.error('Erro ao encerrar apontamento:', error);
-            toast({ variant: 'destructive', title: 'Erro ao encerrar apontamento' });
-        } finally {
-            setIsSavingPointing(false);
-        }
-    };
-
-    const getQrImageUrl = (targetUrl: string, size: number = 600): string =>
-        `https://api.qrserver.com/v1/create-qr-code/?size=${size}x${size}&margin=20&format=png&data=${encodeURIComponent(targetUrl)}`;
-
-    const downloadQrCode = async (targetUrl: string, filename: string) => {
-        if (!targetUrl) return;
-        try {
-            const response = await fetch(getQrImageUrl(targetUrl));
-            if (!response.ok) throw new Error('Falha ao gerar QR Code');
-            const blob = await response.blob();
-            const objectUrl = URL.createObjectURL(blob);
-            const link = document.createElement('a');
-            link.download = filename;
-            link.href = objectUrl;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            URL.revokeObjectURL(objectUrl);
-        } catch (error) {
-            console.error('Erro ao baixar QR Code:', error);
-            toast({ variant: 'destructive', title: 'Erro ao baixar QR Code', description: 'Verifique a conexão e tente novamente.' });
-        }
-    };
-
-    const exportPointingReport = () => {
-        const selectedOrder = orders.find(order => order.id === pointingReportOrderId);
-        const entries = laborPointings.filter(entry => entry.orderId === pointingReportOrderId);
-        if (!selectedOrder || entries.length === 0) {
-            toast({ variant: 'destructive', title: 'Sem apontamentos', description: 'Selecione uma OS que possua apontamentos.' });
-            return;
-        }
-
-        const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
-        const now = new Date();
-        pdf.setFont('helvetica', 'bold');
-        pdf.setFontSize(16);
-        pdf.text('RELATÓRIO DE APONTAMENTO E CUSTO DE PRODUÇÃO', 14, 15);
-        pdf.setFontSize(10);
-        pdf.setFont('helvetica', 'normal');
-        pdf.text(`OS: ${selectedOrder.internalOS}  |  Cliente: ${selectedOrder.customerName}`, 14, 23);
-        pdf.text(`Emissão: ${format(now, 'dd/MM/yyyy HH:mm')}`, 14, 29);
-
-        const rows = entries.map(entry => {
-            const seconds = getElapsedSeconds(entry);
-            const hours = seconds / 3600;
-            const cost = hours * entry.hourlyRate;
-            const statusLabel = entry.status === 'running' ? 'Em execução' : entry.status === 'paused' ? 'Pausado' : 'Encerrado';
-            return [
-                entry.stageName,
-                entry.operatorName,
-                safeFormatDate(entry.startedAt, 'dd/MM/yyyy HH:mm', '-'),
-                entry.completedAt ? safeFormatDate(entry.completedAt, 'dd/MM/yyyy HH:mm', '-') : '-',
-                statusLabel,
-                hours.toFixed(2),
-                `R$ ${entry.hourlyRate.toFixed(2)}`,
-                `R$ ${cost.toFixed(2)}`,
-            ];
-        });
-
-        autoTable(pdf, {
-            startY: 35,
-            head: [['Etapa', 'Operador', 'Início', 'Fim', 'Status', 'Horas', 'R$/h', 'Custo']],
-            body: rows,
-            styles: { fontSize: 8, cellPadding: 2 },
-            headStyles: { fillColor: [37, 99, 235], textColor: 255 },
-        });
-        const totalHours = entries.reduce((sum, entry) => sum + getElapsedSeconds(entry) / 3600, 0);
-        const totalCost = entries.reduce((sum, entry) => sum + (getElapsedSeconds(entry) / 3600) * entry.hourlyRate, 0);
-        const finalY = (pdf as any).lastAutoTable?.finalY || 45;
-        pdf.setFont('helvetica', 'bold');
-        pdf.text(`Total de horas: ${totalHours.toFixed(2)} h`, 14, finalY + 10);
-        pdf.text(`Custo total de mão de obra: R$ ${totalCost.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`, 90, finalY + 10);
-        pdf.save(`Apontamentos_OS_${selectedOrder.internalOS.replace(/[^a-zA-Z0-9]/g, '_')}_${format(now, 'yyyyMMdd_HHmm')}.pdf`);
-        toast({ title: 'Relatório exportado!', description: `Apontamentos da OS ${selectedOrder.internalOS}.` });
-    };
 
     // Algumas consultas/versões antigas não retornavam OS concluídas. Se a requisição
     // possui um ID válido, carregamos esse documento diretamente para preservar o vínculo.
@@ -2603,7 +2164,6 @@ export default function CostsPage() {
                 <TabsTrigger value="receipts">Recebimento de Materiais</TabsTrigger>
                 <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
                 <TabsTrigger value="costEntry">Lançamento de Custos</TabsTrigger>
-                <TabsTrigger value="pointings">Apontamentos</TabsTrigger>
             </TabsList>
             <TabsContent value="receipts">
                 <Card>
@@ -3416,13 +2976,6 @@ export default function CostsPage() {
                                                                     <TableCell className="font-medium">
                                                                         <div>
                                                                             {entry.description}
-                                                                            {entry.sourceType === 'labor_time_pointing' && (
-                                                                                <div className="mt-1">
-                                                                                    <Badge variant="secondary" className="text-xs">
-                                                                                        ⏱️ Mão de obra por apontamento
-                                                                                    </Badge>
-                                                                                </div>
-                                                                            )}
                                                                                                                                                                                                                                  {entry.isFromRequisition && (
                                                                              <div className="flex items-center gap-1 mt-1 flex-wrap">
                                                                                  <Badge variant="secondary" className="text-xs">
@@ -3508,7 +3061,7 @@ export default function CostsPage() {
                                                                     <TableCell className="text-right">
                                                                         <div className="flex items-center justify-end gap-2">
                                                                             {/* Botão de Editar - disponível para todos os lançamentos */}
-                                                                            {entry.sourceType !== 'labor_time_pointing' && <Button 
+                                                                            <Button 
                                                                                 variant="ghost" 
                                                                                 size="icon" 
                                                                                 className="text-blue-600 hover:text-blue-800" 
@@ -3516,10 +3069,10 @@ export default function CostsPage() {
                                                                                 title={entry.isFromRequisition ? "Editar dados do lançamento (ex: nº pedido)" : "Editar lançamento"}
                                                                             >
                                                                                 <Pencil className="h-4 w-4" />
-                                                                            </Button>}
+                                                                            </Button>
                                                                             
                                                                             {/* Botão de Deletar - apenas para lançamentos manuais */}
-                                                                            {!entry.isFromRequisition && entry.sourceType !== 'labor_time_pointing' && (
+                                                                            {!entry.isFromRequisition && (
                                                                                 <Button 
                                                                                     variant="ghost" 
                                                                                     size="icon" 
@@ -3536,9 +3089,6 @@ export default function CostsPage() {
                                                                                 <Badge variant="outline" className="text-xs">
                                                                                     Auto
                                                                                 </Badge>
-                                                                            )}
-                                                                            {entry.sourceType === 'labor_time_pointing' && (
-                                                                                <Badge variant="outline" className="text-xs">Automático</Badge>
                                                                             )}
                                                                         </div>
                                                                     </TableCell>
@@ -3567,249 +3117,6 @@ export default function CostsPage() {
                                 </div>
                             );
                         })()}
-                    </CardContent>
-                </Card>
-            </TabsContent>
-            <TabsContent value="pointings" className="space-y-4">
-                {pointingMode === 'overview' && <div className="grid gap-4 md:grid-cols-3">
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardDescription>Em execução</CardDescription>
-                            <CardTitle className="text-3xl text-green-600">
-                                {laborPointings.filter(entry => entry.status === 'running').length}
-                            </CardTitle>
-                        </CardHeader>
-                    </Card>
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardDescription>Pausados</CardDescription>
-                            <CardTitle className="text-3xl text-amber-600">
-                                {laborPointings.filter(entry => entry.status === 'paused').length}
-                            </CardTitle>
-                        </CardHeader>
-                    </Card>
-                    <Card>
-                        <CardHeader className="pb-2">
-                            <CardDescription>Custo encerrado</CardDescription>
-                            <CardTitle className="text-2xl text-blue-600">
-                                {laborPointings
-                                    .filter(entry => entry.status === 'completed')
-                                    .reduce((sum, entry) => sum + (Number(entry.totalCost) || 0), 0)
-                                    .toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                            </CardTitle>
-                        </CardHeader>
-                    </Card>
-                </div>}
-
-                {pointingMode === 'overview' && <Card>
-                    <CardHeader>
-                        <CardTitle className="flex items-center gap-2">
-                            <QrCode className="h-5 w-5" /> QR Codes Gerais de Apontamento
-                        </CardTitle>
-                        <CardDescription>
-                            Baixe e anexe aos desenhos. Os códigos são gerais e permanentes; a OS e a etapa serão escolhidas pelo operador no celular.
-                        </CardDescription>
-                    </CardHeader>
-                    <CardContent className="grid gap-6 md:grid-cols-2">
-                        <div className="flex flex-col items-center rounded-lg border p-5 text-center">
-                            <div className="mb-3 rounded-full bg-green-100 p-3 text-green-700">
-                                <Play className="h-6 w-6" />
-                            </div>
-                            <h3 className="font-semibold">ABERTURA / RETOMADA</h3>
-                            <p className="mb-4 text-xs text-muted-foreground">Inicia um novo apontamento ou retoma uma etapa pausada.</p>
-                            {qrStartUrl && <img src={getQrImageUrl(qrStartUrl, 300)} width={220} height={220} alt="QR Code para abertura de apontamento" className="rounded-md border bg-white" />}
-                            <Button className="mt-4 w-full" variant="outline" onClick={() => downloadQrCode(qrStartUrl, 'QR_Orbit_Abertura_Apontamento.png')}>
-                                <Download className="mr-2 h-4 w-4" /> Baixar QR de abertura
-                            </Button>
-                        </div>
-                        <div className="flex flex-col items-center rounded-lg border p-5 text-center">
-                            <div className="mb-3 rounded-full bg-red-100 p-3 text-red-700">
-                                <Square className="h-6 w-6" />
-                            </div>
-                            <h3 className="font-semibold">PAUSA / ENCERRAMENTO</h3>
-                            <p className="mb-4 text-xs text-muted-foreground">Localiza uma etapa aberta para pausar ou encerrar o custo.</p>
-                            {qrCloseUrl && <img src={getQrImageUrl(qrCloseUrl, 300)} width={220} height={220} alt="QR Code para pausa ou encerramento de apontamento" className="rounded-md border bg-white" />}
-                            <Button className="mt-4 w-full" variant="outline" onClick={() => downloadQrCode(qrCloseUrl, 'QR_Orbit_Fechamento_Apontamento.png')}>
-                                <Download className="mr-2 h-4 w-4" /> Baixar QR de fechamento
-                            </Button>
-                        </div>
-                    </CardContent>
-                </Card>}
-
-                <Card className={cn(pointingMode === 'start' && 'border-green-500', pointingMode === 'close' && 'border-red-500')}>
-                    <CardHeader>
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                                <CardTitle className="flex items-center gap-2">
-                                    <Timer className="h-5 w-5" />
-                                    {pointingMode === 'start' ? 'Abrir ou retomar processo' : pointingMode === 'close' ? 'Pausar ou encerrar processo' : 'Operação de apontamento'}
-                                </CardTitle>
-                                <CardDescription>Selecione a OS e depois a etapa produtiva.</CardDescription>
-                            </div>
-                            <div className="flex gap-2">
-                                <Button variant={pointingMode === 'start' ? 'default' : 'outline'} onClick={() => { setPointingMode('start'); resetPointingSelection(); }}>
-                                    <Play className="mr-2 h-4 w-4" /> Abrir
-                                </Button>
-                                <Button variant={pointingMode === 'close' ? 'destructive' : 'outline'} onClick={() => { setPointingMode('close'); resetPointingSelection(); }}>
-                                    <Square className="mr-2 h-4 w-4" /> Fechar
-                                </Button>
-                            </div>
-                        </div>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {pointingMode === 'overview' ? (
-                            <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">
-                                Leia um QR Code ou escolha Abrir/Fechar acima.
-                            </div>
-                        ) : (
-                            <>
-                                <div className="grid gap-4 md:grid-cols-2">
-                                    <div className="space-y-2">
-                                        <Label>Buscar OS</Label>
-                                        <div className="relative">
-                                            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                                            <Input className="pl-9" placeholder="Ex.: 790/26 ou cliente" value={pointingOrderSearch} onChange={event => setPointingOrderSearch(event.target.value)} />
-                                        </div>
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label>Ordem de Serviço</Label>
-                                        <Select value={pointingOrderId} onValueChange={value => { setPointingOrderId(value); setPointingStageName(''); }}>
-                                            <SelectTrigger><SelectValue placeholder="Selecione a OS" /></SelectTrigger>
-                                            <SelectContent>
-                                                {availablePointingOrders.map(order => (
-                                                    <SelectItem key={order.id} value={order.id}>OS {order.internalOS} – {order.customerName}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                </div>
-
-                                {pointingOrderId && (
-                                    <div className="space-y-2">
-                                        <Label>Etapa</Label>
-                                        <Select value={pointingStageName} onValueChange={setPointingStageName}>
-                                            <SelectTrigger><SelectValue placeholder={pointingMode === 'close' ? 'Selecione uma etapa aberta' : 'Selecione a etapa a apontar'} /></SelectTrigger>
-                                            <SelectContent>
-                                                {(pointingMode === 'close' ? closingStageOptions : availableOrderStages).map(stage => (
-                                                    <SelectItem key={stage} value={stage}>
-                                                        {stage}{pointingMode === 'start' ? ` – R$ ${resolveHourlyRate(stage).toFixed(2)}/h` : ''}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                    </div>
-                                )}
-
-                                {pointingMode === 'start' && pointingOrderId && availableOrderStages.length === 0 && (
-                                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800">
-                                        Esta OS não possui etapas horárias pendentes cadastradas nos itens do pedido.
-                                    </div>
-                                )}
-
-                                {pointingMode === 'close' && pointingOrderId && closingStageOptions.length === 0 && (
-                                    <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm font-medium text-amber-800">
-                                        Não existe etapa aberta ou pausada para esta OS.
-                                    </div>
-                                )}
-
-                                {pointingMode === 'start' && pointingStageName && (
-                                    <div className="rounded-lg border bg-muted/40 p-4">
-                                        <div className="flex flex-wrap items-center justify-between gap-3">
-                                            <div>
-                                                <p className="font-semibold">OS {selectedPointingOrder?.internalOS} • {pointingStageName}</p>
-                                                <p className="text-sm text-muted-foreground">Taxa congelada no apontamento: R$ {(selectedOpenPointing?.hourlyRate || resolveHourlyRate(pointingStageName)).toFixed(2)}/h</p>
-                                            </div>
-                                            <Button onClick={handleStartOrResumePointing} disabled={isSavingPointing || (selectedOpenPointing?.hourlyRate || resolveHourlyRate(pointingStageName)) <= 0}>
-                                                <Play className="mr-2 h-4 w-4" /> {isSavingPointing ? 'Salvando...' : 'Iniciar / Retomar'}
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
-
-                                {pointingMode === 'close' && pointingStageName && selectedOpenPointing && (
-                                    <div className="rounded-lg border bg-muted/40 p-4">
-                                        <div className="grid gap-3 sm:grid-cols-4">
-                                            <div><p className="text-xs text-muted-foreground">Etapa</p><p className="font-semibold">{selectedOpenPointing.stageName}</p></div>
-                                            <div><p className="text-xs text-muted-foreground">Operador</p><p className="font-semibold">{selectedOpenPointing.operatorName}</p></div>
-                                            <div><p className="text-xs text-muted-foreground">Tempo acumulado</p><p className="font-mono text-xl font-bold">{formatElapsedTime(getElapsedSeconds(selectedOpenPointing))}</p></div>
-                                            <div><p className="text-xs text-muted-foreground">Custo atual</p><p className="font-semibold text-blue-600">{((getElapsedSeconds(selectedOpenPointing) / 3600) * selectedOpenPointing.hourlyRate).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div>
-                                        </div>
-                                        <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
-                                            {selectedOpenPointing.status === 'running' && (
-                                                <Button variant="outline" onClick={handlePausePointing} disabled={isSavingPointing}>
-                                                    <Pause className="mr-2 h-4 w-4" /> Pausar
-                                                </Button>
-                                            )}
-                                            <Button variant="destructive" onClick={handleCompletePointing} disabled={isSavingPointing}>
-                                                <Square className="mr-2 h-4 w-4" /> Encerrar e lançar custo
-                                            </Button>
-                                        </div>
-                                    </div>
-                                )}
-                            </>
-                        )}
-                    </CardContent>
-                </Card>
-
-                <Card>
-                    <CardHeader>
-                        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                            <div>
-                                <CardTitle>Histórico de Apontamentos</CardTitle>
-                                <CardDescription>Horas realizadas e custo de produção calculado por OS e etapa.</CardDescription>
-                            </div>
-                            <div className="flex flex-col gap-2 sm:flex-row">
-                                <Select value={pointingReportOrderId} onValueChange={setPointingReportOrderId}>
-                                    <SelectTrigger className="w-full sm:w-[280px]"><SelectValue placeholder="Selecione a OS do relatório" /></SelectTrigger>
-                                    <SelectContent>
-                                        {orders
-                                            .filter(order => laborPointings.some(entry => entry.orderId === order.id))
-                                            .sort((a, b) => a.internalOS.localeCompare(b.internalOS, 'pt-BR', { numeric: true }))
-                                            .map(order => <SelectItem key={order.id} value={order.id}>OS {order.internalOS} – {order.customerName}</SelectItem>)}
-                                    </SelectContent>
-                                </Select>
-                                <Button onClick={exportPointingReport} disabled={!pointingReportOrderId}>
-                                    <Download className="mr-2 h-4 w-4" /> Exportar PDF da OS
-                                </Button>
-                                <Button variant="outline" size="icon" onClick={fetchLaborPointings} title="Atualizar apontamentos">
-                                    <RotateCcw className="h-4 w-4" />
-                                </Button>
-                            </div>
-                        </div>
-                    </CardHeader>
-                    <CardContent>
-                        {laborPointings.length === 0 ? (
-                            <div className="rounded-lg border border-dashed p-8 text-center text-muted-foreground">Nenhum apontamento registrado.</div>
-                        ) : (
-                            <Table>
-                                <TableHeader><TableRow>
-                                    <TableHead>OS</TableHead><TableHead>Etapa</TableHead><TableHead>Operador</TableHead>
-                                    <TableHead>Início</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Tempo</TableHead>
-                                    <TableHead className="text-right">R$/h</TableHead><TableHead className="text-right">Custo</TableHead>
-                                </TableRow></TableHeader>
-                                <TableBody>
-                                    {laborPointings.map(entry => {
-                                        const seconds = getElapsedSeconds(entry);
-                                        return (
-                                            <TableRow key={entry.id}>
-                                                <TableCell className="font-semibold">{entry.internalOS}</TableCell>
-                                                <TableCell>{entry.stageName}</TableCell>
-                                                <TableCell>{entry.operatorName}</TableCell>
-                                                <TableCell>{safeFormatDate(entry.startedAt, 'dd/MM/yyyy HH:mm', '-')}</TableCell>
-                                                <TableCell>
-                                                    <Badge variant={entry.status === 'running' ? 'default' : entry.status === 'paused' ? 'secondary' : 'outline'}>
-                                                        {entry.status === 'running' ? 'Em execução' : entry.status === 'paused' ? 'Pausado' : 'Encerrado'}
-                                                    </Badge>
-                                                </TableCell>
-                                                <TableCell className="text-right font-mono">{formatElapsedTime(seconds)}</TableCell>
-                                                <TableCell className="text-right">R$ {entry.hourlyRate.toFixed(2)}</TableCell>
-                                                <TableCell className="text-right font-semibold">{((seconds / 3600) * entry.hourlyRate).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell>
-                                            </TableRow>
-                                        );
-                                    })}
-                                </TableBody>
-                            </Table>
-                        )}
                     </CardContent>
                 </Card>
             </TabsContent>
