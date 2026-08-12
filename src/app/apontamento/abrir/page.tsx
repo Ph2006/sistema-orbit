@@ -13,7 +13,7 @@ import { useToast } from "@/hooks/use-toast";
 type StageOption = { stageName: string; hourlyRate: number };
 type ItemOption = { id: string; code: string; description: string; productionPlan: any[] };
 type OrderOption = { id: string; internalOS: string; customerName: string; items: ItemOption[] };
-type ActiveAppointment = { id: string; orderId: string; orderInternalOS: string; itemId: string; itemDescription: string; stageName: string; hourlyRate: number; status: 'Aberto' | 'Pausado'; operatorName: string; startedAt: any; lastResumedAt?: any; accumulatedSeconds: number };
+type ActiveAppointment = { id: string; orderId: string; orderInternalOS: string; itemId: string; itemCode?: string; itemDescription: string; stageName: string; hourlyRate: number; status: 'Aberto' | 'Pausado'; operatorName: string; startedAt: any; lastResumedAt?: any; accumulatedSeconds: number };
 
 const asArray = (value: any): any[] => Array.isArray(value)
   ? value
@@ -166,7 +166,7 @@ export default function AbrirApontamentoPage() {
       const item = order.items.find(candidate => candidate.id === selectedItemId)!;
       const stage = availableStages.find(candidate => candidate.stageName === selectedStage)!;
       await addDoc(collection(db, "companies", "mecald", "productionAppointments"), {
-        orderId: order.id, orderInternalOS: order.internalOS, itemId: item.id, itemDescription: item.description,
+        orderId: order.id, orderInternalOS: order.internalOS, itemId: item.id, itemCode: item.code || '', itemDescription: item.description,
         stageName: stage.stageName, hourlyRate: stage.hourlyRate, status: "Aberto", operatorName: operatorName.trim(),
         startedAt: Timestamp.now(), lastResumedAt: Timestamp.now(), pausedAt: null, accumulatedSeconds: 0,
       });
@@ -234,7 +234,7 @@ export default function AbrirApontamentoPage() {
         {!loadingOrders && orderSearch && filteredOrders.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma OS encontrada para “{orderSearch}”.</p>}
 
         {mode === 'start' && <>
-          {selectedOrder && <Select value={selectedItemId} onValueChange={handleSelectItem}><SelectTrigger><SelectValue placeholder="Selecione o item" /></SelectTrigger><SelectContent>{selectedOrder.items.map(item => <SelectItem key={item.id} value={item.id}>{item.description}</SelectItem>)}</SelectContent></Select>}
+          {selectedOrder && <Select value={selectedItemId} onValueChange={handleSelectItem}><SelectTrigger><SelectValue placeholder="Selecione o item" /></SelectTrigger><SelectContent>{selectedOrder.items.map(item => <SelectItem key={item.id} value={item.id}>{item.code ? `${item.code} — ${item.description}` : item.description}</SelectItem>)}</SelectContent></Select>}
           {selectedItemId && <Select value={selectedStage} onValueChange={setSelectedStage}><SelectTrigger><SelectValue placeholder="Selecione a etapa" /></SelectTrigger><SelectContent>{availableStages.map(stage => <SelectItem key={stage.stageName} value={stage.stageName}>{stage.stageName}</SelectItem>)}</SelectContent></Select>}
           <Button className="w-full" size="lg" onClick={handleOpen} disabled={loading}>{loading ? "Iniciando..." : "Iniciar apontamento"}</Button>
         </>}
@@ -244,7 +244,7 @@ export default function AbrirApontamentoPage() {
           {loadingAppointments ? <p className="py-5 text-center text-muted-foreground">Buscando apontamentos...</p> : activeAppointments.length === 0 ? <p className="rounded-lg border border-dashed py-8 text-center text-muted-foreground">Nenhum apontamento aberto ou pausado nesta OS.</p> : activeAppointments.map(appointment => {
             const seconds = (Number(appointment.accumulatedSeconds) || 0) + currentSeconds(appointment);
             return <div key={appointment.id} className="space-y-3 rounded-lg border p-4">
-              <div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{appointment.stageName}</p><p className="text-sm text-muted-foreground">{appointment.itemDescription}</p><p className="mt-1 text-xs text-muted-foreground">Operador: {appointment.operatorName}</p></div><span className={appointment.status === 'Aberto' ? 'rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700' : 'rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700'}>{appointment.status}</span></div>
+              <div className="flex items-start justify-between gap-3"><div><p className="font-semibold">{appointment.stageName}</p><p className="text-sm text-muted-foreground">{(() => { const code = appointment.itemCode || selectedOrder?.items.find(item => item.id === appointment.itemId)?.code; return code ? `${code} — ${appointment.itemDescription}` : appointment.itemDescription; })()}</p><p className="mt-1 text-xs text-muted-foreground">Operador: {appointment.operatorName}</p></div><span className={appointment.status === 'Aberto' ? 'rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-700' : 'rounded-full bg-amber-100 px-2 py-1 text-xs font-medium text-amber-700'}>{appointment.status}</span></div>
               <div className="rounded-md bg-muted p-3 text-center"><p className="text-xs text-muted-foreground">Tempo acumulado</p><p className="font-mono text-2xl font-bold">{formatDuration(seconds)}</p></div>
               <div className="grid grid-cols-2 gap-2">{appointment.status === 'Aberto' ? <Button variant="outline" disabled={savingAppointmentId === appointment.id} onClick={() => pauseAppointment(appointment)}>Pausar</Button> : <Button variant="outline" disabled={savingAppointmentId === appointment.id} onClick={() => resumeAppointment(appointment)}>Retomar</Button>}<Button variant="destructive" disabled={savingAppointmentId === appointment.id} onClick={() => closeAppointment(appointment)}>Encerrar</Button></div>
             </div>;
