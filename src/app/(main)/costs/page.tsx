@@ -678,6 +678,10 @@ export default function CostsPage() {
     const [costCenters, setCostCenters] = useState<ProductionCostCenter[]>([]);
     const [costCenterDrafts, setCostCenterDrafts] = useState<Record<string, string>>({});
     const [isSavingCostCenters, setIsSavingCostCenters] = useState(false);
+    const [isCostCenterDialogOpen, setIsCostCenterDialogOpen] = useState(false);
+    const [newCostCenterName, setNewCostCenterName] = useState('');
+    const [newCostCenterRate, setNewCostCenterRate] = useState('');
+    const [isCreatingCostCenter, setIsCreatingCostCenter] = useState(false);
     const [appointmentSearch, setAppointmentSearch] = useState('');
     const [selectedAppointmentOS, setSelectedAppointmentOS] = useState('');
     const [editingAppointment, setEditingAppointment] = useState<ProductionAppointment | null>(null);
@@ -1077,7 +1081,14 @@ export default function CostsPage() {
         link.click();
     };
 
-    const appointmentSectors = useMemo(() => [...PRODUCTION_SECTORS], []);
+    const appointmentSectors = useMemo(() => {
+        const sectors = new Map<string, string>();
+        [...PRODUCTION_SECTORS, ...costCenters.map(center => center.sectorName)].forEach(sector => {
+            const name = String(sector || '').trim();
+            if (name) sectors.set(costCenterId(name), name);
+        });
+        return Array.from(sectors.values()).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+    }, [costCenters]);
 
     const appointmentOrderGroups = useMemo(() => {
         const search = appointmentSearch.trim().toLocaleLowerCase('pt-BR');
@@ -1114,6 +1125,58 @@ export default function CostsPage() {
             console.error('Erro ao salvar centros de custo:', error);
             toast({ variant: 'destructive', title: 'Erro ao salvar centros de custo' });
         } finally { setIsSavingCostCenters(false); }
+    };
+
+    const createCostCenter = async () => {
+        const sectorName = newCostCenterName.trim();
+        const normalizedRate = newCostCenterRate.trim().replace(',', '.');
+        const hourlyRate = Number(normalizedRate);
+
+        if (!sectorName) {
+            toast({ variant: 'destructive', title: 'Informe o nome do centro de custo' });
+            return;
+        }
+        if (normalizedRate === '' || !Number.isFinite(hourlyRate) || hourlyRate < 0) {
+            toast({ variant: 'destructive', title: 'Informe um valor por hora válido' });
+            return;
+        }
+
+        const newId = costCenterId(sectorName);
+        if (!newId) {
+            toast({ variant: 'destructive', title: 'Nome de centro de custo inválido' });
+            return;
+        }
+        if (appointmentSectors.some(existing => costCenterId(existing) === newId)) {
+            toast({
+                variant: 'destructive',
+                title: 'Centro de custo já cadastrado',
+                description: 'Edite o valor diretamente na lista de centros de custo.',
+            });
+            return;
+        }
+
+        setIsCreatingCostCenter(true);
+        try {
+            await setDoc(doc(db, "companies", "mecald", "productionCostCenters", newId), {
+                sectorName,
+                hourlyRate,
+                createdAt: Timestamp.now(),
+                lastUpdate: Timestamp.now(),
+            });
+            await fetchCostCenters();
+            setNewCostCenterName('');
+            setNewCostCenterRate('');
+            setIsCostCenterDialogOpen(false);
+            toast({
+                title: 'Centro de custo cadastrado',
+                description: `${sectorName} foi cadastrado com o valor de ${hourlyRate.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/h.`,
+            });
+        } catch (error) {
+            console.error('Erro ao cadastrar centro de custo:', error);
+            toast({ variant: 'destructive', title: 'Erro ao cadastrar centro de custo' });
+        } finally {
+            setIsCreatingCostCenter(false);
+        }
     };
 
     const openAppointmentEdit = (appointment: ProductionAppointment) => {
@@ -3503,9 +3566,15 @@ export default function CostsPage() {
                             <CardTitle>Centros de custo por setor</CardTitle>
                             <CardDescription>Defina o custo horário. O custo do apontamento será: horas trabalhadas × R$/h da etapa.</CardDescription>
                         </div>
-                        <Button onClick={saveCostCenters} disabled={isSavingCostCenters}>
-                            {isSavingCostCenters ? 'Salvando...' : 'Salvar centros de custo'}
-                        </Button>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Button variant="outline" onClick={() => setIsCostCenterDialogOpen(true)}>
+                                <PlusCircle className="mr-2 h-4 w-4" />
+                                Cadastrar centro de custo
+                            </Button>
+                            <Button onClick={saveCostCenters} disabled={isSavingCostCenters}>
+                                {isSavingCostCenters ? 'Salvando...' : 'Salvar centros de custo'}
+                            </Button>
+                        </div>
                     </CardHeader>
                     <CardContent className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                         {appointmentSectors.map(sector => (
@@ -3519,6 +3588,65 @@ export default function CostsPage() {
                         ))}
                     </CardContent>
                 </Card>
+
+                <Dialog
+                    open={isCostCenterDialogOpen}
+                    onOpenChange={open => {
+                        setIsCostCenterDialogOpen(open);
+                        if (!open && !isCreatingCostCenter) {
+                            setNewCostCenterName('');
+                            setNewCostCenterRate('');
+                        }
+                    }}
+                >
+                    <DialogContent className="sm:max-w-md">
+                        <DialogHeader>
+                            <DialogTitle>Cadastrar centro de custo</DialogTitle>
+                            <DialogDescription>
+                                Informe o setor e o respectivo custo por hora. O novo centro ficará disponível para vinculação às etapas de fabricação.
+                            </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4 py-2">
+                            <div className="space-y-2">
+                                <Label htmlFor="new-cost-center-name">Nome do setor</Label>
+                                <Input
+                                    id="new-cost-center-name"
+                                    value={newCostCenterName}
+                                    onChange={event => setNewCostCenterName(event.target.value)}
+                                    placeholder="Ex.: Caldeiraria"
+                                    autoFocus
+                                />
+                            </div>
+                            <div className="space-y-2">
+                                <Label htmlFor="new-cost-center-rate">Custo por hora (R$/h)</Label>
+                                <div className="relative">
+                                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">R$</span>
+                                    <Input
+                                        id="new-cost-center-rate"
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        className="pl-9"
+                                        value={newCostCenterRate}
+                                        onChange={event => setNewCostCenterRate(event.target.value)}
+                                        onKeyDown={event => {
+                                            if (event.key === 'Enter') createCostCenter();
+                                        }}
+                                        placeholder="0,00"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setIsCostCenterDialogOpen(false)} disabled={isCreatingCostCenter}>
+                                Cancelar
+                            </Button>
+                            <Button onClick={createCostCenter} disabled={isCreatingCostCenter}>
+                                {isCreatingCostCenter ? 'Cadastrando...' : 'Cadastrar'}
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
 
                 <Card>
                     <CardHeader>
