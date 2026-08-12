@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, arrayRemove, getDoc } from "firebase/firestore";
+import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
     import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package, BookOpen, ShieldAlert, Upload, User, Hash, Save, ImagePlus, X } from "lucide-react";
 import { useAuth } from "../layout";
@@ -88,6 +88,18 @@ interface ManufacturingPlan {
   createdBy?: string;
   generalNotes?: string;
   tasks: PlanTask[];
+}
+
+interface CostCenter {
+  id: string;
+  sectorName: string;
+  hourlyRate: number;
+}
+
+interface ManufacturingStage {
+  name: string;
+  costCenterId: string;
+  costCenterName?: string;
 }
 
 type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
@@ -544,9 +556,12 @@ export default function ProductsPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   
-  const [manufacturingStages, setManufacturingStages] = useState<string[]>([]);
+  const [manufacturingStages, setManufacturingStages] = useState<ManufacturingStage[]>([]);
   const [isLoadingStages, setIsLoadingStages] = useState(true);
   const [newStageName, setNewStageName] = useState("");
+  const [costCenters, setCostCenters] = useState<CostCenter[]>([]);
+  const [isLoadingCostCenters, setIsLoadingCostCenters] = useState(true);
+  const [newStageCostCenterId, setNewStageCostCenterId] = useState("");
   const [activeTab, setActiveTab] = useState("catalog");
 
   // ─── NOVO: conjunto de códigos com precificação salva ───────────────────────
@@ -654,7 +669,7 @@ export default function ProductsPage() {
   const simulateSectorWorkload = useCallback(() => {
     const workload: Record<string, number> = {};
     manufacturingStages.forEach(stage => {
-      workload[stage] = Math.random() * 0.95;
+      workload[stage.name] = Math.random() * 0.95;
     });
     setSectorWorkload(workload);
   }, [manufacturingStages]);
@@ -669,11 +684,12 @@ export default function ProductsPage() {
   const [copyFromSearch, setCopyFromSearch] = useState("");
 
   const [isEditStageDialogOpen, setIsEditStageDialogOpen] = useState(false);
-  const [stageToEdit, setStageToEdit] = useState<{ oldName: string; index: number } | null>(null);
+  const [stageToEdit, setStageToEdit] = useState<{ oldStage: ManufacturingStage; index: number } | null>(null);
   const [newStageNameForEdit, setNewStageNameForEdit] = useState("");
+  const [newStageCostCenterIdForEdit, setNewStageCostCenterIdForEdit] = useState("");
   
   const [isDeleteStageDialogOpen, setIsDeleteStageDialogOpen] = useState(false);
-  const [stageToDeleteConfirmation, setStageToDeleteConfirmation] = useState<string | null>(null);
+  const [stageToDeleteConfirmation, setStageToDeleteConfirmation] = useState<ManufacturingStage | null>(null);
 
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [draggedOverIndex, setDraggedOverIndex] = useState<number | null>(null);
@@ -705,12 +721,40 @@ export default function ProductsPage() {
 
   const stagesDocRef = useMemo(() => doc(db, "companies", "mecald", "settings", "manufacturingStages"), []);
 
+  const fetchCostCenters = useCallback(async () => {
+    setIsLoadingCostCenters(true);
+    try {
+      const snap = await getDocs(collection(db, "companies", "mecald", "productionCostCenters"));
+      const centers = snap.docs.map(centerDoc => ({
+        id: centerDoc.id,
+        sectorName: String(centerDoc.data().sectorName || centerDoc.id),
+        hourlyRate: Number(centerDoc.data().hourlyRate) || 0,
+      })).sort((a, b) => a.sectorName.localeCompare(b.sectorName, "pt-BR"));
+      setCostCenters(centers);
+    } catch (error) {
+      console.error("Error fetching cost centers:", error);
+      toast({ variant: "destructive", title: "Erro ao buscar centros de custo" });
+      setCostCenters([]);
+    } finally {
+      setIsLoadingCostCenters(false);
+    }
+  }, [toast]);
+
   const fetchStages = useCallback(async () => {
     setIsLoadingStages(true);
     try {
         const docSnap = await getDoc(stagesDocRef);
         if (docSnap.exists() && Array.isArray(docSnap.data().stages)) {
-            setManufacturingStages(docSnap.data().stages);
+            const normalized: ManufacturingStage[] = docSnap.data().stages
+              .map((stage: any) => typeof stage === "string"
+                ? { name: stage, costCenterId: "", costCenterName: "" }
+                : {
+                    name: String(stage?.name || "").trim(),
+                    costCenterId: String(stage?.costCenterId || ""),
+                    costCenterName: String(stage?.costCenterName || ""),
+                  })
+              .filter((stage: ManufacturingStage) => Boolean(stage.name));
+            setManufacturingStages(normalized);
         } else {
             setManufacturingStages([]);
         }
@@ -733,19 +777,36 @@ export default function ProductsPage() {
         });
         return;
     }
+    if (!newStageCostCenterId) {
+      toast({
+        variant: "destructive",
+        title: "Centro de custo obrigatório",
+        description: "Selecione a qual centro de custo esta etapa pertence.",
+      });
+      return;
+    }
+    if (manufacturingStages.some(stage => stage.name.toLowerCase() === stageToAdd.toLowerCase())) {
+      toast({ variant: "destructive", title: "Etapa já existe" });
+      return;
+    }
+    const selectedCenter = costCenters.find(center => center.id === newStageCostCenterId);
     try {
-      await setDoc(stagesDocRef, {
-        stages: arrayUnion(stageToAdd)
-      }, { merge: true });
+      const updatedStages = [...manufacturingStages, {
+        name: stageToAdd,
+        costCenterId: newStageCostCenterId,
+        costCenterName: selectedCenter?.sectorName || "",
+      }];
+      await setDoc(stagesDocRef, { stages: updatedStages }, { merge: true });
       
       setNewStageName("");
+      setNewStageCostCenterId("");
       toast({ title: "Etapa adicionada!" });
       await fetchStages();
     } catch (error) {
       console.error("Error adding stage:", error);
       toast({ variant: "destructive", title: "Erro ao adicionar etapa" });
     }
-  }, [newStageName, stagesDocRef, fetchStages, toast]);
+  }, [newStageName, newStageCostCenterId, manufacturingStages, costCenters, stagesDocRef, fetchStages, toast]);
 
   const fetchProducts = useCallback(async () => {
     setIsLoading(true);
@@ -1281,8 +1342,9 @@ export default function ProductsPage() {
       fetchSavedPricingCodes();
       fetchPlanCreators();
       fetchSavedPlanDrawings();
+      fetchCostCenters();
     }
-  }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials, fetchSavedPricingCodes, fetchPlanCreators, fetchSavedPlanDrawings]);
+  }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials, fetchSavedPricingCodes, fetchPlanCreators, fetchSavedPlanDrawings, fetchCostCenters]);
   
   const syncCatalog = useCallback(async () => {
     setIsSyncing(true);
@@ -1565,10 +1627,10 @@ export default function ProductsPage() {
   }, [draggedIndex, manufacturingStages, stagesDocRef, fetchStages, toast]);
 
   const DraggableStageItem = ({ stage, index, onEdit, onDelete, isDragging }: {
-    stage: string;
+    stage: ManufacturingStage;
     index: number;
-    onEdit: (stage: string, index: number) => void;
-    onDelete: (stage: string) => void;
+    onEdit: (stage: ManufacturingStage, index: number) => void;
+    onDelete: (stage: ManufacturingStage) => void;
     isDragging: boolean;
   }) => {
     return (
@@ -1586,7 +1648,14 @@ export default function ProductsPage() {
       >
         <div className="flex items-center gap-3">
           <GripVertical className="h-4 w-4 text-muted-foreground cursor-grab active:cursor-grabbing" />
-          <span className="font-medium">{stage}</span>
+          <span className="font-medium">{stage.name}</span>
+          {stage.costCenterId ? (
+            <Badge variant="outline" className="text-xs">
+              {stage.costCenterName || costCenters.find(center => center.id === stage.costCenterId)?.sectorName || "Centro vinculado"}
+            </Badge>
+          ) : (
+            <Badge variant="destructive" className="text-xs">Sem centro de custo</Badge>
+          )}
         </div>
         <div className="flex items-center gap-1">
           <Button variant="ghost" size="icon" onClick={() => onEdit(stage, index)}>
@@ -1605,23 +1674,24 @@ export default function ProductsPage() {
     );
   };
 
-  const handleEditStageClick = (stageName: string, index: number) => {
-    setStageToEdit({ oldName: stageName, index });
-    setNewStageNameForEdit(stageName);
+  const handleEditStageClick = (stage: ManufacturingStage, index: number) => {
+    setStageToEdit({ oldStage: stage, index });
+    setNewStageNameForEdit(stage.name);
+    setNewStageCostCenterIdForEdit(stage.costCenterId || "");
     setIsEditStageDialogOpen(true);
   };
 
   const handleConfirmEditStage = async () => {
-    if (!stageToEdit || !newStageNameForEdit.trim()) return;
-
-    const oldName = stageToEdit.oldName;
-    const newName = newStageNameForEdit.trim();
-
-    if (oldName === newName) {
-        setIsEditStageDialogOpen(false);
+    if (!stageToEdit || !newStageNameForEdit.trim() || !newStageCostCenterIdForEdit) {
+        toast({ variant: "destructive", title: "Preencha nome e centro de custo" });
         return;
     }
-    if (manufacturingStages.some((stage, index) => stage.toLowerCase() === newName.toLowerCase() && index !== stageToEdit.index)) {
+
+    const oldName = stageToEdit.oldStage.name;
+    const newName = newStageNameForEdit.trim();
+    const selectedCenter = costCenters.find(center => center.id === newStageCostCenterIdForEdit);
+
+    if (manufacturingStages.some((stage, index) => stage.name.toLowerCase() === newName.toLowerCase() && index !== stageToEdit.index)) {
         toast({ variant: "destructive", title: "Nome duplicado", description: "Esta etapa já existe." });
         return;
     }
@@ -1629,12 +1699,16 @@ export default function ProductsPage() {
     try {
         const batch = writeBatch(db);
         const updatedStages = [...manufacturingStages];
-        updatedStages[stageToEdit.index] = newName;
+        updatedStages[stageToEdit.index] = {
+          name: newName,
+          costCenterId: newStageCostCenterIdForEdit,
+          costCenterName: selectedCenter?.sectorName || "",
+        };
         batch.update(stagesDocRef, { stages: updatedStages });
 
-        const productsToUpdate = products.filter(p =>
+        const productsToUpdate = oldName !== newName ? products.filter(p =>
             p.productionPlanTemplate?.some(stage => stage.stageName === oldName)
-        );
+        ) : [];
 
         for (const product of productsToUpdate) {
             const productRef = doc(db, "companies", "mecald", "products", product.id);
@@ -1650,6 +1724,7 @@ export default function ProductsPage() {
         setIsEditStageDialogOpen(false);
         setStageToEdit(null);
         setNewStageNameForEdit("");
+        setNewStageCostCenterIdForEdit("");
         await fetchStages();
         await fetchProducts();
 
@@ -1659,8 +1734,8 @@ export default function ProductsPage() {
     }
   };
   
-  const handleDeleteStageClick = (stageName: string) => {
-      setStageToDeleteConfirmation(stageName);
+  const handleDeleteStageClick = (stage: ManufacturingStage) => {
+      setStageToDeleteConfirmation(stage);
       setIsDeleteStageDialogOpen(true);
   };
 
@@ -1669,16 +1744,17 @@ export default function ProductsPage() {
     
     try {
         const batch = writeBatch(db);
-        batch.update(stagesDocRef, { stages: arrayRemove(stageToDeleteConfirmation) });
+        const updatedStages = manufacturingStages.filter(stage => stage.name !== stageToDeleteConfirmation.name);
+        batch.update(stagesDocRef, { stages: updatedStages });
 
         const productsToUpdate = products.filter(p =>
-            p.productionPlanTemplate?.some(stage => stage.stageName === stageToDeleteConfirmation)
+            p.productionPlanTemplate?.some(stage => stage.stageName === stageToDeleteConfirmation.name)
         );
 
         for (const product of productsToUpdate) {
             const productRef = doc(db, "companies", "mecald", "products", product.id);
             const updatedPlan = product.productionPlanTemplate!.filter(
-                stage => stage.stageName !== stageToDeleteConfirmation
+                stage => stage.stageName !== stageToDeleteConfirmation.name
             );
             batch.update(productRef, { productionPlanTemplate: updatedPlan });
         }
@@ -1694,6 +1770,34 @@ export default function ProductsPage() {
         toast({ variant: "destructive", title: "Erro ao remover etapa" });
     }
   };
+
+  const migrateStagesToCostCenters = useCallback(async () => {
+    try {
+      const migrated = manufacturingStages.map(stage => {
+        if (stage.costCenterId) return stage;
+        const match = costCenters.find(center =>
+          center.sectorName.localeCompare(stage.name, "pt-BR", { sensitivity: "base" }) === 0
+        );
+        return match
+          ? { ...stage, costCenterId: match.id, costCenterName: match.sectorName }
+          : stage;
+      });
+      const linkedCount = migrated.filter((stage, index) =>
+        !manufacturingStages[index].costCenterId && Boolean(stage.costCenterId)
+      ).length;
+      await setDoc(stagesDocRef, { stages: migrated }, { merge: true });
+      toast({
+        title: "Vinculação concluída!",
+        description: linkedCount > 0
+          ? `${linkedCount} etapa(s) foram vinculadas automaticamente.`
+          : "Nenhuma correspondência nova foi encontrada.",
+      });
+      await fetchStages();
+    } catch (error) {
+      console.error("Error migrating stages to cost centers:", error);
+      toast({ variant: "destructive", title: "Erro na vinculação automática" });
+    }
+  }, [manufacturingStages, costCenters, stagesDocRef, fetchStages, toast]);
 
   const leadTimeStats = useMemo(() => {
     if (products.length === 0) return { avgLeadTime: 0, maxLeadTime: 0, productsWithLeadTime: 0 };
@@ -2450,18 +2554,47 @@ export default function ProductsPage() {
                         </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-6">
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-col md:flex-row items-stretch md:items-center gap-2">
                             <Input 
                                 placeholder="Nome da nova etapa (ex: Solda, Pintura)"
                                 value={newStageName}
                                 onChange={(e) => setNewStageName(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && handleAddStage()}
+                                className="md:flex-1"
                             />
+                            <Select value={newStageCostCenterId} onValueChange={setNewStageCostCenterId} disabled={isLoadingCostCenters}>
+                                <SelectTrigger className="md:w-72">
+                                    <SelectValue placeholder={isLoadingCostCenters ? "Carregando centros..." : "Vincular centro de custo"} />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    {costCenters.map(center => (
+                                        <SelectItem key={center.id} value={center.id}>
+                                            {center.sectorName} — R$ {center.hourlyRate.toFixed(2)}/h
+                                        </SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
                             <Button onClick={handleAddStage}>
                                 <PlusCircle className="mr-2 h-4 w-4" />
                                 Adicionar Etapa
                             </Button>
                         </div>
+                        {!isLoadingCostCenters && costCenters.length === 0 && (
+                            <p className="text-xs text-destructive">
+                                Nenhum centro de custo cadastrado. Cadastre-o em Centro de Custos → Apontamentos → Centros de custo por setor.
+                            </p>
+                        )}
+
+                        {manufacturingStages.some(stage => !stage.costCenterId) && (
+                            <div className="flex flex-col gap-3 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800 md:flex-row md:items-center md:justify-between">
+                                <span>
+                                    ⚠️ {manufacturingStages.filter(stage => !stage.costCenterId).length} etapa(s) sem centro de custo vinculado. Edite-as pelo lápis ou tente a vinculação por nome.
+                                </span>
+                                <Button type="button" variant="outline" size="sm" onClick={migrateStagesToCostCenters} disabled={costCenters.length === 0}>
+                                    Vincular automaticamente
+                                </Button>
+                            </div>
+                        )}
                         
                         <Separator />
                         
@@ -2485,7 +2618,7 @@ export default function ProductsPage() {
                                     <div className="space-y-2">
                                         {manufacturingStages.map((stage, index) => (
                                             <DraggableStageItem
-                                                key={`${stage}-${index}`}
+                                                key={`${stage.name}-${index}`}
                                                 stage={stage}
                                                 index={index}
                                                 onEdit={handleEditStageClick}
@@ -2533,15 +2666,15 @@ export default function ProductsPage() {
                                 <h4 className="text-sm font-medium mb-3">Carga Atual dos Setores</h4>
                                 <div className="grid gap-2">
                                     {manufacturingStages.map(stage => {
-                                        const workload = sectorWorkload[stage] || 0;
+                                        const workload = sectorWorkload[stage.name] || 0;
                                         const percentage = Math.round(workload * 100);
                                         let colorClass = "bg-green-500";
                                         if (percentage > 80) colorClass = "bg-red-500";
                                         else if (percentage > 60) colorClass = "bg-yellow-500";
                                         
                                         return (
-                                            <div key={stage} className="flex items-center gap-3">
-                                                <span className="text-sm font-medium w-24 truncate">{stage}</span>
+                                            <div key={stage.name} className="flex items-center gap-3">
+                                                <span className="text-sm font-medium w-24 truncate" title={stage.costCenterName || stage.name}>{stage.name}</span>
                                                 <div className="flex-1 bg-muted rounded-full h-2">
                                                     <div 
                                                         className={`h-2 rounded-full transition-all ${colorClass}`}
@@ -2861,8 +2994,13 @@ export default function ProductsPage() {
                                     </p>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                         {manufacturingStages.map(stage => (
-                                            <div key={stage}>
-                                                <Label className="text-xs">{stage}</Label>
+                                            <div key={stage.name}>
+                                                <Label className="text-xs">
+                                                    {stage.name}
+                                                    {stage.costCenterId && (
+                                                        <span className="ml-2 text-muted-foreground">({stage.costCenterName || "Centro vinculado"})</span>
+                                                    )}
+                                                </Label>
                                                 <div className="relative">
                                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                                                         R$
@@ -2872,10 +3010,10 @@ export default function ProductsPage() {
                                                         step="0.01"
                                                         placeholder="0.00"
                                                         className="pl-8"
-                                                        value={stageCosts[stage] || ''}
+                                                        value={stageCosts[stage.name] || ''}
                                                         onChange={(e) => setStageCosts(prev => ({
                                                             ...prev,
-                                                            [stage]: Number(e.target.value)
+                                                            [stage.name]: Number(e.target.value)
                                                         }))}
                                                     />
                                                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
@@ -4408,7 +4546,8 @@ export default function ProductsPage() {
                             )}
                             
                             <div className="space-y-3">
-                                {manufacturingStages.map((stageName) => {
+                                {manufacturingStages.map((stage) => {
+                                    const stageName = stage.name;
                                     const currentStage = field.value?.find(p => p.stageName === stageName);
                                     const isChecked = !!currentStage;
 
@@ -4421,11 +4560,18 @@ export default function ProductsPage() {
                                                     const newValue = checked
                                                         ? [...(field.value || []), { stageName: stageName, durationDays: 0 }]
                                                         : (field.value || []).filter(p => p.stageName !== stageName);
-                                                    field.onChange(newValue.sort((a,b) => manufacturingStages.indexOf(a.stageName) - manufacturingStages.indexOf(b.stageName)));
+                                                    const stageOrder = new Map(manufacturingStages.map((item, index) => [item.name, index]));
+                                                    field.onChange(newValue.sort((a, b) =>
+                                                        (stageOrder.get(a.stageName) ?? Number.MAX_SAFE_INTEGER)
+                                                        - (stageOrder.get(b.stageName) ?? Number.MAX_SAFE_INTEGER)
+                                                    ));
                                                 }}
                                             />
                                             <Label htmlFor={`stage-checkbox-${stageName}`} className="flex-1 font-normal cursor-pointer">
                                                 {stageName}
+                                                {stage.costCenterId && (
+                                                    <span className="ml-2 text-xs text-muted-foreground">({stage.costCenterName || "Centro vinculado"})</span>
+                                                )}
                                             </Label>
                                             {isChecked && (
                                              <div className="flex items-center gap-2">
@@ -4491,17 +4637,32 @@ export default function ProductsPage() {
             <DialogHeader>
                 <DialogTitle>Editar Etapa de Fabricação</DialogTitle>
                 <DialogDescription>
-                    Alterar o nome aqui atualizará a etapa em todos os produtos que a utilizam.
+                    Alterar o nome ou o centro de custo atualiza a etapa e mantém os produtos relacionados consistentes.
                 </DialogDescription>
             </DialogHeader>
-            <div className="py-4">
-                <Label htmlFor="edit-stage-name">Novo Nome da Etapa</Label>
-                <Input 
-                    id="edit-stage-name"
-                    value={newStageNameForEdit}
-                    onChange={(e) => setNewStageNameForEdit(e.target.value)}
-                    className="mt-2"
-                />
+            <div className="py-4 space-y-4">
+                <div>
+                    <Label htmlFor="edit-stage-name">Nome da Etapa</Label>
+                    <Input 
+                        id="edit-stage-name"
+                        value={newStageNameForEdit}
+                        onChange={(e) => setNewStageNameForEdit(e.target.value)}
+                        className="mt-2"
+                    />
+                </div>
+                <div>
+                    <Label>Centro de Custo</Label>
+                    <Select value={newStageCostCenterIdForEdit} onValueChange={setNewStageCostCenterIdForEdit}>
+                        <SelectTrigger className="mt-2"><SelectValue placeholder="Selecione o centro de custo" /></SelectTrigger>
+                        <SelectContent>
+                            {costCenters.map(center => (
+                                <SelectItem key={center.id} value={center.id}>
+                                    {center.sectorName} — R$ {center.hourlyRate.toFixed(2)}/h
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
             </div>
             <DialogFooter>
                 <Button variant="outline" onClick={() => setIsEditStageDialogOpen(false)}>Cancelar</Button>
@@ -4515,7 +4676,7 @@ export default function ProductsPage() {
             <AlertDialogHeader>
                 <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
                 <AlertDialogDescription>
-                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation}</span> da lista e de todos os produtos que a utilizam. Esta ação não pode ser desfeita.
+                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation?.name}</span> da lista e de todos os produtos que a utilizam. Esta ação não pode ser desfeita.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
