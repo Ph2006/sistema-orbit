@@ -140,60 +140,15 @@ const getLeadTimeBadge = (leadTime: number) => {
     interface StageCostItem {
     stageName: string;
     durationDays: number;
-    costMethod: 'hour' | 'kg';
-    unitRate: number;
-    calculatedQuantity: number;
-    calculatedUnit: 'h' | 'kg';
-    // Mantido para compatibilidade com precificações antigas.
     costPerDay: number;
     totalCost: number;
     }
-
-    const normalizeStageName = (value: string): string => value
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim();
-
-    const HOURLY_COST_STAGES = new Set([
-      'listagem de materia prima',
-      'compra de materia prima',
-      'recebimento de materia prima',
-      'preparacao',
-      'montagem',
-      'controle dimensional de montagem',
-      'soldagem',
-      'ensaio visual de solda',
-      'desempeno',
-      'acabamento para ensaio de lp',
-      'ensaio de lp',
-      'usinagem',
-      'furacao',
-      'pre montagem dos componentes',
-      'acabamento final',
-      'jateamento',
-      'inspecao em jato',
-      'pintura de fundo',
-      'inspecao de pintura',
-      'pintura de acabamento',
-      'montagem mecanica final',
-      'controle final',
-      'embalagem para expedicao',
-      'expedicao',
-    ]);
-
-    const usesHourlyStageCost = (stageName: string): boolean => {
-      const normalizedName = normalizeStageName(stageName);
-      return normalizedName.startsWith('engenharia do produto') || HOURLY_COST_STAGES.has(normalizedName);
-    };
 
     interface PricingCalculation {
     productId: string;
     productCode: string;
     productDescription: string;
     productWeight: number;
-    normalWorkdayHours?: number;
     materialCosts: MaterialCompositionItem[];
     stageCosts: StageCostItem[];
     machiningCost: number;
@@ -630,7 +585,6 @@ export default function ProductsPage() {
 
     // Estados da calculadora de preços
     const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
-    const [normalWorkdayHours, setNormalWorkdayHours] = useState<number>(8.5);
     const [machineHourRate, setMachineHourRate] = useState<number>(150);
     const [consumablesCostPerKg, setConsumablesCostPerKg] = useState<number>(0);
     const [selectedProductForPricing, setSelectedProductForPricing] = useState<Product | null>(null);
@@ -979,13 +933,10 @@ export default function ProductsPage() {
       );
       setStageCosts((sourceData.stageCosts || []).reduce((result, stage) => ({
         ...result,
-        [stage.stageName]: Number(stage.unitRate ?? stage.costPerDay) || (
-          !usesHourlyStageCost(stage.stageName) && copiedWeight > 0
-            ? (Number(stage.totalCost) || 0) / copiedWeight
-            : 0
-        ),
+        [stage.stageName]: copiedWeight > 0
+          ? (Number(stage.totalCost) || 0) / copiedWeight
+          : Number(stage.costPerDay) || 0,
       }), {} as Record<string, number>));
-      setNormalWorkdayHours(Number(sourceData.normalWorkdayHours) > 0 ? Number(sourceData.normalWorkdayHours) : 8.5);
 
       if ((sourceData.machiningHours || 0) > 0) {
         setMachineHourRate((Number(sourceData.machiningCost) || 0) / Number(sourceData.machiningHours));
@@ -2267,7 +2218,6 @@ export default function ProductsPage() {
         const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
         await setDoc(costsRef, { 
             costs: stageCosts, 
-            normalWorkdayHours,
             machineHourRate,
             consumablesCostPerKg
         }, { merge: true });
@@ -2276,7 +2226,7 @@ export default function ProductsPage() {
         console.error("Error saving stage costs:", error);
         toast({ variant: "destructive", title: "Erro ao salvar custos" });
         }
-    }, [stageCosts, normalWorkdayHours, machineHourRate, consumablesCostPerKg, toast]);
+    }, [stageCosts, machineHourRate, consumablesCostPerKg, toast]);
 
     const loadStageCosts = useCallback(async () => {
         try {
@@ -2285,7 +2235,6 @@ export default function ProductsPage() {
         if (docSnap.exists()) {
             const data = docSnap.data();
             setStageCosts(data.costs || {});
-            setNormalWorkdayHours(Number(data.normalWorkdayHours) > 0 ? Number(data.normalWorkdayHours) : 8.5);
             setMachineHourRate(data.machineHourRate || 150);
             setConsumablesCostPerKg(data.consumablesCostPerKg || 0);
         }
@@ -2835,7 +2784,7 @@ export default function ProductsPage() {
                             <CardContent className="space-y-4">
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     <div>
-                                        <Label>Valor da Hora-Máquina do Equipamento (R$)</Label>
+                                        <Label>Valor da Hora Máquina (R$)</Label>
                                         <Input
                                             type="number"
                                             value={machineHourRate}
@@ -2843,7 +2792,7 @@ export default function ProductsPage() {
                                             placeholder="150.00"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            Custo adicional do equipamento; não substitui a taxa R$/h da etapa de usinagem
+                                            Usado para calcular custos de usinagem
                                         </p>
                                     </div>
                                     <div>
@@ -2906,35 +2855,14 @@ export default function ProductsPage() {
                                 <Separator />
 
                                 <div>
-                                    <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between mb-3">
-                                        <div>
-                                            <h4 className="text-sm font-medium">Custos das Etapas (R$/h ou R$/kg)</h4>
-                                            <p className="text-xs text-muted-foreground mt-1">
-                                                Etapas operacionais selecionadas usam o lead time em horas; as demais continuam pelo peso do produto.
-                                            </p>
-                                        </div>
-                                        <div className="w-full sm:w-52">
-                                            <Label className="text-xs">Jornada normal (h/dia)</Label>
-                                            <Input
-                                                type="number"
-                                                min="0.01"
-                                                step="0.25"
-                                                value={normalWorkdayHours}
-                                                onChange={(e) => setNormalWorkdayHours(Number(e.target.value))}
-                                            />
-                                        </div>
-                                    </div>
+                                    <h4 className="text-sm font-medium mb-3">Custo por Kg de Cada Etapa (R$/kg)</h4>
+                                    <p className="text-xs text-muted-foreground mb-3">
+                                        💡 Defina quanto custa cada etapa por quilograma do produto. O sistema multiplicará pelo peso total automaticamente.
+                                    </p>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                                        {manufacturingStages.map(stage => {
-                                            const isHourly = usesHourlyStageCost(stage);
-                                            return (
-                                            <div key={stage} className={cn("rounded-md", isHourly && "ring-1 ring-blue-500/20")}>
-                                                <div className="flex items-center justify-between gap-2">
-                                                    <Label className="text-xs">{stage}</Label>
-                                                    <Badge variant={isHourly ? "default" : "secondary"} className="text-[10px] h-5">
-                                                        {isHourly ? 'R$/h' : 'R$/kg'}
-                                                    </Badge>
-                                                </div>
+                                        {manufacturingStages.map(stage => (
+                                            <div key={stage}>
+                                                <Label className="text-xs">{stage}</Label>
                                                 <div className="relative">
                                                     <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
                                                         R$
@@ -2951,23 +2879,20 @@ export default function ProductsPage() {
                                                         }))}
                                                     />
                                                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                                                        {isHourly ? '/h' : '/kg'}
+                                                        /kg
                                                     </span>
                                                 </div>
                                             </div>
-                                        )})}
+                                        ))}
                                     </div>
                                     
                                     <div className="mt-3 p-3 bg-muted rounded-md text-xs space-y-1">
-                                        <div className="font-medium">Exemplos do modelo híbrido:</div>
+                                        <div className="font-medium">Exemplo de cálculo:</div>
                                         <div className="text-muted-foreground">
-                                            Etapa horária: 2 dias × {normalWorkdayHours.toLocaleString('pt-BR')} h/dia × R$ 35,00/h.
+                                            Se "Listagem de matéria-prima" custa R$ 0,15/kg e o produto pesa 1000 kg:
                                         </div>
                                         <div className="font-mono">
-                                            Custo = <span className="font-bold text-primary">R$ {(2 * normalWorkdayHours * 35).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
-                                        </div>
-                                        <div className="text-muted-foreground pt-1">
-                                            Etapa por peso: 1.000 kg × R$ 0,15/kg = <span className="font-bold text-primary">R$ 150,00</span>
+                                            Custo da etapa = 0,15 × 1.000 = <span className="font-bold text-primary">R$ 150,00</span>
                                         </div>
                                     </div>
                                     
@@ -3324,7 +3249,7 @@ export default function ProductsPage() {
                                                 <>
                                                     <Separator />
                                                     <div>
-                                                        <Label>Horas-Máquina Adicionais (opcional)</Label>
+                                                        <Label>Horas de Usinagem Estimadas</Label>
                                                         <Input
                                                             type="number"
                                                             step="0.5"
@@ -3333,7 +3258,7 @@ export default function ProductsPage() {
                                                             onChange={(e) => setMachiningHours(Number(e.target.value))}
                                                         />
                                                         <p className="text-xs text-muted-foreground mt-1">
-                                                            Use apenas quando desejar somar o custo do equipamento. A mão de obra da etapa já é calculada pelo lead time. Valor: R$ {machineHourRate.toFixed(2)}/h = {machiningHours > 0 ? `R$ ${(machiningHours * machineHourRate).toFixed(2)}` : 'R$ 0,00'}
+                                                            Valor da hora: R$ {machineHourRate.toFixed(2)} = {machiningHours > 0 ? `R$ ${(machiningHours * machineHourRate).toFixed(2)}` : 'R$ 0,00'}
                                                         </p>
                                                     </div>
                                                 </>
@@ -3363,32 +3288,14 @@ export default function ProductsPage() {
 
                                                     const productWeight = selectedProductForPricing.unitWeight || 0;
 
-                                                    if (!Number.isFinite(normalWorkdayHours) || normalWorkdayHours <= 0) {
-                                                        toast({
-                                                            variant: "destructive",
-                                                            title: "Jornada normal inválida",
-                                                            description: "Informe uma quantidade de horas por dia maior que zero."
-                                                        });
-                                                        return;
-                                                    }
-
                                                     const stageCostItems: StageCostItem[] = (selectedProductForPricing.productionPlanTemplate || []).map(stage => {
-                                                        const unitRate = Number(stageCosts[stage.stageName]) || 0;
-                                                        const durationDays = Number(stage.durationDays) || 0;
-                                                        const costMethod = usesHourlyStageCost(stage.stageName) ? 'hour' : 'kg';
-                                                        const calculatedQuantity = costMethod === 'hour'
-                                                            ? durationDays * normalWorkdayHours
-                                                            : productWeight;
-                                                        const totalCost = unitRate * calculatedQuantity;
+                                                        const costPerKg = stageCosts[stage.stageName] || 0;
+                                                        const totalCost = costPerKg * productWeight;
                                                         
                                                         return {
                                                             stageName: stage.stageName,
-                                                            durationDays,
-                                                            costMethod,
-                                                            unitRate,
-                                                            calculatedQuantity,
-                                                            calculatedUnit: costMethod === 'hour' ? 'h' : 'kg',
-                                                            costPerDay: unitRate,
+                                                            durationDays: stage.durationDays || 0,
+                                                            costPerDay: costPerKg,
                                                             totalCost: totalCost
                                                         };
                                                     });
@@ -3424,7 +3331,6 @@ export default function ProductsPage() {
                                                         productCode: selectedProductForPricing.code,
                                                         productDescription: selectedProductForPricing.description,
                                                         productWeight: productWeight,
-                                                        normalWorkdayHours,
                                                         materialCosts: materialComposition,
                                                         stageCosts: stageCostItems,
                                                         machiningCost,
@@ -3728,8 +3634,8 @@ export default function ProductsPage() {
                                                         doc.setFontSize(9);
                                                         doc.setFont('helvetica', 'bold');
                                                         doc.text('Etapa', margin + 2, stagesTableY + 6);
-                                                        doc.text('Taxa', pageWidth - margin - 80, stagesTableY + 6, { align: 'right' });
-                                                        doc.text('Base', pageWidth - margin - 50, stagesTableY + 6, { align: 'right' });
+                                                        doc.text('Custo/kg', pageWidth - margin - 80, stagesTableY + 6, { align: 'right' });
+                                                        doc.text('Peso Total', pageWidth - margin - 50, stagesTableY + 6, { align: 'right' });
                                                         doc.text('Custo Total', pageWidth - margin - 2, stagesTableY + 6, { align: 'right' });
                                                         yPosition = stagesTableY + 10;
                                                         
@@ -3743,14 +3649,8 @@ export default function ProductsPage() {
                                                             doc.setFont('helvetica', 'normal');
                                                             doc.setTextColor(0, 0, 0);
                                                             doc.text(`${index + 1}. ${s.stageName}`, margin + 2, yPosition);
-                                                            const stageMethod = s.costMethod || (usesHourlyStageCost(s.stageName) ? 'hour' : 'kg');
-                                                            const stageRate = Number(s.unitRate ?? s.costPerDay) || 0;
-                                                            const stageQuantity = Number(s.calculatedQuantity) || (stageMethod === 'hour'
-                                                                ? (Number(s.durationDays) || 0) * (pricingCalculation.normalWorkdayHours || normalWorkdayHours)
-                                                                : pricingCalculation.productWeight);
-                                                            const stageUnit = stageMethod === 'hour' ? 'h' : 'kg';
-                                                            doc.text(`R$ ${stageRate.toFixed(2)}/${stageUnit}`, pageWidth - margin - 80, yPosition, { align: 'right' });
-                                                            doc.text(`${stageQuantity.toFixed(2)} ${stageUnit}`, pageWidth - margin - 50, yPosition, { align: 'right' });
+                                                            doc.text(`R$ ${s.costPerDay.toFixed(2)}/kg`, pageWidth - margin - 80, yPosition, { align: 'right' });
+                                                            doc.text(`${pricingCalculation.productWeight.toFixed(2)} kg`, pageWidth - margin - 50, yPosition, { align: 'right' });
                                                             doc.setFont('helvetica', 'bold');
                                                             doc.text(`R$ ${s.totalCost.toFixed(2)}`, pageWidth - margin - 2, yPosition, { align: 'right' });
                                                             yPosition += 8;
@@ -3771,7 +3671,7 @@ export default function ProductsPage() {
                                                     
                                                     addSection('OUTROS CUSTOS');
                                                     if (pricingCalculation.machiningCost > 0) {
-                                                        addText(`Hora-máquina adicional: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
+                                                        addText(`Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
                                                     }
                                                     if (pricingCalculation.consumablesCost > 0) {
                                                         addText(`Insumos e Consumíveis:`, 9, true);
@@ -3920,15 +3820,7 @@ export default function ProductsPage() {
                                                             <span className="flex-1">
                                                                 {s.stageName}
                                                                 <span className="text-xs ml-1">
-                                                                    {(() => {
-                                                                        const method = s.costMethod || (usesHourlyStageCost(s.stageName) ? 'hour' : 'kg');
-                                                                        const rate = Number(s.unitRate ?? s.costPerDay) || 0;
-                                                                        const quantity = Number(s.calculatedQuantity) || (method === 'hour'
-                                                                            ? (Number(s.durationDays) || 0) * (pricingCalculation.normalWorkdayHours || normalWorkdayHours)
-                                                                            : pricingCalculation.productWeight);
-                                                                        const unit = method === 'hour' ? 'h' : 'kg';
-                                                                        return `(R$ ${rate.toFixed(2)}/${unit} × ${quantity.toLocaleString('pt-BR', { maximumFractionDigits: 2 })} ${unit})`;
-                                                                    })()}
+                                                                    (R$ {s.costPerDay.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
                                                                 </span>
                                                             </span>
                                                             <span className="font-mono">R$ {s.totalCost.toFixed(2)}</span>
@@ -3937,7 +3829,7 @@ export default function ProductsPage() {
                                                     {pricingCalculation.machiningCost > 0 && (
                                                         <div className="flex justify-between text-muted-foreground">
                                                             <span className="flex-1">
-                                                                Hora-máquina adicional
+                                                                Usinagem
                                                                 <span className="text-xs ml-1">
                                                                     ({machiningHours}h × R$ {machineHourRate.toFixed(2)}/h)
                                                                 </span>
