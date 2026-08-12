@@ -21,6 +21,7 @@ const asArray = (value: any): any[] => Array.isArray(value)
     : [];
 
 const normalizeStatus = (value: any) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+const normalizeStage = (value: any) => String(value || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim().toLocaleLowerCase('pt-BR');
 
 export default function AbrirApontamentoPage() {
   const { toast } = useToast();
@@ -85,6 +86,16 @@ export default function AbrirApontamentoPage() {
     if (!item) return setAvailableStages([]);
 
     let template: any[] = [];
+    const costCenterRates = new Map<string, number>();
+    try {
+      const costCentersSnapshot = await getDocs(collection(db, "companies", "mecald", "productionCostCenters"));
+      costCentersSnapshot.docs.forEach(costDoc => {
+        const data = costDoc.data();
+        costCenterRates.set(normalizeStage(data.sectorName), Number(data.hourlyRate) || 0);
+      });
+    } catch (error) {
+      console.warn("Não foi possível carregar os centros de custo:", error);
+    }
     if (item.code) {
       try {
         const productSnapshot = await getDoc(doc(db, "companies", "mecald", "products", item.code));
@@ -97,7 +108,8 @@ export default function AbrirApontamentoPage() {
     const stages = source.map(stage => {
       const stageName = typeof stage === "string" ? stage : String(stage?.stageName || stage?.name || "");
       const templateStage = template.find(candidate => String(candidate?.stageName || candidate?.name || "") === stageName);
-      return { stageName, hourlyRate: Number(templateStage?.hourlyRate ?? stage?.hourlyRate) || 0 };
+      const centerRate = costCenterRates.get(normalizeStage(stageName));
+      return { stageName, hourlyRate: Number(centerRate ?? templateStage?.hourlyRate ?? stage?.hourlyRate) || 0 };
     }).filter(stage => stage.stageName);
     setAvailableStages([...new Map(stages.map(stage => [stage.stageName, stage])).values()]);
   };
