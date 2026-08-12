@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, Timestamp, updateDoc, where, writeBatch } from "firebase/firestore";
+import { getAuth, signInAnonymously } from "firebase/auth";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -40,6 +41,8 @@ export default function AbrirApontamentoPage() {
   const [availableStages, setAvailableStages] = useState<StageOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(true);
+  const [ordersLoadError, setOrdersLoadError] = useState("");
+  const [ordersReloadKey, setOrdersReloadKey] = useState(0);
   const [mode, setMode] = useState<'start' | 'manage'>('start');
   const [activeAppointments, setActiveAppointments] = useState<ActiveAppointment[]>([]);
   const [loadingAppointments, setLoadingAppointments] = useState(false);
@@ -49,8 +52,23 @@ export default function AbrirApontamentoPage() {
   useEffect(() => { const timer = window.setInterval(() => setClockTick(value => value + 1), 1000); return () => window.clearInterval(timer); }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
     (async () => {
       try {
+        setLoadingOrders(true);
+        setOrdersLoadError("");
+
+        // A página é acessada diretamente pelo QR Code. Quando não existe uma
+        // sessão anterior no navegador, cria uma sessão anônima antes de ler o
+        // Firestore. Assim, as regras podem continuar exigindo request.auth.
+        const auth = getAuth(db.app);
+        await auth.authStateReady();
+        if (!auth.currentUser) {
+          await signInAnonymously(auth);
+        }
+        if (cancelled) return;
+
         const snapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
         const closed = new Set(["concluido", "completed", "finished", "cancelado", "cancelled", "canceled"]);
         const list = snapshot.docs.map(orderDoc => {
@@ -69,15 +87,30 @@ export default function AbrirApontamentoPage() {
             status: normalizeStatus(data.status),
           };
         }).filter(order => !closed.has(order.status) && order.internalOS);
-        setOrders(list.sort((a, b) => a.internalOS.localeCompare(b.internalOS, "pt-BR", { numeric: true })));
+        if (!cancelled) {
+          setOrders(list.sort((a, b) => a.internalOS.localeCompare(b.internalOS, "pt-BR", { numeric: true })));
+        }
       } catch (error) {
         console.error("Erro ao buscar OS para apontamento:", error);
-        toast({ variant: "destructive", title: "Erro ao buscar Ordens de Serviço" });
+        if (cancelled) return;
+
+        const code = String((error as { code?: string })?.code || "");
+        const message = code === "auth/operation-not-allowed"
+          ? "A autenticação anônima ainda não está habilitada no Firebase Authentication."
+          : code === "permission-denied" || code === "firestore/permission-denied"
+            ? "A sessão foi criada, mas as regras do Firestore não permitem consultar as OS para o apontamento."
+            : "Não foi possível carregar as Ordens de Serviço. Verifique a conexão e tente novamente.";
+
+        setOrders([]);
+        setOrdersLoadError(message);
+        toast({ variant: "destructive", title: "Erro ao buscar Ordens de Serviço", description: message });
       } finally {
-        setLoadingOrders(false);
+        if (!cancelled) setLoadingOrders(false);
       }
     })();
-  }, [toast]);
+
+    return () => { cancelled = true; };
+  }, [toast, ordersReloadKey]);
 
   const selectedOrder = useMemo(() => orders.find(order => order.id === selectedOrderId), [orders, selectedOrderId]);
   const filteredOrders = useMemo(() => {
@@ -230,6 +263,17 @@ export default function AbrirApontamentoPage() {
 
         {mode === 'start' && <div className="space-y-2"><Label>Operador</Label><Input placeholder="Digite seu nome" value={operatorName} onChange={event => setOperatorName(event.target.value)} /></div>}
         <div className="space-y-2"><Label>Buscar OS</Label><Input placeholder="Digite o número da OS ou o cliente" value={orderSearch} onChange={event => setOrderSearch(event.target.value)} /></div>
+        {ordersLoadError && (
+          <div className="space-y-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+            <div>
+              <p className="font-medium text-destructive">Não foi possível carregar as OS</p>
+              <p className="text-sm text-muted-foreground">{ordersLoadError}</p>
+            </div>
+            <Button type="button" variant="outline" size="sm" onClick={() => setOrdersReloadKey(current => current + 1)} disabled={loadingOrders}>
+              {loadingOrders ? "Tentando novamente..." : "Tentar novamente"}
+            </Button>
+          </div>
+        )}
         <Select value={selectedOrderId} onValueChange={handleSelectOrder} disabled={loadingOrders}><SelectTrigger><SelectValue placeholder={loadingOrders ? "Carregando OS..." : "Selecione a OS"} /></SelectTrigger><SelectContent>{filteredOrders.map(order => <SelectItem key={order.id} value={order.id}>OS {order.internalOS} — {order.customerName}</SelectItem>)}</SelectContent></Select>
         {!loadingOrders && orderSearch && filteredOrders.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma OS encontrada para “{orderSearch}”.</p>}
 
