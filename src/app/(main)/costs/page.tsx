@@ -11,6 +11,7 @@ import { useAuth } from "../layout";
 import { format } from "date-fns";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
+import QRCode from "qrcode";
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
@@ -159,6 +160,24 @@ type Requisition = {
 
 type ItemForUpdate = RequisitionItem & { requisitionId: string };
 type OrderInfo = { id: string; internalOS: string; customerName: string; customerId?: string; costEntries?: any[] };
+
+type ProductionAppointment = {
+  id: string;
+  orderId: string;
+  orderInternalOS: string;
+  itemId: string;
+  itemDescription: string;
+  stageName: string;
+  hourlyRate: number;
+  status: 'Aberto' | 'Pausado' | 'Concluído';
+  operatorName: string;
+  startedAt: Date | null;
+  pausedAt: Date | null;
+  closedAt: Date | null;
+  accumulatedSeconds: number;
+  totalHours?: number;
+  totalCost?: number;
+};
 
 const normalizeOSNumber = (value?: string): string =>
     (value || '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, '');
@@ -638,6 +657,11 @@ export default function CostsPage() {
     const [relinkSearchByRequisition, setRelinkSearchByRequisition] = useState<Record<string, string>>({});
     const [selectedOrderByRequisition, setSelectedOrderByRequisition] = useState<Record<string, string>>({});
     const [relinkingRequisitionId, setRelinkingRequisitionId] = useState<string | null>(null);
+    const [appointments, setAppointments] = useState<ProductionAppointment[]>([]);
+    const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
+    const [appointmentOSFilter, setAppointmentOSFilter] = useState("all");
+    const [openQrUrl, setOpenQrUrl] = useState("");
+    const [closeQrUrl, setCloseQrUrl] = useState("");
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -950,6 +974,68 @@ export default function CostsPage() {
             fetchOrders();
         }
     }, [user, authLoading, fetchRequisitions, fetchSuppliers, fetchOrders]);
+
+    const fetchAppointments = useCallback(async () => {
+        if (!user) return;
+        setIsLoadingAppointments(true);
+        try {
+            const snapshot = await getDocs(collection(db, "companies", "mecald", "productionAppointments"));
+            const toDate = (value: any): Date | null => {
+                if (!value) return null;
+                const parsed = typeof value.toDate === 'function' ? value.toDate() : new Date(value);
+                return parsed instanceof Date && !Number.isNaN(parsed.getTime()) ? parsed : null;
+            };
+            const list = snapshot.docs.map(appointmentDoc => {
+                const data = appointmentDoc.data();
+                return {
+                    id: appointmentDoc.id,
+                    orderId: String(data.orderId || ''),
+                    orderInternalOS: String(data.orderInternalOS || 'N/A'),
+                    itemId: String(data.itemId || ''),
+                    itemDescription: String(data.itemDescription || 'Item não informado'),
+                    stageName: String(data.stageName || 'Etapa não informada'),
+                    hourlyRate: Number(data.hourlyRate) || 0,
+                    status: data.status || 'Aberto',
+                    operatorName: String(data.operatorName || 'Não informado'),
+                    startedAt: toDate(data.startedAt),
+                    pausedAt: toDate(data.pausedAt),
+                    closedAt: toDate(data.closedAt),
+                    accumulatedSeconds: Number(data.accumulatedSeconds) || 0,
+                    totalHours: data.totalHours == null ? undefined : Number(data.totalHours) || 0,
+                    totalCost: data.totalCost == null ? undefined : Number(data.totalCost) || 0,
+                } as ProductionAppointment;
+            }).sort((a, b) => (b.startedAt?.getTime() || 0) - (a.startedAt?.getTime() || 0));
+            setAppointments(list);
+        } catch (error) {
+            console.error('Erro ao buscar apontamentos:', error);
+            toast({ variant: 'destructive', title: 'Erro ao buscar apontamentos' });
+        } finally {
+            setIsLoadingAppointments(false);
+        }
+    }, [user, toast]);
+
+    useEffect(() => {
+        if (activeTab === 'appointments') fetchAppointments();
+    }, [activeTab, fetchAppointments]);
+
+    useEffect(() => {
+        const baseUrl = window.location.origin;
+        Promise.all([
+            QRCode.toDataURL(`${baseUrl}/apontamento/abrir`, { width: 300, margin: 2 }),
+            QRCode.toDataURL(`${baseUrl}/apontamento/fechar`, { width: 300, margin: 2 }),
+        ]).then(([openUrl, closeUrl]) => {
+            setOpenQrUrl(openUrl);
+            setCloseQrUrl(closeUrl);
+        }).catch(error => console.error('Erro ao gerar QR Codes de apontamento:', error));
+    }, []);
+
+    const downloadQr = (dataUrl: string, filename: string) => {
+        if (!dataUrl) return;
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = filename;
+        link.click();
+    };
 
     // Algumas consultas/versões antigas não retornavam OS concluídas. Se a requisição
     // possui um ID válido, carregamos esse documento diretamente para preservar o vínculo.
@@ -2149,6 +2235,45 @@ export default function CostsPage() {
         }
     };
 
+    const exportAppointmentsReport = (list: ProductionAppointment[], osNumber: string) => {
+        try {
+            const pdf = new jsPDF({ orientation: 'landscape', unit: 'mm', format: 'a4' });
+            const totalHours = list.reduce((sum, appointment) => sum + (Number(appointment.totalHours) || 0), 0);
+            const totalCost = list.reduce((sum, appointment) => sum + (Number(appointment.totalCost) || 0), 0);
+            const currency = (value: number) => value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+            pdf.setFont('helvetica', 'bold');
+            pdf.setFontSize(16);
+            pdf.text(`RELATÓRIO DE APONTAMENTO E CUSTO DE PRODUÇÃO - OS ${osNumber}`, 14, 15);
+            autoTable(pdf, {
+                startY: 25,
+                head: [['Item', 'Etapa', 'Operador', 'Início', 'Fim', 'Status', 'Horas', 'R$/h', 'Custo']],
+                body: list.map(appointment => [
+                    appointment.itemDescription,
+                    appointment.stageName,
+                    appointment.operatorName,
+                    safeFormatDate(appointment.startedAt, 'dd/MM HH:mm', '-'),
+                    safeFormatDate(appointment.closedAt, 'dd/MM HH:mm', '-'),
+                    appointment.status,
+                    appointment.totalHours == null ? '-' : appointment.totalHours.toFixed(2),
+                    currency(appointment.hourlyRate),
+                    appointment.totalCost == null ? '-' : currency(appointment.totalCost),
+                ]),
+                styles: { fontSize: 8 },
+                headStyles: { fillColor: [37, 99, 235] },
+            });
+
+            const finalY = (pdf as any).lastAutoTable.finalY + 10;
+            pdf.setFontSize(11);
+            pdf.setFont('helvetica', 'bold');
+            pdf.text(`TOTAL: ${totalHours.toFixed(2)}h  |  ${currency(totalCost)}`, 14, finalY);
+            pdf.save(`Apontamentos_OS_${osNumber.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`);
+        } catch (error) {
+            console.error('Erro ao exportar apontamentos:', error);
+            toast({ variant: 'destructive', title: 'Erro ao exportar relatório de apontamentos' });
+        }
+    };
+
 
 
     // Proteção contra erros de renderização
@@ -2164,6 +2289,7 @@ export default function CostsPage() {
                 <TabsTrigger value="receipts">Recebimento de Materiais</TabsTrigger>
                 <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
                 <TabsTrigger value="costEntry">Lançamento de Custos</TabsTrigger>
+                <TabsTrigger value="appointments">Apontamentos</TabsTrigger>
             </TabsList>
             <TabsContent value="receipts">
                 <Card>
@@ -3117,6 +3243,100 @@ export default function CostsPage() {
                                 </div>
                             );
                         })()}
+                    </CardContent>
+                </Card>
+            </TabsContent>
+
+            <TabsContent value="appointments" className="space-y-4">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>QR Codes de Apontamento</CardTitle>
+                        <CardDescription>
+                            QR Codes genéricos para impressão. Após a leitura, o operador escolhe a OS, o item e a etapa.
+                        </CardDescription>
+                    </CardHeader>
+                    <CardContent className="grid grid-cols-1 gap-6 md:grid-cols-2">
+                        <div className="space-y-3 rounded-lg border p-4 text-center">
+                            <h3 className="font-semibold text-green-700">Abertura de Processo</h3>
+                            {openQrUrl && <img src={openQrUrl} alt="QR Code para iniciar apontamento" className="mx-auto" />}
+                            <Button variant="outline" onClick={() => downloadQr(openQrUrl, 'qrcode-abertura-apontamento.png')} disabled={!openQrUrl}>
+                                <Download className="mr-2 h-4 w-4" /> Baixar QR Code
+                            </Button>
+                        </div>
+                        <div className="space-y-3 rounded-lg border p-4 text-center">
+                            <h3 className="font-semibold text-red-700">Fechamento ou Pausa</h3>
+                            {closeQrUrl && <img src={closeQrUrl} alt="QR Code para pausar ou encerrar apontamento" className="mx-auto" />}
+                            <Button variant="outline" onClick={() => downloadQr(closeQrUrl, 'qrcode-fechamento-apontamento.png')} disabled={!closeQrUrl}>
+                                <Download className="mr-2 h-4 w-4" /> Baixar QR Code
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+
+                <Card>
+                    <CardHeader className="flex flex-row items-center justify-between gap-4">
+                        <div>
+                            <CardTitle>Apontamentos por OS</CardTitle>
+                            <CardDescription>Etapas abertas, pausadas e concluídas.</CardDescription>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2">
+                            <Select value={appointmentOSFilter} onValueChange={setAppointmentOSFilter}>
+                                <SelectTrigger className="w-[220px]"><SelectValue placeholder="Filtrar por OS" /></SelectTrigger>
+                                <SelectContent>
+                                    <SelectItem value="all">Todas as OS</SelectItem>
+                                    {[...new Set(appointments.map(appointment => appointment.orderInternalOS).filter(Boolean))]
+                                        .sort((a, b) => a.localeCompare(b, 'pt-BR', { numeric: true }))
+                                        .map(os => <SelectItem key={os} value={os}>OS {os}</SelectItem>)}
+                                </SelectContent>
+                            </Select>
+                            <Button variant="outline" onClick={fetchAppointments} disabled={isLoadingAppointments}>
+                                {isLoadingAppointments ? 'Atualizando...' : 'Atualizar'}
+                            </Button>
+                            <Button
+                                onClick={() => exportAppointmentsReport(
+                                    appointments.filter(appointment => appointmentOSFilter === 'all' || appointment.orderInternalOS === appointmentOSFilter),
+                                    appointmentOSFilter
+                                )}
+                                disabled={appointmentOSFilter === 'all'}
+                            >
+                                <Download className="mr-2 h-4 w-4" /> Exportar Relatório da OS
+                            </Button>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {isLoadingAppointments ? <Skeleton className="h-48 w-full" /> : (
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>OS</TableHead><TableHead>Item</TableHead><TableHead>Etapa</TableHead>
+                                        <TableHead>Operador</TableHead><TableHead>Início</TableHead><TableHead>Status</TableHead>
+                                        <TableHead className="text-right">Horas</TableHead><TableHead className="text-right">Custo</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {appointments
+                                        .filter(appointment => appointmentOSFilter === 'all' || appointment.orderInternalOS === appointmentOSFilter)
+                                        .map(appointment => (
+                                            <TableRow key={appointment.id}>
+                                                <TableCell className="font-medium">{appointment.orderInternalOS}</TableCell>
+                                                <TableCell>{appointment.itemDescription}</TableCell>
+                                                <TableCell>{appointment.stageName}</TableCell>
+                                                <TableCell>{appointment.operatorName}</TableCell>
+                                                <TableCell>{safeFormatDate(appointment.startedAt, 'dd/MM HH:mm', '-')}</TableCell>
+                                                <TableCell>
+                                                    <Badge variant={appointment.status === 'Concluído' ? 'default' : appointment.status === 'Pausado' ? 'secondary' : 'outline'} className={appointment.status === 'Aberto' ? 'bg-blue-500 text-white' : ''}>
+                                                        {appointment.status}
+                                                    </Badge>
+                                                </TableCell>
+                                                <TableCell className="text-right">{appointment.totalHours == null ? '-' : appointment.totalHours.toFixed(2)}</TableCell>
+                                                <TableCell className="text-right font-medium text-green-600">
+                                                    {appointment.totalCost == null ? '-' : appointment.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                </TableCell>
+                                            </TableRow>
+                                        ))}
+                                </TableBody>
+                            </Table>
+                        )}
                     </CardContent>
                 </Card>
             </TabsContent>
