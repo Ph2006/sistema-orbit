@@ -29,6 +29,7 @@ export default function AbrirApontamentoPage() {
   const [selectedItemId, setSelectedItemId] = useState("");
   const [selectedStage, setSelectedStage] = useState("");
   const [operatorName, setOperatorName] = useState("");
+  const [orderSearch, setOrderSearch] = useState("");
   const [availableStages, setAvailableStages] = useState<StageOption[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadingOrders, setLoadingOrders] = useState(true);
@@ -65,6 +66,14 @@ export default function AbrirApontamentoPage() {
   }, [toast]);
 
   const selectedOrder = useMemo(() => orders.find(order => order.id === selectedOrderId), [orders, selectedOrderId]);
+  const filteredOrders = useMemo(() => {
+    const search = orderSearch.trim().toLocaleLowerCase("pt-BR");
+    if (!search) return orders;
+    return orders.filter(order =>
+      order.internalOS.toLocaleLowerCase("pt-BR").includes(search) ||
+      order.customerName.toLocaleLowerCase("pt-BR").includes(search)
+    );
+  }, [orders, orderSearch]);
 
   const handleSelectOrder = (orderId: string) => {
     setSelectedOrderId(orderId); setSelectedItemId(""); setSelectedStage(""); setAvailableStages([]);
@@ -131,7 +140,9 @@ export default function AbrirApontamentoPage() {
     <Card><CardHeader><CardTitle>Iniciar Apontamento</CardTitle><CardDescription>Selecione a OS, o item e a etapa de produção.</CardDescription></CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2"><Label>Operador</Label><Input placeholder="Seu nome" value={operatorName} onChange={event => setOperatorName(event.target.value)} /></div>
-        <Select value={selectedOrderId} onValueChange={handleSelectOrder} disabled={loadingOrders}><SelectTrigger><SelectValue placeholder={loadingOrders ? "Carregando OS..." : "Selecione a OS"} /></SelectTrigger><SelectContent>{orders.map(order => <SelectItem key={order.id} value={order.id}>OS {order.internalOS} — {order.customerName}</SelectItem>)}</SelectContent></Select>
+        <div className="space-y-2"><Label>Buscar OS</Label><Input placeholder="Digite o número da OS" value={orderSearch} onChange={event => setOrderSearch(event.target.value)} /></div>
+        <Select value={selectedOrderId} onValueChange={handleSelectOrder} disabled={loadingOrders}><SelectTrigger><SelectValue placeholder={loadingOrders ? "Carregando OS..." : "Selecione a OS"} /></SelectTrigger><SelectContent>{filteredOrders.map(order => <SelectItem key={order.id} value={order.id}>OS {order.internalOS} — {order.customerName}</SelectItem>)}</SelectContent></Select>
+        {!loadingOrders && orderSearch && filteredOrders.length === 0 && <p className="text-sm text-muted-foreground">Nenhuma OS encontrada para “{orderSearch}”.</p>}
         {selectedOrder && <Select value={selectedItemId} onValueChange={handleSelectItem}><SelectTrigger><SelectValue placeholder="Selecione o item" /></SelectTrigger><SelectContent>{selectedOrder.items.map(item => <SelectItem key={item.id} value={item.id}>{item.description}</SelectItem>)}</SelectContent></Select>}
         {selectedItemId && <Select value={selectedStage} onValueChange={setSelectedStage}><SelectTrigger><SelectValue placeholder="Selecione a etapa" /></SelectTrigger><SelectContent>{availableStages.map(stage => <SelectItem key={stage.stageName} value={stage.stageName}>{stage.stageName}</SelectItem>)}</SelectContent></Select>}
         <Button className="w-full" size="lg" onClick={handleOpen} disabled={loading}>{loading ? "Iniciando..." : "Iniciar Apontamento"}</Button>
