@@ -5,6 +5,8 @@ import { arrayUnion, collection, doc, getDocs, query, Timestamp, updateDoc, wher
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 
@@ -17,6 +19,7 @@ export default function FecharApontamentoPage() {
   const { toast } = useToast();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  const [orderSearch, setOrderSearch] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [now, setNow] = useState(Date.now());
@@ -34,6 +37,11 @@ export default function FecharApontamentoPage() {
   useEffect(() => { fetchOpen(); }, []);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer); }, []);
   const selected = useMemo(() => appointments.find(appointment => appointment.id === selectedId), [appointments, selectedId]);
+  const filteredAppointments = useMemo(() => {
+    const search = orderSearch.trim().toLocaleLowerCase("pt-BR");
+    if (!search) return appointments;
+    return appointments.filter(appointment => appointment.orderInternalOS.toLocaleLowerCase("pt-BR").includes(search));
+  }, [appointments, orderSearch]);
   const totalSeconds = selected ? (Number(selected.accumulatedSeconds) || 0) + activeSeconds(selected, now) : 0;
 
   const handlePause = async () => {
@@ -73,7 +81,9 @@ export default function FecharApontamentoPage() {
   };
 
   return <main className="mx-auto max-w-md p-4 md:p-6"><Card><CardHeader><CardTitle>Pausar ou Encerrar</CardTitle><CardDescription>Escolha um apontamento ativo.</CardDescription></CardHeader><CardContent className="space-y-4">
-    <Select value={selectedId} onValueChange={setSelectedId} disabled={loading}><SelectTrigger><SelectValue placeholder={loading ? "Carregando..." : "Selecione OS, item e etapa"} /></SelectTrigger><SelectContent>{appointments.map(appointment => <SelectItem key={appointment.id} value={appointment.id}>OS {appointment.orderInternalOS} — {appointment.itemDescription} — {appointment.stageName}</SelectItem>)}</SelectContent></Select>
+    <div className="space-y-2"><Label>Buscar OS</Label><Input placeholder="Digite o número da OS" value={orderSearch} onChange={event => setOrderSearch(event.target.value)} /></div>
+    <Select value={selectedId} onValueChange={setSelectedId} disabled={loading}><SelectTrigger><SelectValue placeholder={loading ? "Carregando..." : "Selecione OS, item e etapa"} /></SelectTrigger><SelectContent>{filteredAppointments.map(appointment => <SelectItem key={appointment.id} value={appointment.id}>OS {appointment.orderInternalOS} — {appointment.itemDescription} — {appointment.stageName}</SelectItem>)}</SelectContent></Select>
+    {!loading && orderSearch && filteredAppointments.length === 0 && <p className="text-sm text-muted-foreground">Nenhum apontamento ativo encontrado para a OS “{orderSearch}”.</p>}
     {selected && <div className="space-y-3 rounded-lg border p-4"><p className="font-medium">OS {selected.orderInternalOS} — {selected.stageName}</p><p className="text-sm text-muted-foreground">Operador: {selected.operatorName} · Status: {selected.status}</p><p className="text-center font-mono text-3xl font-bold">{duration(totalSeconds)}</p><div className="grid grid-cols-2 gap-2">{selected.status === "Aberto" ? <Button variant="outline" onClick={handlePause} disabled={saving}>Pausar</Button> : <Button variant="outline" onClick={handleResume} disabled={saving}>Retomar</Button>}<Button variant="destructive" onClick={handleClose} disabled={saving}>Encerrar</Button></div></div>}
     {!loading && !appointments.length && <p className="py-6 text-center text-muted-foreground">Nenhuma etapa em aberto.</p>}
   </CardContent></Card></main>;
