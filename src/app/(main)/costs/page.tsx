@@ -74,14 +74,14 @@ const requisitionItemSchema = z.object({
 
 const segmentOptions = [
   "Insumos de pintura", 
-  "MatÃ©ria-Prima", 
-  "Ensaios nÃ£o-destrutivos", 
-  "Tratamento TÃ©rmico", 
+  "Matéria-Prima", 
+  "Ensaios não-destrutivos", 
+  "Tratamento Térmico", 
   "Emborrachamento", 
   "Dobra", 
   "Corte a laser", 
   "Usinagem CNC", 
-  "EletroerosÃ£o", 
+  "Eletroerosão", 
   "Usinagem", 
   "Insumos de solda"
 ];
@@ -110,7 +110,7 @@ const supplierSchema = z.object({
     bank: z.string().optional(),
     agency: z.string().optional(),
     accountNumber: z.string().optional(),
-    accountType: z.enum(["Pessoa JurÃ­dica", "Pessoa FÃ­sica"]).optional(),
+    accountType: z.enum(["Pessoa Jurídica", "Pessoa Física"]).optional(),
     pix: z.string().optional(),
   }).optional(),
   commercialInfo: z.object({
@@ -169,7 +169,7 @@ type ProductionAppointment = {
   itemDescription: string;
   stageName: string;
   hourlyRate: number;
-  status: 'Aberto' | 'Pausado' | 'ConcluÃ­do';
+  status: 'Aberto' | 'Pausado' | 'Concluído';
   operatorName: string;
   startedAt: Date | null;
   pausedAt: Date | null;
@@ -182,9 +182,9 @@ type ProductionAppointment = {
 type ProductionCostCenter = { id: string; sectorName: string; hourlyRate: number };
 
 const PRODUCTION_SECTORS = [
-  'PCP', 'Compras', 'Almoxarifado', 'PreparaÃ§Ã£o', 'Montagem', 'Solda',
-  'Controle da qualidade', 'Jato', 'Pintura', 'Usinagem', 'CÃ©lula RobÃ³tica',
-  'FuraÃ§Ã£o', 'Desempeno', 'Montagem MecÃ¢nica', 'Peritagem',
+  'PCP', 'Compras', 'Almoxarifado', 'Preparação', 'Montagem', 'Solda',
+  'Controle da qualidade', 'Jato', 'Pintura', 'Usinagem', 'Célula Robótica',
+  'Furação', 'Desempeno', 'Montagem Mecânica', 'Peritagem',
 ];
 
 const costCenterId = (sectorName: string) => sectorName.normalize('NFD')
@@ -222,8 +222,8 @@ const requisitionFinancialSummary = (requisition: Requisition) => {
     };
 };
 
-// MantÃ©m a especificaÃ§Ã£o cadastrada na requisiÃ§Ã£o e oferece uma identificaÃ§Ã£o
-// segura para registros antigos cuja liga/norma esteja apenas na descriÃ§Ã£o.
+// Mantém a especificação cadastrada na requisição e oferece uma identificação
+// segura para registros antigos cuja liga/norma esteja apenas na descrição.
 const resolveMaterialDescription = (item: RequisitionItem): string => {
     const savedMaterial = String(item.material || '').trim();
     if (savedMaterial) return savedMaterial;
@@ -235,15 +235,15 @@ const resolveMaterialDescription = (item: RequisitionItem): string => {
 
     return knownSpecification
         ? knownSpecification[0].replace(/\s+/g, ' ').toUpperCase()
-        : 'NÃ£o especificado';
+        : 'Não especificado';
 };
 
-// FunÃ§Ã£o utilitÃ¡ria para formataÃ§Ã£o segura de datas
-const safeFormatDate = (date: any, formatString: string, fallback: string = 'Data invÃ¡lida'): string => {
+// Função utilitária para formatação segura de datas
+const safeFormatDate = (date: any, formatString: string, fallback: string = 'Data inválida'): string => {
     try {
         if (!date) return fallback;
         
-        // Converter Firestore Timestamp para Date se necessÃ¡rio
+        // Converter Firestore Timestamp para Date se necessário
         let dateObj = date;
         if (date?.toDate) {
             dateObj = date.toDate();
@@ -251,9 +251,9 @@ const safeFormatDate = (date: any, formatString: string, fallback: string = 'Dat
             dateObj = new Date(date);
         }
         
-        // Verificar se a data Ã© vÃ¡lida
+        // Verificar se a data é válida
         if (!dateObj || !(dateObj instanceof Date) || isNaN(dateObj.getTime())) {
-            console.warn('Data invÃ¡lida detectada:', { 
+            console.warn('Data inválida detectada:', { 
                 originalDate: date, 
                 convertedDate: dateObj, 
                 formatString,
@@ -263,12 +263,12 @@ const safeFormatDate = (date: any, formatString: string, fallback: string = 'Dat
             return fallback;
         }
         
-        // Tentar formatar com proteÃ§Ã£o adicional
+        // Tentar formatar com proteção adicional
         const result = format(dateObj, formatString);
         return result;
         
     } catch (error: any) {
-        console.error('âŒ Erro ao formatar data:', { 
+        console.error('❌ Erro ao formatar data:', { 
             date, 
             formatString, 
             error: error.message,
@@ -277,7 +277,7 @@ const safeFormatDate = (date: any, formatString: string, fallback: string = 'Dat
         
         // Se for especificamente o erro RangeError: Invalid time value
         if (error.message?.includes('Invalid time value')) {
-            console.error('ðŸš¨ ERRO ESPECÃFICO - Invalid time value:', {
+            console.error('🚨 ERRO ESPECÍFICO - Invalid time value:', {
                 originalDate: date,
                 dateType: typeof date,
                 formatString
@@ -288,14 +288,14 @@ const safeFormatDate = (date: any, formatString: string, fallback: string = 'Dat
     }
 };
 
-// FunÃ§Ã£o utilitÃ¡ria para limpar valores undefined recursivamente
+// Função utilitária para limpar valores undefined recursivamente
 const cleanFirestoreData = (obj) => {
     if (obj === null || obj === undefined) {
         return null;
     }
     
     if (obj instanceof Date || obj?.toDate) {
-        return obj; // Manter Timestamps e Dates como estÃ£o
+        return obj; // Manter Timestamps e Dates como estão
     }
     
     if (Array.isArray(obj)) {
@@ -319,29 +319,29 @@ const cleanFirestoreData = (obj) => {
 // Biblioteca global de insumos para caldeiraria e usinagem
 const insumosBiblioteca = {
     "MATERIAS_PRIMAS": [
-        // AÃ§os Carbono
-        "AÃ§o carbono ASTM A36",
-        "AÃ§o SAE 1020",
-        "AÃ§o SAE 1045",
-        "AÃ§o SAE 8620",
-        "AÃ§o SAE 4140",
-        "AÃ§o SAE 4340",
-        "AÃ§o 52100",
+        // Aços Carbono
+        "Aço carbono ASTM A36",
+        "Aço SAE 1020",
+        "Aço SAE 1045",
+        "Aço SAE 8620",
+        "Aço SAE 4140",
+        "Aço SAE 4340",
+        "Aço 52100",
         
-        // AÃ§os Ferramenta
-        "AÃ§o ferramenta D2",
-        "AÃ§o ferramenta D6",
-        "AÃ§o ferramenta VC131",
-        "AÃ§o ferramenta H13",
+        // Aços Ferramenta
+        "Aço ferramenta D2",
+        "Aço ferramenta D6",
+        "Aço ferramenta VC131",
+        "Aço ferramenta H13",
         
-        // AÃ§os InoxidÃ¡veis
-        "AÃ§o inox AISI 304",
-        "AÃ§o inox AISI 316",
-        "AÃ§o inox AISI 310",
-        "AÃ§o inox AISI 410",
-        "AÃ§o inox AISI 420",
+        // Aços Inoxidáveis
+        "Aço inox AISI 304",
+        "Aço inox AISI 316",
+        "Aço inox AISI 310",
+        "Aço inox AISI 410",
+        "Aço inox AISI 420",
         
-        // AÃ§os Especiais
+        // Aços Especiais
         "HARDOX 400",
         "HARDOX 450",
         "HARDOX 500",
@@ -350,34 +350,34 @@ const insumosBiblioteca = {
         "USI AR 400",
         "USI AR 500",
         
-        // Metais NÃ£o Ferrosos
-        "AlumÃ­nio 6061",
-        "AlumÃ­nio 7075",
-        "AlumÃ­nio 5083",
-        "LatÃ£o",
+        // Metais Não Ferrosos
+        "Alumínio 6061",
+        "Alumínio 7075",
+        "Alumínio 5083",
+        "Latão",
         "Bronze SAE 660",
-        "TitÃ¢nio Ti-6Al-4V",
-        "Cobre eletrolÃ­tico",
+        "Titânio Ti-6Al-4V",
+        "Cobre eletrolítico",
         "Zinco fundido",
-        "MagnÃ©sio fundido",
-        "NÃ­quel puro ou ligado",
+        "Magnésio fundido",
+        "Níquel puro ou ligado",
         
-        // PlÃ¡sticos TÃ©cnicos
-        "PlÃ¡stico Nylon (PA6)",
-        "PlÃ¡stico UHMW",
-        "PlÃ¡stico POM (Delrin)",
-        "PlÃ¡stico PTFE (Teflon)",
-        "PlÃ¡stico PVC industrial",
-        "Poliuretano sÃ³lido",
+        // Plásticos Técnicos
+        "Plástico Nylon (PA6)",
+        "Plástico UHMW",
+        "Plástico POM (Delrin)",
+        "Plástico PTFE (Teflon)",
+        "Plástico PVC industrial",
+        "Poliuretano sólido",
         "Poliuretano expandido",
-        "Grafite para eletroerosÃ£o"
+        "Grafite para eletroerosão"
     ],
     
     "FERRAMENTAS_CORTE": [
         // Pastilhas
-        "Pastilha de corte de metal duro (carbeto de tungstÃªnio)",
-        "Pastilha de corte cerÃ¢mica",
-        "Pastilha de corte CBN (nitreto cÃºbico de boro)",
+        "Pastilha de corte de metal duro (carbeto de tungstênio)",
+        "Pastilha de corte cerâmica",
+        "Pastilha de corte CBN (nitreto cúbico de boro)",
         "Pastilha de corte PCD (diamante policristalino)",
         
         // Brocas
@@ -386,12 +386,12 @@ const insumosBiblioteca = {
         
         // Fresas
         "Fresas topo reto",
-        "Fresas topo esfÃ©rico",
+        "Fresas topo esférico",
         "Fresas de canal",
         
         // Ferramentas Especiais
         "Alargadores manuais",
-        "Alargadores de mÃ¡quina",
+        "Alargadores de máquina",
         "Machos de rosca M, G, NPT",
         
         // Abrasivos
@@ -403,11 +403,11 @@ const insumosBiblioteca = {
     
     "CONSUMIVEIS_USINAGEM": [
         // Fluidos
-        "Fluidos de corte solÃºveis",
-        "Fluidos de corte semissintÃ©ticos",
-        "Fluidos de corte sintÃ©ticos",
-        "Ã“leos integrais para usinagem pesada",
-        "Ã“leos de base vegetal para usinagem ecolÃ³gica",
+        "Fluidos de corte solúveis",
+        "Fluidos de corte semissintéticos",
+        "Fluidos de corte sintéticos",
+        "Óleos integrais para usinagem pesada",
+        "Óleos de base vegetal para usinagem ecológica",
         
         // Porta-ferramentas
         "Porta-pastilhas ISO",
@@ -421,27 +421,27 @@ const insumosBiblioteca = {
     
     "FIXACAO": [
         // Parafusos
-        "Parafusos cabeÃ§a sextavada",
+        "Parafusos cabeça sextavada",
         "Parafusos Allen",
-        "Parafusos de pressÃ£o",
-        "Parafusos cabeÃ§a chata",
+        "Parafusos de pressão",
+        "Parafusos cabeça chata",
         
         // Porcas e Arruelas
         "Porcas sextavadas",
         "Porcas travantes (nylon ou metal)",
         "Arruelas lisas",
-        "Arruelas de pressÃ£o",
+        "Arruelas de pressão",
         "Arruelas dentadas",
         
-        // Elementos de FixaÃ§Ã£o
-        "Pinos de posicionamento cilÃ­ndricos",
-        "Pinos cÃ´nicos",
+        // Elementos de Fixação
+        "Pinos de posicionamento cilíndricos",
+        "Pinos cônicos",
         "Chavetas retas DIN 6885",
         "Chavetas paralelas DIN 6886",
         "Prisioneiros roscados",
-        "AnÃ©is de retenÃ§Ã£o Seeger",
+        "Anéis de retenção Seeger",
         "Buchas de guia",
-        "Buchas de reduÃ§Ã£o"
+        "Buchas de redução"
     ],
     
     "SOLDAGEM": [
@@ -456,8 +456,8 @@ const insumosBiblioteca = {
         // Eletrodos
         "Eletrodo revestido E6013",
         "Eletrodo revestido E7018",
-        "Eletrodo inoxidÃ¡vel 308L",
-        "Eletrodo de nÃ­quel Ni99",
+        "Eletrodo inoxidável 308L",
+        "Eletrodo de níquel Ni99",
         
         // Varetas TIG
         "Vareta TIG ER308L",
@@ -465,13 +465,13 @@ const insumosBiblioteca = {
         "Vareta TIG ER5356",
         
         // Gases
-        "ArgÃ´nio puro",
-        "COâ‚‚ industrial",
-        "Mistura Ar + COâ‚‚ (92/8 ou 80/20)",
-        "OxigÃªnio industrial",
+        "Argônio puro",
+        "CO₂ industrial",
+        "Mistura Ar + CO₂ (92/8 ou 80/20)",
+        "Oxigênio industrial",
         "Acetileno Puro",
-        "NitrogÃªnio gasoso",
-        "GÃ¡s hÃ©lio (uso especial)",
+        "Nitrogênio gasoso",
+        "Gás hélio (uso especial)",
         
         // Fundentes
         "Fundente para soldagem TIG",
@@ -480,26 +480,26 @@ const insumosBiblioteca = {
     
     "ACABAMENTO_PINTURA": [
         // Abrasivos
-        "Lixas ferro grÃ£o 36, 60, 80",
+        "Lixas ferro grão 36, 60, 80",
         "Lixas flap zirconada",
-        "Escovas de aÃ§o rotativas",
+        "Escovas de aço rotativas",
         
         // Ensaios
-        "LÃ­quido penetrante (ensaio LP)",
+        "Líquido penetrante (ensaio LP)",
         "Tinta de contraste para LP",
         "Revelador em spray",
         
         // Limpeza
         "Trapos industriais",
-        "Panos nÃ£o tecidos",
+        "Panos não tecidos",
         "Solvente desengraxante",
-        "Desengraxante biodegradÃ¡vel",
+        "Desengraxante biodegradável",
         
         // Tintas e Primers
-        "Tinta epÃ³xi bicomponente",
+        "Tinta epóxi bicomponente",
         "Tinta poliuretano (PU)",
-        "Tinta esmalte sintÃ©tico industrial",
-        "Primer zarcÃ£o industrial",
+        "Tinta esmalte sintético industrial",
+        "Primer zarcão industrial",
         "Diluente industrial",
         "Catalisador PU",
         "Fita crepe de alta temperatura",
@@ -508,63 +508,63 @@ const insumosBiblioteca = {
     ],
     
     "LUBRIFICACAO": [
-        "Ã“leo hidrÃ¡ulico ISO VG 32",
-        "Ã“leo hidrÃ¡ulico ISO VG 68",
+        "Óleo hidráulico ISO VG 32",
+        "Óleo hidráulico ISO VG 68",
         "Graxa industrial EP2",
-        "Graxa branca atÃ³xica",
-        "Graxa com bisulfeto de molibdÃªnio"
+        "Graxa branca atóxica",
+        "Graxa com bisulfeto de molibdênio"
     ],
     
     "DISPOSITIVOS_FIXACAO": [
-        "MandÃ­bulas de torno",
-        "Garras de torno automÃ¡tico",
-        "CalÃ§os metÃ¡licos",
-        "CalÃ§os plÃ¡sticos",
+        "Mandíbulas de torno",
+        "Garras de torno automático",
+        "Calços metálicos",
+        "Calços plásticos",
         "Calas de nivelamento",
-        "Morsas fixas e giratÃ³rias",
-        "Suportes magnÃ©ticos",
-        "Dispositivos de fixaÃ§Ã£o rÃ¡pida"
+        "Morsas fixas e giratórias",
+        "Suportes magnéticos",
+        "Dispositivos de fixação rápida"
     ],
     
     "ELEMENTOS_MAQUINAS": [
         // Mancais e Rolamentos
         "Mancais tipo pedestal",
         "Mancais tipo flange",
-        "Rolamentos rÃ­gidos de esferas",
-        "Rolamentos de rolos cilÃ­ndricos",
+        "Rolamentos rígidos de esferas",
+        "Rolamentos de rolos cilíndricos",
         "Rolamentos de agulhas",
         "Rolamentos axiais",
         
-        // TransmissÃ£o
+        // Transmissão
         "Engrenagens retas",
         "Engrenagens helicoidais",
-        "Polias de alumÃ­nio",
+        "Polias de alumínio",
         "Polias de ferro fundido",
         "Correias em V A/B/C",
         "Correias sincronizadoras HTD",
-        "Acoplamento elÃ¡stico tipo H",
+        "Acoplamento elástico tipo H",
         "Acoplamento dentado tipo KTR",
         "Acoplamento cardan",
         
         // Molas
         "Molas helicoidais",
         "Molas prato",
-        "Molas de compressÃ£o e traÃ§Ã£o"
+        "Molas de compressão e tração"
     ],
     
     "INSTRUMENTOS_MEDICAO": [
         // Instrumentos Dimensionais
-        "PaquÃ­metros digitais e analÃ³gicos",
-        "MicrÃ´metros externos",
-        "MicrÃ´metros internos",
-        "RelÃ³gios comparadores",
-        "RelÃ³gios apalpadores",
-        "Blocos padrÃ£o",
+        "Paquímetros digitais e analógicos",
+        "Micrômetros externos",
+        "Micrômetros internos",
+        "Relógios comparadores",
+        "Relógios apalpadores",
+        "Blocos padrão",
         "Calibradores de raio",
         "Calibradores de rosca (M, G, UN, NPT)",
         "Calibradores de folga",
         "Trenas industriais",
-        "Esquadros de precisÃ£o"
+        "Esquadros de precisão"
     ]
 };
 
@@ -610,15 +610,15 @@ const emptySupplierFormValues: z.infer<typeof supplierSchema> = {
 };
 
 export default function CostsPage() {
-    // VerificaÃ§Ã£o inicial de problemas com datas
+    // Verificação inicial de problemas com datas
     React.useEffect(() => {
         try {
-            // Testar se a biblioteca de formataÃ§Ã£o de datas estÃ¡ funcionando
+            // Testar se a biblioteca de formatação de datas está funcionando
             const testDate = new Date();
             format(testDate, 'dd/MM/yyyy');
-            console.log("âœ… Biblioteca de formataÃ§Ã£o de datas funcionando corretamente");
+            console.log("✅ Biblioteca de formatação de datas funcionando corretamente");
         } catch (error) {
-            console.error("âŒ Problema detectado com a biblioteca de formataÃ§Ã£o de datas:", error);
+            console.error("❌ Problema detectado com a biblioteca de formatação de datas:", error);
         }
 
         // Interceptar erros de RangeError relacionados a datas
@@ -626,7 +626,7 @@ export default function CostsPage() {
         console.error = (...args) => {
             const message = args.join(' ');
             if (message.includes('Invalid time value') || message.includes('RangeError')) {
-                console.warn("ðŸš¨ ERRO DE DATA DETECTADO:", ...args);
+                console.warn("🚨 ERRO DE DATA DETECTADO:", ...args);
                 console.trace("Stack trace do erro de data:");
             }
             originalError.apply(console, args);
@@ -672,7 +672,6 @@ export default function CostsPage() {
     const [isLoadingAppointments, setIsLoadingAppointments] = useState(false);
     const [appointmentOSFilter, setAppointmentOSFilter] = useState("all");
     const [openQrUrl, setOpenQrUrl] = useState("");
-    const [closeQrUrl, setCloseQrUrl] = useState("");
     const [costCenters, setCostCenters] = useState<ProductionCostCenter[]>([]);
     const [costCenterDrafts, setCostCenterDrafts] = useState<Record<string, string>>({});
     const [isSavingCostCenters, setIsSavingCostCenters] = useState(false);
@@ -697,8 +696,8 @@ export default function CostsPage() {
         resolver: zodResolver(costEntrySchema),
     });
 
-    // Resolve o vÃ­nculo primeiro pelo ID e, como contingÃªncia, pelo nÃºmero legÃ­vel da OS.
-    // Isso mantÃ©m compatibilidade com requisiÃ§Ãµes antigas e documentos migrados.
+    // Resolve o vínculo primeiro pelo ID e, como contingência, pelo número legível da OS.
+    // Isso mantém compatibilidade com requisições antigas e documentos migrados.
     const resolveLinkedOrder = useCallback((requisition: Pick<Requisition, 'orderId' | 'orderNumber' | 'internalOS'>) => {
         const orderById = requisition.orderId
             ? orders.find(order => order.id === requisition.orderId)
@@ -776,7 +775,7 @@ export default function CostsPage() {
                         }
                     })(),
                     items: (data.items || []).map((item: any, index: number): RequisitionItem => {
-                        // Tentar diferentes possÃ­veis estruturas para o peso
+                        // Tentar diferentes possíveis estruturas para o peso
                         const weight = item.weight || item.peso || item.materialWeight || item.itemWeight || undefined;
                         const weightUnit = item.weightUnit || item.pesoUnidade || item.unidadePeso || item.unit || "kg";
                         
@@ -814,21 +813,21 @@ export default function CostsPage() {
                     }),
                 };
                 
-                // Log para debug requisiÃ§Ãµes com valores
+                // Log para debug requisições com valores
                 if (requisition.totalValue && requisition.totalValue > 0) {
-                    console.log(`ðŸ’° RequisiÃ§Ã£o ${requisition.requisitionNumber} carregada com valor R$ ${requisition.totalValue} (${requisition.progress}% completa) - OS ID: ${requisition.orderId || 'NÃƒO VINCULADA'}`);
+                    console.log(`💰 Requisição ${requisition.requisitionNumber} carregada com valor R$ ${requisition.totalValue} (${requisition.progress}% completa) - OS ID: ${requisition.orderId || 'NÃO VINCULADA'}`);
                     
-                    // Log especial para a requisiÃ§Ã£o 00008
+                    // Log especial para a requisição 00008
                     if (requisition.requisitionNumber === '00008') {
-                        console.log(`ðŸ” ===== REQUISIÃ‡ÃƒO 00008 DETECTADA =====`);
-                        console.log(`ðŸ’° Valor: R$ ${requisition.totalValue}`);
-                        console.log(`ðŸ“Š Progresso: ${requisition.progress}%`);
-                        console.log(`ðŸ”— OS ID: ${requisition.orderId}`);
-                        console.log(`ðŸ“… Ãšltima atualizaÃ§Ã£o: ${requisition.lastPriceUpdate}`);
-                        console.log(`ðŸ” ===== FIM DEBUG 00008 =====`);
+                        console.log(`🔍 ===== REQUISIÇÃO 00008 DETECTADA =====`);
+                        console.log(`💰 Valor: R$ ${requisition.totalValue}`);
+                        console.log(`📊 Progresso: ${requisition.progress}%`);
+                        console.log(`🔗 OS ID: ${requisition.orderId}`);
+                        console.log(`📅 Última atualização: ${requisition.lastPriceUpdate}`);
+                        console.log(`🔍 ===== FIM DEBUG 00008 =====`);
                     }
                 } else if (requisition.orderId) {
-                    console.log(`ðŸ“‹ RequisiÃ§Ã£o ${requisition.requisitionNumber} sem valores ainda - OS ID: ${requisition.orderId}`);
+                    console.log(`📋 Requisição ${requisition.requisitionNumber} sem valores ainda - OS ID: ${requisition.orderId}`);
                 }
                 
                 return requisition;
@@ -836,7 +835,7 @@ export default function CostsPage() {
             setRequisitions(reqsList.sort(compareRequisitionsAscending));
         } catch (error) {
             console.error("Error fetching requisitions:", error);
-            toast({ variant: "destructive", title: "Erro ao buscar requisiÃ§Ãµes" });
+            toast({ variant: "destructive", title: "Erro ao buscar requisições" });
         } finally {
             setIsLoadingRequisitions(false);
         }
@@ -891,13 +890,13 @@ export default function CostsPage() {
     
     const fetchOrders = useCallback(async () => {
         if (!user) return;
-        console.log('ðŸ“Š Iniciando busca de ordens de serviÃ§o...');
+        console.log('📊 Iniciando busca de ordens de serviço...');
         setIsLoadingOrders(true);
         try {
             const ordersSnapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
             const ordersList: OrderInfo[] = ordersSnapshot.docs
-                // Custos precisam localizar tambÃ©m OS concluÃ­das ou canceladas,
-                // pois seus vÃ­nculos e histÃ³ricos financeiros continuam vÃ¡lidos.
+                // Custos precisam localizar também OS concluídas ou canceladas,
+                // pois seus vínculos e históricos financeiros continuam válidos.
                 .map(doc => {
                     const data = doc.data();
                     return {
@@ -951,26 +950,26 @@ export default function CostsPage() {
                 });
             
             const totalCostEntries = ordersList.reduce((sum, order) => sum + (order.costEntries?.length || 0), 0);
-            console.log(`ðŸ“Š ${ordersList.length} ordens carregadas com ${totalCostEntries} lanÃ§amentos de custo`);
+            console.log(`📊 ${ordersList.length} ordens carregadas com ${totalCostEntries} lançamentos de custo`);
             
             // Log especial para debug da OS 724/25
             const order724 = ordersList.find(order => order.internalOS === '724/25');
             if (order724) {
-                console.log(`ðŸ” ===== OS 724/25 DETECTADA =====`);
-                console.log(`ðŸ†” ID: ${order724.id}`);
-                console.log(`ðŸ“‹ NÃºmero: ${order724.internalOS}`);
-                console.log(`ðŸ‘¤ Cliente: ${order724.customerName}`);
-                console.log(`ðŸ’¼ LanÃ§amentos: ${(order724.costEntries || []).length}`);
+                console.log(`🔍 ===== OS 724/25 DETECTADA =====`);
+                console.log(`🆔 ID: ${order724.id}`);
+                console.log(`📋 Número: ${order724.internalOS}`);
+                console.log(`👤 Cliente: ${order724.customerName}`);
+                console.log(`💼 Lançamentos: ${(order724.costEntries || []).length}`);
                 if (order724.costEntries && order724.costEntries.length > 0) {
                     order724.costEntries.forEach((entry: any, index: number) => {
-                        console.log(`  ðŸ“ LanÃ§amento ${index + 1}: ${entry.description} - R$ ${entry.totalCost} (Req ID: ${entry.requisitionId || 'N/A'})`);
+                        console.log(`  📝 Lançamento ${index + 1}: ${entry.description} - R$ ${entry.totalCost} (Req ID: ${entry.requisitionId || 'N/A'})`);
                     });
                 }
-                console.log(`ðŸ” ===== FIM DEBUG OS 724/25 =====`);
+                console.log(`🔍 ===== FIM DEBUG OS 724/25 =====`);
             } else {
-                console.log(`âš ï¸ OS 724/25 NÃƒO ENCONTRADA nas ${ordersList.length} ordens carregadas`);
+                console.log(`⚠️ OS 724/25 NÃO ENCONTRADA nas ${ordersList.length} ordens carregadas`);
                 // Listar todas as OS para debug
-                console.log('ðŸ“‹ Ordens carregadas:');
+                console.log('📋 Ordens carregadas:');
                 ordersList.forEach(order => {
                     console.log(`  - ${order.internalOS} (ID: ${order.id}) - ${order.customerName}`);
                 });
@@ -981,7 +980,7 @@ export default function CostsPage() {
 
         } catch (error) {
             console.error("Error fetching orders:", error);
-            toast({ variant: "destructive", title: "Erro ao buscar Ordens de ServiÃ§o" });
+            toast({ variant: "destructive", title: "Erro ao buscar Ordens de Serviço" });
         } finally {
             setIsLoadingOrders(false);
         }
@@ -1013,11 +1012,11 @@ export default function CostsPage() {
                     orderId: String(data.orderId || ''),
                     orderInternalOS: String(data.orderInternalOS || 'N/A'),
                     itemId: String(data.itemId || ''),
-                    itemDescription: String(data.itemDescription || 'Item nÃ£o informado'),
-                    stageName: String(data.stageName || 'Etapa nÃ£o informada'),
+                    itemDescription: String(data.itemDescription || 'Item não informado'),
+                    stageName: String(data.stageName || 'Etapa não informada'),
                     hourlyRate: Number(data.hourlyRate) || 0,
                     status: data.status || 'Aberto',
-                    operatorName: String(data.operatorName || 'NÃ£o informado'),
+                    operatorName: String(data.operatorName || 'Não informado'),
                     startedAt: toDate(data.startedAt),
                     pausedAt: toDate(data.pausedAt),
                     closedAt: toDate(data.closedAt),
@@ -1061,13 +1060,9 @@ export default function CostsPage() {
 
     useEffect(() => {
         const baseUrl = window.location.origin;
-        Promise.all([
-            QRCode.toDataURL(`${baseUrl}/apontamento/abrir`, { width: 300, margin: 2 }),
-            QRCode.toDataURL(`${baseUrl}/apontamento/fechar`, { width: 300, margin: 2 }),
-        ]).then(([openUrl, closeUrl]) => {
-            setOpenQrUrl(openUrl);
-            setCloseQrUrl(closeUrl);
-        }).catch(error => console.error('Erro ao gerar QR Codes de apontamento:', error));
+        QRCode.toDataURL(`${baseUrl}/apontamento/abrir`, { width: 300, margin: 2 })
+            .then(setOpenQrUrl)
+            .catch(error => console.error('Erro ao gerar QR Code de apontamento:', error));
     }, []);
 
     const downloadQr = (dataUrl: string, filename: string) => {
@@ -1095,7 +1090,7 @@ export default function CostsPage() {
             os,
             entries,
             count: entries.length,
-            openCount: entries.filter(entry => entry.status !== 'ConcluÃ­do').length,
+            openCount: entries.filter(entry => entry.status !== 'Concluído').length,
             totalHours: entries.reduce((sum, entry) => sum + (Number(entry.totalHours) || 0), 0),
             totalCost: entries.reduce((sum, entry) => sum + (Number(entry.totalCost) || 0), 0),
         })).filter(group => !search || group.os.toLocaleLowerCase('pt-BR').includes(search))
@@ -1114,7 +1109,7 @@ export default function CostsPage() {
             });
             await batch.commit();
             await fetchCostCenters();
-            toast({ title: 'Centros de custo salvos', description: 'Os prÃ³ximos apontamentos usarÃ£o os novos valores por hora.' });
+            toast({ title: 'Centros de custo salvos', description: 'Os próximos apontamentos usarão os novos valores por hora.' });
         } catch (error) {
             console.error('Erro ao salvar centros de custo:', error);
             toast({ variant: 'destructive', title: 'Erro ao salvar centros de custo' });
@@ -1129,7 +1124,7 @@ export default function CostsPage() {
     };
 
     const saveAppointmentEdit = async () => {
-        if (!editingAppointment || editingAppointment.status !== 'ConcluÃ­do') return;
+        if (!editingAppointment || editingAppointment.status !== 'Concluído') return;
         const hours = Math.max(0, Number(editAppointmentHours.replace(',', '.')) || 0);
         const rate = Math.max(0, Number(editAppointmentRate.replace(',', '.')) || 0);
         const totalCost = Math.round(hours * rate * 100) / 100;
@@ -1138,17 +1133,17 @@ export default function CostsPage() {
                 const orderRef = doc(db, "companies", "mecald", "orders", editingAppointment.orderId);
                 const appointmentRef = doc(db, "companies", "mecald", "productionAppointments", editingAppointment.id);
                 const orderSnapshot = await transaction.get(orderRef);
-                if (!orderSnapshot.exists()) throw new Error('OS nÃ£o encontrada');
+                if (!orderSnapshot.exists()) throw new Error('OS não encontrada');
                 const costEntries = Array.isArray(orderSnapshot.data().costEntries) ? orderSnapshot.data().costEntries : [];
                 const updatedEntry = {
                     id: `apontamento-${editingAppointment.id}`,
-                    description: `MÃ£o de obra - ${editingAppointment.stageName} (${editingAppointment.itemDescription})`,
+                    description: `Mão de obra - ${editingAppointment.stageName} (${editingAppointment.itemDescription})`,
                     quantity: Number(hours.toFixed(4)), unitCost: rate, totalCost,
-                    entryDate: Timestamp.now(), enteredBy: `Apontamento (${editAppointmentOperator.trim() || 'NÃ£o informado'})`,
+                    entryDate: Timestamp.now(), enteredBy: `Apontamento (${editAppointmentOperator.trim() || 'Não informado'})`,
                     isFromAppointment: true, appointmentId: editingAppointment.id,
                 };
                 transaction.update(appointmentRef, {
-                    operatorName: editAppointmentOperator.trim() || 'NÃ£o informado', hourlyRate: rate,
+                    operatorName: editAppointmentOperator.trim() || 'Não informado', hourlyRate: rate,
                     totalHours: hours, accumulatedSeconds: Math.round(hours * 3600), totalCost, lastEditDate: Timestamp.now(),
                 });
                 transaction.update(orderRef, { costEntries: [...costEntries.filter((entry: any) => entry.appointmentId !== editingAppointment.id), updatedEntry] });
@@ -1177,15 +1172,15 @@ export default function CostsPage() {
             });
             setAppointmentToDelete(null);
             await fetchAppointments();
-            toast({ title: 'Apontamento excluÃ­do', description: 'O custo correspondente tambÃ©m foi removido da OS.' });
+            toast({ title: 'Apontamento excluído', description: 'O custo correspondente também foi removido da OS.' });
         } catch (error) {
             console.error('Erro ao excluir apontamento:', error);
             toast({ variant: 'destructive', title: 'Erro ao excluir apontamento' });
         }
     };
 
-    // Algumas consultas/versÃµes antigas nÃ£o retornavam OS concluÃ­das. Se a requisiÃ§Ã£o
-    // possui um ID vÃ¡lido, carregamos esse documento diretamente para preservar o vÃ­nculo.
+    // Algumas consultas/versões antigas não retornavam OS concluídas. Se a requisição
+    // possui um ID válido, carregamos esse documento diretamente para preservar o vínculo.
     useEffect(() => {
         if (isLoadingRequisitions || isLoadingOrders || !requisitions.length) return;
 
@@ -1234,27 +1229,27 @@ export default function CostsPage() {
         return () => { cancelled = true; };
     }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders]);
 
-    // Sincronizar requisiÃ§Ãµes com OS automaticamente
+    // Sincronizar requisições com OS automaticamente
     useEffect(() => {
         const syncRequisitionsWithOrders = async () => {
             if (!requisitions.length || !orders.length || isLoadingRequisitions || isLoadingOrders) return;
             
-            console.log('ðŸ”„ ===== INICIANDO VERIFICAÃ‡ÃƒO DE SINCRONIZAÃ‡ÃƒO =====');
-            console.log(`ðŸ“Š Total de requisiÃ§Ãµes: ${requisitions.length}`);
-            console.log(`ðŸ“Š Total de ordens: ${orders.length}`);
+            console.log('🔄 ===== INICIANDO VERIFICAÇÃO DE SINCRONIZAÇÃO =====');
+            console.log(`📊 Total de requisições: ${requisitions.length}`);
+            console.log(`📊 Total de ordens: ${orders.length}`);
             
             let hasChanges = false;
             
             for (const req of requisitions) {
                 const hasOrderLink = Boolean(req.orderId || req.orderNumber || req.internalOS);
                 if (hasOrderLink && req.totalValue && req.totalValue > 0) {
-                    console.log(`ðŸ” ===== VERIFICANDO REQUISIÃ‡ÃƒO ${req.requisitionNumber} =====`);
-                    console.log(`ðŸ’° Valor: R$ ${req.totalValue} | Progresso: ${req.progress}% | OS ID: ${req.orderId}`);
+                    console.log(`🔍 ===== VERIFICANDO REQUISIÇÃO ${req.requisitionNumber} =====`);
+                    console.log(`💰 Valor: R$ ${req.totalValue} | Progresso: ${req.progress}% | OS ID: ${req.orderId}`);
                     
                     const order = resolveLinkedOrder(req);
                     if (order) {
-                        // MigraÃ§Ã£o automÃ¡tica: consolida ID atual e nÃºmero da OS
-                        // nas requisiÃ§Ãµes antigas assim que o vÃ­nculo Ã© reconhecido.
+                        // Migração automática: consolida ID atual e número da OS
+                        // nas requisições antigas assim que o vínculo é reconhecido.
                         if (req.orderId !== order.id || req.orderNumber !== order.internalOS || req.internalOS !== order.internalOS) {
                             await updateDoc(doc(db, "companies", "mecald", "materialRequisitions", req.id), {
                                 orderId: order.id,
@@ -1266,20 +1261,20 @@ export default function CostsPage() {
                             req.internalOS = order.internalOS;
                             hasChanges = true;
                         }
-                        console.log(`ðŸ“‹ OS encontrada: ${order.internalOS} - ${order.customerName}`);
-                        console.log(`ðŸ’¼ LanÃ§amentos existentes na OS: ${(order.costEntries || []).length}`);
+                        console.log(`📋 OS encontrada: ${order.internalOS} - ${order.customerName}`);
+                        console.log(`💼 Lançamentos existentes na OS: ${(order.costEntries || []).length}`);
                         
-                        // Debug especial para requisiÃ§Ã£o 00008
+                        // Debug especial para requisição 00008
                         if (req.requisitionNumber === '00008') {
-                            console.log(`ðŸ” ===== MAPEAMENTO REQUISIÃ‡ÃƒO 00008 =====`);
-                            console.log(`ðŸ”— RequisiÃ§Ã£o 00008 estÃ¡ vinculada ao ID: ${req.orderId}`);
-                            console.log(`ðŸ“‹ Este ID corresponde Ã  OS: ${order.internalOS}`);
-                            console.log(`ðŸŽ¯ Esperado: OS 724/25`);
-                            console.log(`âœ… Match: ${order.internalOS === '724/25' ? 'SIM' : 'NÃƒO - PROBLEMA!'}`);
+                            console.log(`🔍 ===== MAPEAMENTO REQUISIÇÃO 00008 =====`);
+                            console.log(`🔗 Requisição 00008 está vinculada ao ID: ${req.orderId}`);
+                            console.log(`📋 Este ID corresponde à OS: ${order.internalOS}`);
+                            console.log(`🎯 Esperado: OS 724/25`);
+                            console.log(`✅ Match: ${order.internalOS === '724/25' ? 'SIM' : 'NÃO - PROBLEMA!'}`);
                             if (order.internalOS !== '724/25') {
-                                console.error(`âŒ ERRO: RequisiÃ§Ã£o 00008 deveria estar vinculada Ã  OS 724/25, mas estÃ¡ vinculada Ã  OS ${order.internalOS}`);
+                                console.error(`❌ ERRO: Requisição 00008 deveria estar vinculada à OS 724/25, mas está vinculada à OS ${order.internalOS}`);
                             }
-                            console.log(`ðŸ” ===== FIM MAPEAMENTO 00008 =====`);
+                            console.log(`🔍 ===== FIM MAPEAMENTO 00008 =====`);
                         }
                         
                         const existingReqCost = order.costEntries?.find((entry: any) => 
@@ -1287,33 +1282,33 @@ export default function CostsPage() {
                         );
                         
                         if (existingReqCost) {
-                            console.log(`ðŸ” LanÃ§amento existente encontrado: R$ ${existingReqCost.totalCost} | Pendente: ${existingReqCost.isPending}`);
+                            console.log(`🔍 Lançamento existente encontrado: R$ ${existingReqCost.totalCost} | Pendente: ${existingReqCost.isPending}`);
                         } else {
-                            console.log(`âš ï¸ NENHUM lanÃ§amento encontrado para esta requisiÃ§Ã£o!`);
+                            console.log(`⚠️ NENHUM lançamento encontrado para esta requisição!`);
                         }
                         
-                        // Se nÃ£o existe lanÃ§amento OU o lanÃ§amento existente tem valor diferente
+                        // Se não existe lançamento OU o lançamento existente tem valor diferente
                         const needsUpdate = !existingReqCost || 
                                           (existingReqCost.totalCost !== req.totalValue) ||
                                           existingReqCost.isPending;
                         
                         if (needsUpdate) {
-                            console.log(`ðŸš€ EXECUTANDO SINCRONIZAÃ‡ÃƒO: RequisiÃ§Ã£o ${req.requisitionNumber} -> OS ${req.orderId}`);
+                            console.log(`🚀 EXECUTANDO SINCRONIZAÇÃO: Requisição ${req.requisitionNumber} -> OS ${req.orderId}`);
                             try {
                                 await updateOrderCostFromRequisition(order.id, req.id, req.items);
                                 hasChanges = true;
-                                console.log(`âœ… SincronizaÃ§Ã£o da requisiÃ§Ã£o ${req.requisitionNumber} CONCLUÃDA`);
+                                console.log(`✅ Sincronização da requisição ${req.requisitionNumber} CONCLUÍDA`);
                             } catch (error) {
-                                console.error(`âŒ ERRO na sincronizaÃ§Ã£o da requisiÃ§Ã£o ${req.requisitionNumber}:`, error);
+                                console.error(`❌ ERRO na sincronização da requisição ${req.requisitionNumber}:`, error);
                             }
                         } else {
-                            console.log(`âœ… RequisiÃ§Ã£o ${req.requisitionNumber} jÃ¡ estÃ¡ sincronizada corretamente`);
+                            console.log(`✅ Requisição ${req.requisitionNumber} já está sincronizada corretamente`);
                         }
                     } else {
-                        console.error(`âŒ OS ${req.orderId} NÃƒO ENCONTRADA para requisiÃ§Ã£o ${req.requisitionNumber}!`);
+                        console.error(`❌ OS ${req.orderId} NÃO ENCONTRADA para requisição ${req.requisitionNumber}!`);
                     }
                 } else if (hasOrderLink && (!req.totalValue || req.totalValue === 0)) {
-                    // RequisiÃ§Ã£o sem valores ainda - criar lanÃ§amento pendente
+                    // Requisição sem valores ainda - criar lançamento pendente
                     const order = resolveLinkedOrder(req);
                     if (order) {
                         const existingReqCost = order.costEntries?.find((entry: any) => 
@@ -1321,7 +1316,7 @@ export default function CostsPage() {
                         );
                         
                         if (!existingReqCost) {
-                            console.log(`ðŸ“ Criando lanÃ§amento pendente para requisiÃ§Ã£o ${req.requisitionNumber} na OS ${req.orderId}`);
+                            console.log(`📝 Criando lançamento pendente para requisição ${req.requisitionNumber} na OS ${req.orderId}`);
                             await createInitialOrderCostFromRequisition(order.id, req.id);
                             hasChanges = true;
                         }
@@ -1329,16 +1324,16 @@ export default function CostsPage() {
                 }
             }
             
-            // Re-fetch orders se houve mudanÃ§as
-            console.log('ðŸ”„ ===== FINALIZANDO VERIFICAÃ‡ÃƒO DE SINCRONIZAÃ‡ÃƒO =====');
+            // Re-fetch orders se houve mudanças
+            console.log('🔄 ===== FINALIZANDO VERIFICAÇÃO DE SINCRONIZAÇÃO =====');
             if (hasChanges) {
-                console.log('ðŸ“Š âœ… MUDANÃ‡AS DETECTADAS - Atualizando interface...');
+                console.log('📊 ✅ MUDANÇAS DETECTADAS - Atualizando interface...');
                 await fetchOrders();
-                console.log('ðŸ”„ Interface atualizada apÃ³s sincronizaÃ§Ã£o');
+                console.log('🔄 Interface atualizada após sincronização');
             } else {
-                console.log('âœ… Nenhuma sincronizaÃ§Ã£o necessÃ¡ria - todos os dados estÃ£o atualizados');
+                console.log('✅ Nenhuma sincronização necessária - todos os dados estão atualizados');
             }
-            console.log('ðŸ”„ ===== VERIFICAÃ‡ÃƒO DE SINCRONIZAÃ‡ÃƒO CONCLUÃDA =====');
+            console.log('🔄 ===== VERIFICAÇÃO DE SINCRONIZAÇÃO CONCLUÍDA =====');
         };
         
         // Sincronizar quando dados mudam - aguardar um pouco para garantir que tudo foi carregado
@@ -1346,25 +1341,25 @@ export default function CostsPage() {
         return () => clearTimeout(timeoutId);
     }, [requisitions, orders, isLoadingRequisitions, isLoadingOrders, resolveLinkedOrder, fetchOrders]);
 
-    // FunÃ§Ã£o para forÃ§ar refresh dos dados de custos
+    // Função para forçar refresh dos dados de custos
     const forceRefreshCosts = useCallback(async () => {
-        console.log('ðŸ”„ Refresh forÃ§ado dos dados...');
+        console.log('🔄 Refresh forçado dos dados...');
         setIsLoadingOrders(true);
         setIsLoadingRequisitions(true);
         
-        // Recarregar tanto requisiÃ§Ãµes quanto ordens
+        // Recarregar tanto requisições quanto ordens
         await Promise.all([
             fetchRequisitions(),
             fetchOrders()
         ]);
         
-        console.log('âœ… Refresh completo - dados serÃ£o sincronizados automaticamente');
+        console.log('✅ Refresh completo - dados serão sincronizados automaticamente');
     }, [fetchOrders, fetchRequisitions]);
 
     // Auto-atualizar dados quando mudar para aba de custos
     useEffect(() => {
         if (activeTab === "costEntry") {
-            console.log('ðŸ”„ Mudou para aba de custos, atualizando dados...');
+            console.log('🔄 Mudou para aba de custos, atualizando dados...');
             forceRefreshCosts();
         }
     }, [activeTab, forceRefreshCosts]);
@@ -1376,7 +1371,7 @@ export default function CostsPage() {
             const selectedItemData = { ...item, requisitionId };
             setSelectedItem(selectedItemData);
             
-            // Resetar formulÃ¡rio com dados existentes - com proteÃ§Ã£o para datas
+            // Resetar formulário com dados existentes - com proteção para datas
             const formData = {
                 supplierName: item.supplierName || "",
                 invoiceNumber: item.invoiceNumber || "",
@@ -1389,7 +1384,7 @@ export default function CostsPage() {
                         const date = item.deliveryReceiptDate;
                         return date && !isNaN(date.getTime()) ? date : null;
                     } catch {
-                        console.warn("Data de entrega invÃ¡lida no item:", item.deliveryReceiptDate);
+                        console.warn("Data de entrega inválida no item:", item.deliveryReceiptDate);
                         return null;
                     }
                 })(),
@@ -1401,11 +1396,11 @@ export default function CostsPage() {
             itemForm.reset(formData);
             setIsFormOpen(true);
         } catch (error) {
-            console.error("Erro ao abrir formulÃ¡rio de item:", error);
+            console.error("Erro ao abrir formulário de item:", error);
             toast({ 
                 variant: "destructive",
                 title: "Erro", 
-                description: "NÃ£o foi possÃ­vel abrir o formulÃ¡rio. Tente novamente." 
+                description: "Não foi possível abrir o formulário. Tente novamente." 
             });
         }
     };
@@ -1417,7 +1412,7 @@ export default function CostsPage() {
             const reqRef = doc(db, "companies", "mecald", "materialRequisitions", selectedItem.requisitionId);
             const reqSnap = await getDoc(reqRef);
             if (!reqSnap.exists()) {
-                throw new Error("RequisiÃ§Ã£o nÃ£o encontrada.");
+                throw new Error("Requisição não encontrada.");
             }
 
             const reqData = reqSnap.data();
@@ -1425,7 +1420,7 @@ export default function CostsPage() {
             const itemIndex = items.findIndex((i: any) => i.id === selectedItem.id);
 
             if (itemIndex === -1) {
-                throw new Error("Item nÃ£o encontrado na requisiÃ§Ã£o.");
+                throw new Error("Item não encontrado na requisição.");
             }
 
             const updatedItem = {
@@ -1439,21 +1434,21 @@ export default function CostsPage() {
             } else if (values.inspectionStatus === "Rejeitado") {
                 updatedItem.status = "Inspecionado e Rejeitado";
             } else if (values.deliveryReceiptDate) {
-                updatedItem.status = "Recebido (Aguardando InspeÃ§Ã£o)";
+                updatedItem.status = "Recebido (Aguardando Inspeção)";
             }
 
             const updatedItems = [...items];
             updatedItems[itemIndex] = updatedItem;
 
-            // Calcular valor total da requisiÃ§Ã£o
+            // Calcular valor total da requisição
             const totalValue = updatedItems.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
             const itemsWithPrice = updatedItems.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
             const progress = updatedItems.length > 0 ? Math.round((itemsWithPrice / updatedItems.length) * 100) : 0;
 
-            console.log(`ðŸ’° Valor total calculado da requisiÃ§Ã£o: R$ ${totalValue}`);
-            console.log(`ðŸ“Š Progresso de precificaÃ§Ã£o: ${progress}% (${itemsWithPrice}/${updatedItems.length} itens)`);
+            console.log(`💰 Valor total calculado da requisição: R$ ${totalValue}`);
+            console.log(`📊 Progresso de precificação: ${progress}% (${itemsWithPrice}/${updatedItems.length} itens)`);
 
-            // Atualizar requisiÃ§Ã£o com os novos valores e totais
+            // Atualizar requisição com os novos valores e totais
             await updateDoc(reqRef, { 
                 items: updatedItems,
                 totalValue: totalValue,
@@ -1461,26 +1456,26 @@ export default function CostsPage() {
                 progress: progress,
                 lastPriceUpdate: Timestamp.now()
             });
-            console.log('âœ… RequisiÃ§Ã£o atualizada no banco de dados com valores totais');
+            console.log('✅ Requisição atualizada no banco de dados com valores totais');
 
-            // Atualizar custos da OS automaticamente se a requisiÃ§Ã£o estiver vinculada a uma OS
+            // Atualizar custos da OS automaticamente se a requisição estiver vinculada a uma OS
             let costUpdateSuccess = false;
             const requisitionForLink = requisitions.find(req => req.id === selectedItem.requisitionId);
             const resolvedOrder = requisitionForLink ? resolveLinkedOrder(requisitionForLink) : undefined;
             const resolvedOrderId = resolvedOrder?.id || reqData.orderId;
 
             if (resolvedOrderId) {
-                console.log('ðŸ”— RequisiÃ§Ã£o vinculada Ã  OS, atualizando custos...');
+                console.log('🔗 Requisição vinculada à OS, atualizando custos...');
                 try {
                     await updateOrderCostFromRequisition(resolvedOrderId, selectedItem.requisitionId, updatedItems);
-                    console.log('âœ… Custos da OS atualizados com sucesso');
+                    console.log('✅ Custos da OS atualizados com sucesso');
                     costUpdateSuccess = true;
                 } catch (costError) {
-                    console.error('âŒ Erro ao atualizar custos da OS:', costError);
-                    // Mesmo se houver erro nos custos, mostra que a requisiÃ§Ã£o foi salva
+                    console.error('❌ Erro ao atualizar custos da OS:', costError);
+                    // Mesmo se houver erro nos custos, mostra que a requisição foi salva
                 }
             } else {
-                console.log('âš ï¸ RequisiÃ§Ã£o nÃ£o estÃ¡ vinculada a uma OS');
+                console.log('⚠️ Requisição não está vinculada a uma OS');
             }
 
             // Toast mais informativo baseado nos valores
@@ -1488,48 +1483,48 @@ export default function CostsPage() {
                 const hasValues = values.invoiceItemValue && values.invoiceItemValue > 0;
                 if (hasValues && costUpdateSuccess) {
                     toast({ 
-                        title: "âœ… Item precificado com sucesso!", 
+                        title: "✅ Item precificado com sucesso!", 
                         description: `Valor ${values.invoiceItemValue?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} foi adicionado aos custos da OS.`,
                         duration: 5000
                     });
                 } else if (hasValues && !costUpdateSuccess) {
                     toast({ 
-                        title: "âš ï¸ Item atualizado com aviso!", 
-                        description: "Dados salvos, mas houve problema ao atualizar custos da OS. Tente recarregar a pÃ¡gina." 
+                        title: "⚠️ Item atualizado com aviso!", 
+                        description: "Dados salvos, mas houve problema ao atualizar custos da OS. Tente recarregar a página." 
                     });
                 } else {
                     toast({ 
-                        title: "ðŸ“ Item atualizado!", 
+                        title: "📝 Item atualizado!", 
                         description: "Dados salvos. Adicione o valor da nota fiscal para atualizar os custos da OS." 
                     });
                 }
             } else {
                 toast({ 
                     title: "Item atualizado com sucesso!", 
-                    description: "RequisiÃ§Ã£o nÃ£o vinculada a uma OS." 
+                    description: "Requisição não vinculada a uma OS." 
                 });
             }
 
-            // CORREÃ‡ÃƒO: NÃƒO fechar o modal nem mudar de aba automaticamente
-            // Deixar o usuÃ¡rio decidir quando sair da tela de precificaÃ§Ã£o
+            // CORREÇÃO: NÃO fechar o modal nem mudar de aba automaticamente
+            // Deixar o usuário decidir quando sair da tela de precificação
             // setIsFormOpen(false); // REMOVIDO
             
-            // ForÃ§ar refresh de dados de forma mais robusta
-            console.log('ðŸ”„ Atualizando interface apÃ³s ediÃ§Ã£o...');
+            // Forçar refresh de dados de forma mais robusta
+            console.log('🔄 Atualizando interface após edição...');
             
-            // Aguardar um pouco para o Firestore processar as mudanÃ§as
+            // Aguardar um pouco para o Firestore processar as mudanças
             await new Promise(resolve => setTimeout(resolve, 1000));
             
             // Atualizar dados sequencialmente para evitar conflitos
             await fetchRequisitions();
             await fetchOrders();
             
-            console.log('âœ… Interface atualizada');
+            console.log('✅ Interface atualizada');
             
-            // MELHORIA: Mostrar toast com opÃ§Ã£o de continuar precificando ou voltar
+            // MELHORIA: Mostrar toast com opção de continuar precificando ou voltar
             toast({
-                title: "ðŸŽ‰ Item salvo com sucesso!",
-                description: "VocÃª pode continuar precificando outros itens ou fechar esta janela quando terminar.",
+                title: "🎉 Item salvo com sucesso!",
+                description: "Você pode continuar precificando outros itens ou fechar esta janela quando terminar.",
                 duration: 7000
             });
             
@@ -1539,23 +1534,23 @@ export default function CostsPage() {
         }
     };
 
-    // FunÃ§Ã£o para atualizar custos da OS baseado na requisiÃ§Ã£o
+    // Função para atualizar custos da OS baseado na requisição
     const updateOrderCostFromRequisition = async (orderId, requisitionId, items) => {
-        console.log('ðŸ”„ ===== INICIANDO ATUALIZAÃ‡ÃƒO DE CUSTOS =====');
-        console.log('ðŸ”„ Dados de entrada:', { orderId, requisitionId, itemsCount: items.length });
+        console.log('🔄 ===== INICIANDO ATUALIZAÇÃO DE CUSTOS =====');
+        console.log('🔄 Dados de entrada:', { orderId, requisitionId, itemsCount: items.length });
         
         try {
-            // Buscar dados da requisiÃ§Ã£o
+            // Buscar dados da requisição
             const reqRef = doc(db, "companies", "mecald", "materialRequisitions", requisitionId);
             const reqSnap = await getDoc(reqRef);
             
             if (!reqSnap.exists()) {
-                console.log('âŒ RequisiÃ§Ã£o nÃ£o encontrada:', requisitionId);
+                console.log('❌ Requisição não encontrada:', requisitionId);
                 return;
             }
             
             const reqData = reqSnap.data();
-            console.log('ðŸ“‹ RequisiÃ§Ã£o encontrada:', {
+            console.log('📋 Requisição encontrada:', {
                 id: requisitionId,
                 number: reqData.requisitionNumber,
                 status: reqData.status,
@@ -1569,51 +1564,51 @@ export default function CostsPage() {
             const orderSnap = await getDoc(orderRef);
             
             if (!orderSnap.exists()) {
-                console.log('âŒ OS nÃ£o encontrada:', orderId);
+                console.log('❌ OS não encontrada:', orderId);
                 return;
             }
             
             const orderData = orderSnap.data();
             const existingCostEntries = orderData.costEntries || [];
-                    console.log('ðŸ“Š Custos existentes na OS:', existingCostEntries.length);
+                    console.log('📊 Custos existentes na OS:', existingCostEntries.length);
         
-        // Log detalhado dos lanÃ§amentos existentes
+        // Log detalhado dos lançamentos existentes
         existingCostEntries.forEach((entry, index) => {
-            console.log(`ðŸ“ LanÃ§amento ${index}: ID=${entry.id}, ReqID=${entry.requisitionId}, DescriÃ§Ã£o="${entry.description}"`);
+            console.log(`📝 Lançamento ${index}: ID=${entry.id}, ReqID=${entry.requisitionId}, Descrição="${entry.description}"`);
         });
         
-        // Remover lanÃ§amentos antigos desta requisiÃ§Ã£o
+        // Remover lançamentos antigos desta requisição
         const oldEntriesForThisReq = existingCostEntries.filter((entry) => 
             entry.requisitionId === requisitionId
         );
-        console.log(`ðŸ” Encontrados ${oldEntriesForThisReq.length} lanÃ§amentos antigos da requisiÃ§Ã£o ${requisitionId}:`, oldEntriesForThisReq.map(e => e.id));
+        console.log(`🔍 Encontrados ${oldEntriesForThisReq.length} lançamentos antigos da requisição ${requisitionId}:`, oldEntriesForThisReq.map(e => e.id));
         
         const filteredCostEntries = existingCostEntries.filter((entry) => 
             entry.requisitionId !== requisitionId
         );
-        console.log('ðŸ—‘ï¸ Removendo custos antigos da requisiÃ§Ã£o, restaram:', filteredCostEntries.length);
+        console.log('🗑️ Removendo custos antigos da requisição, restaram:', filteredCostEntries.length);
         
-        // Usar valores jÃ¡ calculados e salvos na requisiÃ§Ã£o
+        // Usar valores já calculados e salvos na requisição
         const requisitionTotal = reqData.totalValue || 0;
         const itemsWithValues = reqData.itemsWithPrice || 0;
         const totalItems = items.length;
         const progress = reqData.progress || 0;
         
-        console.log('ðŸ’µ Valor total da requisiÃ§Ã£o (salvo):', requisitionTotal);
-        console.log(`ðŸ“ˆ Progresso salvo: ${progress}% (${itemsWithValues}/${totalItems} itens precificados)`);
+        console.log('💵 Valor total da requisição (salvo):', requisitionTotal);
+        console.log(`📈 Progresso salvo: ${progress}% (${itemsWithValues}/${totalItems} itens precificados)`);
         
-        // Criar descriÃ§Ã£o dinÃ¢mica baseada no progresso
-        let description = `Materiais - RequisiÃ§Ã£o ${reqData.requisitionNumber || 'N/A'}`;
+        // Criar descrição dinâmica baseada no progresso
+        let description = `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'}`;
         
         if (itemsWithValues === 0) {
-            description += ` (Aguardando precificaÃ§Ã£o)`;
+            description += ` (Aguardando precificação)`;
         } else if (itemsWithValues < totalItems) {
             description += ` (${itemsWithValues}/${totalItems} itens precificados)`;
         } else {
             description += ` (Totalmente precificada)`;
         }
         
-        // Criar novo lanÃ§amento consolidado da requisiÃ§Ã£o - ANTES da limpeza
+        // Criar novo lançamento consolidado da requisição - ANTES da limpeza
         const requisitionCostEntry = {
             id: `req-${requisitionId}-${Date.now()}`,
             description: description,
@@ -1634,7 +1629,7 @@ export default function CostsPage() {
                 description: item.description || '',
                 quantity: item.quantityRequested || 0,
                 value: item.invoiceItemValue || 0,
-                weight: item.weight || null, // null ao invÃ©s de undefined
+                weight: item.weight || null, // null ao invés de undefined
                 weightUnit: item.weightUnit || 'kg',
                 hasPricing: !!(item.invoiceItemValue && item.invoiceItemValue > 0)
             }))
@@ -1643,53 +1638,53 @@ export default function CostsPage() {
         // LIMPAR DADOS antes de salvar no Firestore
         const cleanedCostEntry = cleanFirestoreData(requisitionCostEntry);
         
-        console.log('ðŸ’¾ Novo lanÃ§amento de custo (antes da limpeza):', requisitionCostEntry);
-        console.log('ðŸ§¹ Novo lanÃ§amento de custo (apÃ³s limpeza):', cleanedCostEntry);
+        console.log('💾 Novo lançamento de custo (antes da limpeza):', requisitionCostEntry);
+        console.log('🧹 Novo lançamento de custo (após limpeza):', cleanedCostEntry);
         
-        // Verificar se ainda hÃ¡ valores undefined
+        // Verificar se ainda há valores undefined
         const hasUndefined = JSON.stringify(cleanedCostEntry).includes('undefined');
         if (hasUndefined) {
-            console.error('âŒ AINDA HÃ VALORES UNDEFINED apÃ³s limpeza!');
-            console.error('Objeto problemÃ¡tico:', cleanedCostEntry);
-            throw new Error('Dados ainda contÃªm valores undefined apÃ³s limpeza');
+            console.error('❌ AINDA HÁ VALORES UNDEFINED após limpeza!');
+            console.error('Objeto problemático:', cleanedCostEntry);
+            throw new Error('Dados ainda contêm valores undefined após limpeza');
         }
         
-        // Primeiro, vamos tentar remover os lanÃ§amentos antigos usando arrayRemove
+        // Primeiro, vamos tentar remover os lançamentos antigos usando arrayRemove
         if (oldEntriesForThisReq.length > 0) {
-            console.log('ðŸ—‘ï¸ Removendo lanÃ§amentos antigos usando arrayRemove...');
+            console.log('🗑️ Removendo lançamentos antigos usando arrayRemove...');
             
-            // Remover lanÃ§amentos antigos um por um
+            // Remover lançamentos antigos um por um
             for (const oldEntry of oldEntriesForThisReq) {
-                console.log(`ðŸ—‘ï¸ Removendo lanÃ§amento: ${oldEntry.id}`);
-                // Limpar tambÃ©m o objeto a ser removido
+                console.log(`🗑️ Removendo lançamento: ${oldEntry.id}`);
+                // Limpar também o objeto a ser removido
                 const cleanedOldEntry = cleanFirestoreData(oldEntry);
                 await updateDoc(orderRef, {
                     costEntries: arrayRemove(cleanedOldEntry)
                 });
             }
             
-            console.log('âœ… LanÃ§amentos antigos removidos');
+            console.log('✅ Lançamentos antigos removidos');
         }
         
-        // Adicionar o novo lanÃ§amento
-        console.log('ðŸ“ Adicionando novo lanÃ§amento...');
+        // Adicionar o novo lançamento
+        console.log('📝 Adicionando novo lançamento...');
         await updateDoc(orderRef, {
             costEntries: arrayUnion(cleanedCostEntry)
         });
-        console.log('âœ… Novo lanÃ§amento adicionado');
+        console.log('✅ Novo lançamento adicionado');
         
-        console.log(`âœ… Custo da OS atualizado com sucesso: RequisiÃ§Ã£o ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
-        console.log('ðŸ”„ ===== ATUALIZAÃ‡ÃƒO DE CUSTOS CONCLUÃDA =====');
+        console.log(`✅ Custo da OS atualizado com sucesso: Requisição ${reqData.requisitionNumber} = R$ ${requisitionTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`);
+        console.log('🔄 ===== ATUALIZAÇÃO DE CUSTOS CONCLUÍDA =====');
         
     } catch (error) {
-        console.error("âŒ ===== ERRO NA ATUALIZAÃ‡ÃƒO DE CUSTOS =====");
-        console.error("âŒ Error updating order costs:", error);
-        console.error("âŒ Detalhes:", { orderId, requisitionId, itemsCount: items.length });
+        console.error("❌ ===== ERRO NA ATUALIZAÇÃO DE CUSTOS =====");
+        console.error("❌ Error updating order costs:", error);
+        console.error("❌ Detalhes:", { orderId, requisitionId, itemsCount: items.length });
         throw error; // Re-throw para que possa ser tratado no onItemSubmit
     }
     };
 
-    // FunÃ§Ã£o para criar lanÃ§amento inicial quando uma requisiÃ§Ã£o Ã© vinculada a uma OS
+    // Função para criar lançamento inicial quando uma requisição é vinculada a uma OS
     const createInitialOrderCostFromRequisition = async (orderId, requisitionId) => {
         try {
             const reqRef = doc(db, "companies", "mecald", "materialRequisitions", requisitionId);
@@ -1700,16 +1695,16 @@ export default function CostsPage() {
             const reqData = reqSnap.data();
             const items = reqData.items || [];
             
-            // Criar lanÃ§amento inicial (mesmo sem valores)
+            // Criar lançamento inicial (mesmo sem valores)
             const orderRef = doc(db, "companies", "mecald", "orders", orderId);
             const initialCostEntry = {
                 id: `req-${requisitionId}-initial`,
-                description: `Materiais - RequisiÃ§Ã£o ${reqData.requisitionNumber || 'N/A'} (Aguardando precificaÃ§Ã£o)`,
+                description: `Materiais - Requisição ${reqData.requisitionNumber || 'N/A'} (Aguardando precificação)`,
                 quantity: items.length,
                 unitCost: 0,
                 totalCost: 0,
                 entryDate: Timestamp.now(),
-                enteredBy: 'Sistema (RequisiÃ§Ã£o)',
+                enteredBy: 'Sistema (Requisição)',
                 requisitionId: requisitionId,
                 isFromRequisition: true,
                 isPending: true,
@@ -1717,7 +1712,7 @@ export default function CostsPage() {
                     description: item.description || '',
                     quantity: item.quantityRequested || 0,
                     value: 0,
-                    weight: item.weight || null, // null ao invÃ©s de undefined
+                    weight: item.weight || null, // null ao invés de undefined
                     weightUnit: item.weightUnit || 'kg'
                 }))
             };
@@ -1736,9 +1731,9 @@ export default function CostsPage() {
     
     const onSupplierSubmit = async (values: z.infer<typeof supplierSchema>) => {
         try {
-            console.log("Dados do formulÃ¡rio:", values);
+            console.log("Dados do formulário:", values);
             
-            // FunÃ§Ã£o simples para limpar campos undefined/null/vazios
+            // Função simples para limpar campos undefined/null/vazios
             const cleanObject = (obj: any): any => {
                 if (obj === null || obj === undefined || obj === '') {
                     return null;
@@ -1764,7 +1759,7 @@ export default function CostsPage() {
                 return obj;
             };
 
-            // Preparar dados bÃ¡sicos obrigatÃ³rios
+            // Preparar dados básicos obrigatórios
             const dataToSave: any = {
                 razaoSocial: values.razaoSocial || values.nomeFantasia || 'Fornecedor',
                 nomeFantasia: values.nomeFantasia || values.razaoSocial || 'Fornecedor',
@@ -1851,27 +1846,27 @@ export default function CostsPage() {
         
         try {
             if (isEditingCost && editingCostEntry) {
-                // EDITANDO LANÃ‡AMENTO EXISTENTE
+                // EDITANDO LANÇAMENTO EXISTENTE
                 const orderSnap = await getDoc(orderRef);
                 if (!orderSnap.exists()) {
-                    throw new Error("Ordem de serviÃ§o nÃ£o encontrada.");
+                    throw new Error("Ordem de serviço não encontrada.");
                 }
                 
                 const orderData = orderSnap.data();
                 const costEntries = orderData.costEntries || [];
                 
-                // Encontrar o lanÃ§amento antigo
+                // Encontrar o lançamento antigo
                 const oldEntryIndex = costEntries.findIndex((e: any) => e.id === editingCostEntry.id);
                 if (oldEntryIndex === -1) {
-                    throw new Error("LanÃ§amento nÃ£o encontrado.");
+                    throw new Error("Lançamento não encontrado.");
                 }
                 
                 const oldEntry = costEntries[oldEntryIndex];
                 
-                // Criar o lanÃ§amento atualizado, preservando campos importantes
+                // Criar o lançamento atualizado, preservando campos importantes
                 const updatedEntry = {
                     ...oldEntry,
-                    // Para lanÃ§amentos automÃ¡ticos, preservar descriÃ§Ã£o, quantidade e custo originais
+                    // Para lançamentos automáticos, preservar descrição, quantidade e custo originais
                     description: oldEntry.isFromRequisition ? oldEntry.description : values.description,
                     quantity: oldEntry.isFromRequisition ? oldEntry.quantity : values.quantity,
                     unitCost: oldEntry.isFromRequisition ? oldEntry.unitCost : values.unitCost,
@@ -1891,11 +1886,11 @@ export default function CostsPage() {
                 });
                 
                 toast({ 
-                    title: "LanÃ§amento atualizado!", 
-                    description: `As alteraÃ§Ãµes foram salvas com sucesso.` 
+                    title: "Lançamento atualizado!", 
+                    description: `As alterações foram salvas com sucesso.` 
                 });
             } else {
-                // CRIANDO NOVO LANÃ‡AMENTO
+                // CRIANDO NOVO LANÇAMENTO
                 const costEntry = {
                     id: Date.now().toString(),
                     description: values.description,
@@ -1912,8 +1907,8 @@ export default function CostsPage() {
                 });
                 
                 toast({ 
-                    title: "Custo lanÃ§ado!", 
-                    description: `O custo foi adicionado Ã  OS selecionada.` 
+                    title: "Custo lançado!", 
+                    description: `O custo foi adicionado à OS selecionada.` 
                 });
             }
             
@@ -1985,7 +1980,7 @@ export default function CostsPage() {
             setEditingCostEntry(entry);
             setIsEditingCost(true);
             
-            // Preencher o formulÃ¡rio com os dados do lanÃ§amento
+            // Preencher o formulário com os dados do lançamento
             costEntryForm.reset({
                 orderId: entry.orderId || "",
                 description: entry.description || "",
@@ -1994,19 +1989,19 @@ export default function CostsPage() {
                 purchaseOrderNumber: entry.purchaseOrderNumber || "",
             });
             
-            // Ir para a aba de lanÃ§amento
+            // Ir para a aba de lançamento
             setActiveTab("costEntry");
             
             toast({ 
-                title: "Modo de ediÃ§Ã£o ativado", 
-                description: "Modifique os campos desejados e salve as alteraÃ§Ãµes." 
+                title: "Modo de edição ativado", 
+                description: "Modifique os campos desejados e salve as alterações." 
             });
         } catch (error) {
-            console.error("Erro ao ativar modo de ediÃ§Ã£o:", error);
+            console.error("Erro ao ativar modo de edição:", error);
             toast({ 
                 variant: "destructive",
                 title: "Erro", 
-                description: "NÃ£o foi possÃ­vel ativar o modo de ediÃ§Ã£o. Tente novamente." 
+                description: "Não foi possível ativar o modo de edição. Tente novamente." 
             });
         }
     };
@@ -2020,10 +2015,10 @@ export default function CostsPage() {
         setItemSpecification("");
     };
 
-    // FunÃ§Ã£o para gerar relatÃ³rio de recebimento de materiais por OS
+    // Função para gerar relatório de recebimento de materiais por OS
     const generateMaterialsReport = (order: OrderInfo) => {
         try {
-            // Buscar todas as requisiÃ§Ãµes vinculadas a esta OS
+            // Buscar todas as requisições vinculadas a esta OS
             const orderRequisitions = requisitions.filter(req => req.orderId === order.id);
             
             // Agrupar gastos por fornecedor
@@ -2045,7 +2040,7 @@ export default function CostsPage() {
                 }>
             }} = {};
 
-            // Resumo por requisiÃ§Ã£o
+            // Resumo por requisição
             const requisitionSummary = orderRequisitions.map(req => {
                 const materialsWithValue = req.items.filter(item => 
                     item.invoiceItemValue && item.invoiceItemValue > 0 && item.supplierName
@@ -2123,11 +2118,11 @@ export default function CostsPage() {
                 reportDate: new Date()
             };
         } catch (error) {
-            console.error("Erro ao gerar relatÃ³rio:", error);
+            console.error("Erro ao gerar relatório:", error);
             toast({
                 variant: "destructive",
-                title: "Erro ao gerar relatÃ³rio",
-                description: "NÃ£o foi possÃ­vel processar os dados para o relatÃ³rio."
+                title: "Erro ao gerar relatório",
+                description: "Não foi possível processar os dados para o relatório."
             });
             return null;
         }
@@ -2144,13 +2139,13 @@ export default function CostsPage() {
             
             if (totalReqItems > 0) {
                 toast({
-                    title: "ðŸ“¦ RelatÃ³rio nÃ£o disponÃ­vel",
-                    description: `Esta OS possui ${totalReqItems} itens em ${orderReqs.length} requisiÃ§Ãµes, mas nenhum material foi recebido e precificado ainda.`
+                    title: "📦 Relatório não disponível",
+                    description: `Esta OS possui ${totalReqItems} itens em ${orderReqs.length} requisições, mas nenhum material foi recebido e precificado ainda.`
                 });
             } else {
                 toast({
-                    title: "ðŸ“‹ Nenhuma requisiÃ§Ã£o",
-                    description: "Esta OS nÃ£o possui requisiÃ§Ãµes de materiais vinculadas."
+                    title: "📋 Nenhuma requisição",
+                    description: "Esta OS não possui requisições de materiais vinculadas."
                 });
             }
         }
@@ -2162,7 +2157,7 @@ export default function CostsPage() {
         try {
             const orderSnap = await getDoc(orderRef);
             if (!orderSnap.exists()) {
-                throw new Error("Ordem de serviÃ§o nÃ£o encontrada.");
+                throw new Error("Ordem de serviço não encontrada.");
             }
             const orderData = orderSnap.data();
             const costEntries = orderData.costEntries || [];
@@ -2170,7 +2165,7 @@ export default function CostsPage() {
             const entryToRemove = costEntries.find((e: any) => e.id === costEntryToDelete.id);
 
             if (!entryToRemove) {
-                toast({ variant: "destructive", title: "Erro", description: "O lanÃ§amento de custo jÃ¡ foi removido ou nÃ£o foi encontrado." });
+                toast({ variant: "destructive", title: "Erro", description: "O lançamento de custo já foi removido ou não foi encontrado." });
                 setIsDeleteCostAlertOpen(false);
                 return;
             }
@@ -2179,7 +2174,7 @@ export default function CostsPage() {
                 costEntries: arrayRemove(entryToRemove)
             });
             
-            toast({ title: "Custo removido!", description: `O lanÃ§amento foi removido da OS.` });
+            toast({ title: "Custo removido!", description: `O lançamento foi removido da OS.` });
             
             setIsDeleteCostAlertOpen(false);
             setCostEntryToDelete(null);
@@ -2190,7 +2185,7 @@ export default function CostsPage() {
         }
     };
 
-    // Reparo manual e permanente para vÃ­nculos antigos ou IDs invÃ¡lidos.
+    // Reparo manual e permanente para vínculos antigos ou IDs inválidos.
     const handleRelinkRequisition = async (requisition: Requisition) => {
         const selectedOrderId = selectedOrderByRequisition[requisition.id];
         const selectedOrder = orders.find(order => order.id === selectedOrderId);
@@ -2199,7 +2194,7 @@ export default function CostsPage() {
             toast({
                 variant: "destructive",
                 title: "Selecione uma OS",
-                description: "Busque e selecione a OS correta antes de confirmar o vÃ­nculo.",
+                description: "Busque e selecione a OS correta antes de confirmar o vínculo.",
             });
             return;
         }
@@ -2219,7 +2214,7 @@ export default function CostsPage() {
                 linkUpdatedBy: user?.email || 'Sistema',
             });
 
-            // Se a requisiÃ§Ã£o jÃ¡ possui valores, lanÃ§a o custo imediatamente.
+            // Se a requisição já possui valores, lança o custo imediatamente.
             if ((requisition.totalValue || 0) > 0) {
                 await updateOrderCostFromRequisition(selectedOrder.id, requisition.id, requisition.items);
             } else {
@@ -2228,7 +2223,7 @@ export default function CostsPage() {
 
             toast({
                 title: "OS vinculada com sucesso",
-                description: `A requisiÃ§Ã£o ${requisition.requisitionNumber} foi vinculada Ã  OS ${selectedOrder.internalOS}.`,
+                description: `A requisição ${requisition.requisitionNumber} foi vinculada à OS ${selectedOrder.internalOS}.`,
             });
 
             setSelectedOrderByRequisition(current => {
@@ -2245,11 +2240,11 @@ export default function CostsPage() {
             await fetchRequisitions();
             await fetchOrders();
         } catch (error) {
-            console.error('Erro ao corrigir vÃ­nculo da requisiÃ§Ã£o:', error);
+            console.error('Erro ao corrigir vínculo da requisição:', error);
             toast({
                 variant: "destructive",
                 title: "Erro ao vincular OS",
-                description: "NÃ£o foi possÃ­vel salvar o vÃ­nculo. Tente novamente.",
+                description: "Não foi possível salvar o vínculo. Tente novamente.",
             });
         } finally {
             setRelinkingRequisitionId(null);
@@ -2273,19 +2268,19 @@ export default function CostsPage() {
         order.customerName.toLowerCase().includes(osSearchTerm.toLowerCase())
     );
 
-    // FunÃ§Ã£o para selecionar insumo da biblioteca
+    // Função para selecionar insumo da biblioteca
     const handleInsumoSelect = (insumo: string) => {
         setSelectedInsumo(insumo);
         updateItemDescription(insumo, itemSpecification);
     };
 
-    // FunÃ§Ã£o para atualizar descriÃ§Ã£o completa do item
+    // Função para atualizar descrição completa do item
     const updateItemDescription = (baseItem: string, specification: string) => {
         const fullDescription = specification ? `${baseItem} - ${specification}` : baseItem;
         costEntryForm.setValue('description', fullDescription);
     };
 
-    // FunÃ§Ã£o para atualizar especificaÃ§Ã£o
+    // Função para atualizar especificação
     const handleSpecificationChange = (specification: string) => {
         setItemSpecification(specification);
         if (selectedInsumo) {
@@ -2391,10 +2386,10 @@ export default function CostsPage() {
 
             pdf.setFont('helvetica', 'bold');
             pdf.setFontSize(16);
-            pdf.text(`RELATÃ“RIO DE APONTAMENTO E CUSTO DE PRODUÃ‡ÃƒO - OS ${osNumber}`, 14, 15);
+            pdf.text(`RELATÓRIO DE APONTAMENTO E CUSTO DE PRODUÇÃO - OS ${osNumber}`, 14, 15);
             autoTable(pdf, {
                 startY: 25,
-                head: [['Item', 'Etapa', 'Operador', 'InÃ­cio', 'Fim', 'Status', 'Horas', 'R$/h', 'Custo']],
+                head: [['Item', 'Etapa', 'Operador', 'Início', 'Fim', 'Status', 'Horas', 'R$/h', 'Custo']],
                 body: list.map(appointment => [
                     appointment.itemDescription,
                     appointment.stageName,
@@ -2417,13 +2412,13 @@ export default function CostsPage() {
             pdf.save(`Apontamentos_OS_${osNumber.replace(/[^a-zA-Z0-9]/g, '-')}.pdf`);
         } catch (error) {
             console.error('Erro ao exportar apontamentos:', error);
-            toast({ variant: 'destructive', title: 'Erro ao exportar relatÃ³rio de apontamentos' });
+            toast({ variant: 'destructive', title: 'Erro ao exportar relatório de apontamentos' });
         }
     };
 
 
 
-    // ProteÃ§Ã£o contra erros de renderizaÃ§Ã£o
+    // Proteção contra erros de renderização
     try {
         return (
         <>
@@ -2435,7 +2430,7 @@ export default function CostsPage() {
             <TabsList>
                 <TabsTrigger value="receipts">Recebimento de Materiais</TabsTrigger>
                 <TabsTrigger value="suppliers">Fornecedores</TabsTrigger>
-                <TabsTrigger value="costEntry">LanÃ§amento de Custos</TabsTrigger>
+                <TabsTrigger value="costEntry">Lançamento de Custos</TabsTrigger>
                 <TabsTrigger value="appointments">Apontamentos</TabsTrigger>
             </TabsList>
             <TabsContent value="receipts">
@@ -2444,12 +2439,12 @@ export default function CostsPage() {
                     <div>
                     <CardTitle>Recebimento de Materiais</CardTitle>
                     <CardDescription>
-                      Gerencie o recebimento de materiais das requisiÃ§Ãµes, adicione valores das notas fiscais e realize a inspeÃ§Ã£o de qualidade. 
-                      <strong>Os valores totais de cada requisiÃ§Ã£o serÃ£o automaticamente lanÃ§ados como custos nas OS vinculadas.</strong>
+                      Gerencie o recebimento de materiais das requisições, adicione valores das notas fiscais e realize a inspeção de qualidade. 
+                      <strong>Os valores totais de cada requisição serão automaticamente lançados como custos nas OS vinculadas.</strong>
                     </CardDescription>
                     </div>
                     <Button variant="outline" onClick={fetchRequisitions} disabled={isLoadingRequisitions}>
-                      {isLoadingRequisitions ? 'Carregando...' : 'ðŸ”„ Atualizar'}
+                      {isLoadingRequisitions ? 'Carregando...' : '🔄 Atualizar'}
                     </Button>
                   </CardHeader>
                   <CardContent>
@@ -2461,13 +2456,13 @@ export default function CostsPage() {
                                 id="receipt-search"
                                 value={receiptSearchTerm}
                                 onChange={(event) => setReceiptSearchTerm(event.target.value)}
-                                placeholder="Buscar por OS, requisiÃ§Ã£o, cliente, item, fornecedor ou NF..."
+                                placeholder="Buscar por OS, requisição, cliente, item, fornecedor ou NF..."
                                 className="pl-9"
                             />
                         </div>
                         {receiptSearchTerm && (
                             <p className="text-xs text-muted-foreground">
-                                {filteredReceiptRequisitions.length} de {requisitions.length} requisiÃ§Ãµes encontradas
+                                {filteredReceiptRequisitions.length} de {requisitions.length} requisições encontradas
                             </p>
                         )}
                     </div>
@@ -2486,11 +2481,11 @@ export default function CostsPage() {
                                             return (
                                                 <div className="flex-1 text-left">
                                                     <div className="flex items-center gap-4">
-                                                        <span className="font-bold text-primary">RequisiÃ§Ã£o NÂº {req.requisitionNumber}</span>
+                                                        <span className="font-bold text-primary">Requisição Nº {req.requisitionNumber}</span>
                                                         <span className="text-muted-foreground text-sm">Data: {safeFormatDate(req.date, 'dd/MM/yyyy')}</span>
                                                         {totalValue > 0 && (
                                                             <Badge variant="default" className="bg-green-600 text-white">
-                                                                ðŸ’° {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                                                💰 {totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                             </Badge>
                                                         )}
                                                     </div>
@@ -2502,15 +2497,15 @@ export default function CostsPage() {
                                                                     const savedNumber = req.orderNumber || req.internalOS;
                                                                     return order
                                                                         ? `OS: ${order.internalOS} - ${order.customerName}`
-                                                                        : savedNumber ? `OS: ${savedNumber}` : 'OS nÃ£o encontrada';
+                                                                        : savedNumber ? `OS: ${savedNumber}` : 'OS não encontrada';
                                                                 })() : 'Sem OS vinculada'
                                                             }
                                                         </span>
-                                                        <span>â€¢</span>
+                                                        <span>•</span>
                                                         <span>{req.items.length} itens</span>
-                                                        <span>â€¢</span>
+                                                        <span>•</span>
                                                         <span className={`font-medium ${progress === 100 ? 'text-green-600' : progress > 0 ? 'text-blue-600' : 'text-orange-600'}`}>
-                                                            {progress === 100 ? 'âœ… Completo' : progress > 0 ? `ðŸ“Š ${progress}% precificado` : 'â³ Aguardando preÃ§os'}
+                                                            {progress === 100 ? '✅ Completo' : progress > 0 ? `📊 ${progress}% precificado` : '⏳ Aguardando preços'}
                                                         </span>
                                                     </div>
                                                 </div>
@@ -2519,7 +2514,7 @@ export default function CostsPage() {
                                     </AccordionTrigger>
                                     <AccordionContent className="p-2">
                                         {(() => {
-                                            // Calcular valores da requisiÃ§Ã£o
+                                            // Calcular valores da requisição
                                             const totalValue = req.items.reduce((sum, item) => sum + (item.invoiceItemValue || 0), 0);
                                             const itemsWithPrice = req.items.filter(item => item.invoiceItemValue && item.invoiceItemValue > 0).length;
                                             const totalItems = req.items.length;
@@ -2540,7 +2535,7 @@ export default function CostsPage() {
                                                                             const savedNumber = req.orderNumber || req.internalOS;
                                                                             return order
                                                                                 ? `${order.internalOS} - ${order.customerName}`
-                                                                                : savedNumber || 'OS nÃ£o encontrada';
+                                                                                : savedNumber || 'OS não encontrada';
                                                                         })() : 'Nenhuma OS vinculada'
                                                                     }
                                                                 </p>
@@ -2556,18 +2551,18 @@ export default function CostsPage() {
                                                         </div>
                                                     </div>
                                                     
-                                                    {/* Resumo Financeiro da RequisiÃ§Ã£o */}
+                                                    {/* Resumo Financeiro da Requisição */}
                                                     <div className="mb-4 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                                                         <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
                                                             <h4 className="font-semibold text-blue-900 flex items-center gap-2">
-                                                                ðŸ’° Resumo Financeiro da RequisiÃ§Ã£o
+                                                                💰 Resumo Financeiro da Requisição
                                                             </h4>
                                                             <div className="flex items-center gap-2">
                                                                 <Button type="button" size="sm" variant="outline" onClick={() => exportRequisitionCostReport(req)}>
                                                                     <Download className="mr-2 h-4 w-4" /> Baixar custos da OS
                                                                 </Button>
                                                                 <Badge variant={progress === 100 ? "default" : progress > 0 ? "secondary" : "outline"} className="text-xs">
-                                                                    {progress === 100 ? "âœ… Completo" : progress > 0 ? `${progress}% Precificado` : "â³ Aguardando"}
+                                                                    {progress === 100 ? "✅ Completo" : progress > 0 ? `${progress}% Precificado` : "⏳ Aguardando"}
                                                                 </Badge>
                                                             </div>
                                                         </div>
@@ -2601,7 +2596,7 @@ export default function CostsPage() {
                                                             </div>
                                                             
                                                             <div className="bg-white p-3 rounded border">
-                                                                <span className="text-xs text-muted-foreground block">Custo MÃ©dio da MatÃ©ria-Prima</span>
+                                                                <span className="text-xs text-muted-foreground block">Custo Médio da Matéria-Prima</span>
                                                                 <span className="text-lg font-bold text-purple-600">
                                                                     {averageCostPerKg.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}/kg
                                                                 </span>
@@ -2613,7 +2608,7 @@ export default function CostsPage() {
                                                         
                                                         {(req.orderId || req.orderNumber || req.internalOS) && totalValue > 0 && (
                                                             <div className="mt-3 p-2 bg-green-100 border border-green-300 rounded text-sm text-green-800">
-                                                                âœ… <strong>Este valor serÃ¡ automaticamente lanÃ§ado como custo na OS {
+                                                                ✅ <strong>Este valor será automaticamente lançado como custo na OS {
                                                                     (() => {
                                                                         const order = resolveLinkedOrder(req);
                                                                         return order?.internalOS || req.orderNumber || req.internalOS || req.orderId;
@@ -2624,7 +2619,7 @@ export default function CostsPage() {
                                                         
                                                         {(req.orderId || req.orderNumber || req.internalOS) && totalValue === 0 && (
                                                             <div className="mt-3 p-2 bg-orange-100 border border-orange-300 rounded text-sm text-orange-800">
-                                                                â³ Adicione os valores dos itens para que sejam lanÃ§ados automaticamente na OS {
+                                                                ⏳ Adicione os valores dos itens para que sejam lançados automaticamente na OS {
                                                                     (() => {
                                                                         const order = resolveLinkedOrder(req);
                                                                         return order?.internalOS || req.orderNumber || req.internalOS || req.orderId;
@@ -2636,10 +2631,10 @@ export default function CostsPage() {
                                                         {!resolveLinkedOrder(req) && (
                                                             <div className="mt-3 space-y-3 rounded border border-red-300 bg-red-100 p-3 text-sm text-red-800">
                                                                 <div>
-                                                                    âš ï¸ <strong>Problema de vinculaÃ§Ã£o:</strong> {(req.orderId || req.orderNumber || req.internalOS)
-                                                                        ? `A OS vinculada (${req.orderNumber || req.internalOS || `ID: ${req.orderId}`}) nÃ£o foi encontrada.`
-                                                                        : 'Esta requisiÃ§Ã£o nÃ£o possui uma OS vinculada.'}
-                                                                    Selecione abaixo a OS correta para reparar permanentemente o vÃ­nculo.
+                                                                    ⚠️ <strong>Problema de vinculação:</strong> {(req.orderId || req.orderNumber || req.internalOS)
+                                                                        ? `A OS vinculada (${req.orderNumber || req.internalOS || `ID: ${req.orderId}`}) não foi encontrada.`
+                                                                        : 'Esta requisição não possui uma OS vinculada.'}
+                                                                    Selecione abaixo a OS correta para reparar permanentemente o vínculo.
                                                                 </div>
                                                                 <div className="grid gap-2 md:grid-cols-[1fr_1.4fr_auto]">
                                                                     <div className="relative">
@@ -2650,7 +2645,7 @@ export default function CostsPage() {
                                                                                 ...current,
                                                                                 [req.id]: event.target.value,
                                                                             }))}
-                                                                            placeholder="Buscar nÃºmero da OS ou cliente..."
+                                                                            placeholder="Buscar número da OS ou cliente..."
                                                                             className="border-red-200 bg-white pl-9 text-foreground"
                                                                         />
                                                                     </div>
@@ -2675,7 +2670,7 @@ export default function CostsPage() {
                                                                                 .slice(0, 100)
                                                                                 .map(order => (
                                                                                     <SelectItem key={order.id} value={order.id}>
-                                                                                        OS {order.internalOS} â€” {order.customerName}
+                                                                                        OS {order.internalOS} — {order.customerName}
                                                                                     </SelectItem>
                                                                                 ))}
                                                                         </SelectContent>
@@ -2708,7 +2703,7 @@ export default function CostsPage() {
                                                     <TableHead>NF</TableHead>
                                                     <TableHead>Entrada da NF</TableHead>
                                                     <TableHead>Status</TableHead>
-                                                    <TableHead className="text-right">AÃ§Ãµes</TableHead>
+                                                    <TableHead className="text-right">Ações</TableHead>
                                                 </TableRow>
                                             </TableHeader>
                                             <TableBody>
@@ -2718,7 +2713,7 @@ export default function CostsPage() {
                                                             <div>
                                                                 <span>{item.description}</span>
                                                                 {item.invoiceItemValue && item.invoiceItemValue > 0 && (
-                                                                    <div className="text-xs text-green-600 mt-1">âœ“ Precificado</div>
+                                                                    <div className="text-xs text-green-600 mt-1">✓ Precificado</div>
                                                                 )}
                                                             </div>
                                                         </TableCell>
@@ -2737,7 +2732,7 @@ export default function CostsPage() {
                                                                 </span>
                                                             ) : (
                                                                 <span className="text-orange-500 text-sm">
-                                                                    âš ï¸ NÃ£o informado
+                                                                    ⚠️ Não informado
                                                                 </span>
                                                             )}
                                                         </TableCell>
@@ -2753,14 +2748,14 @@ export default function CostsPage() {
                                                                 </div>
                                                             ) : (
                                                                 <span className="text-gray-400 text-sm">
-                                                                    NÃ£o informado
+                                                                    Não informado
                                                                 </span>
                                                             )}
                                                         </TableCell>
                                                         <TableCell className="text-sm">{item.supplierName || '-'}</TableCell>
                                                         <TableCell className="text-sm">{item.invoiceNumber || '-'}</TableCell>
                                                         <TableCell className="text-sm whitespace-nowrap">
-                                                            {safeFormatDate(item.deliveryReceiptDate, 'dd/MM/yyyy', 'NÃ£o informada')}
+                                                            {safeFormatDate(item.deliveryReceiptDate, 'dd/MM/yyyy', 'Não informada')}
                                                         </TableCell>
                                                         <TableCell>
                                                             <div className="space-y-1">
@@ -2790,12 +2785,12 @@ export default function CostsPage() {
                         <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-64 border-dashed border-2 rounded-lg">
                             <PackageSearch className="h-12 w-12 mb-4" />
                             <h3 className="text-lg font-semibold">
-                                {receiptSearchTerm ? 'Nenhum resultado para esta busca' : 'Nenhuma RequisiÃ§Ã£o Encontrada'}
+                                {receiptSearchTerm ? 'Nenhum resultado para esta busca' : 'Nenhuma Requisição Encontrada'}
                             </h3>
                             <p className="text-sm">
                                 {receiptSearchTerm
-                                    ? 'Tente pesquisar por outro nÃºmero de OS, requisiÃ§Ã£o, item ou fornecedor.'
-                                    : 'Quando novas requisiÃ§Ãµes de material forem criadas, elas aparecerÃ£o aqui.'}
+                                    ? 'Tente pesquisar por outro número de OS, requisição, item ou fornecedor.'
+                                    : 'Quando novas requisições de material forem criadas, elas aparecerão aqui.'}
                             </p>
                         </div>
                     )}
@@ -2821,12 +2816,12 @@ export default function CostsPage() {
                              <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>CÃ³digo</TableHead>
+                                        <TableHead>Código</TableHead>
                                         <TableHead>Nome Fantasia</TableHead>
                                         <TableHead>CNPJ</TableHead>
                                         <TableHead>Segmento</TableHead>
                                         <TableHead>Status</TableHead>
-                                        <TableHead className="text-right">AÃ§Ãµes</TableHead>
+                                        <TableHead className="text-right">Ações</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -2867,18 +2862,18 @@ export default function CostsPage() {
                         <div className="flex items-center justify-between">
                             <div>
                                 <CardTitle>
-                                    {isEditingCost ? "Editar LanÃ§amento de Custo" : "LanÃ§amento de Custo na OS"}
+                                    {isEditingCost ? "Editar Lançamento de Custo" : "Lançamento de Custo na OS"}
                                 </CardTitle>
                                 <CardDescription>
                                     {isEditingCost 
-                                        ? `Editando: ${editingCostEntry?.description || 'LanÃ§amento selecionado'}`
-                                        : "Registre custos de itens de almoxarifado, consumÃ­veis ou outros serviÃ§os diretamente em uma Ordem de ServiÃ§o."
+                                        ? `Editando: ${editingCostEntry?.description || 'Lançamento selecionado'}`
+                                        : "Registre custos de itens de almoxarifado, consumíveis ou outros serviços diretamente em uma Ordem de Serviço."
                                     }
                                 </CardDescription>
                             </div>
                             {isEditingCost && (
                                 <Button variant="outline" onClick={handleCancelEdit}>
-                                    Cancelar EdiÃ§Ã£o
+                                    Cancelar Edição
                                 </Button>
                             )}
                         </div>
@@ -2888,13 +2883,13 @@ export default function CostsPage() {
                             <div className="mb-6 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                                 <div className="flex items-center gap-2 text-blue-800">
                                     <Pencil className="h-4 w-4" />
-                                    <span className="font-semibold">Modo de EdiÃ§Ã£o Ativo</span>
+                                    <span className="font-semibold">Modo de Edição Ativo</span>
                                 </div>
                                 <p className="text-sm text-blue-600 mt-1">
-                                    VocÃª estÃ¡ editando o lanÃ§amento: <strong>{editingCostEntry?.description}</strong>
+                                    Você está editando o lançamento: <strong>{editingCostEntry?.description}</strong>
                                 </p>
                                 <p className="text-xs text-blue-500 mt-2">
-                                    ðŸ’¡ Dica: Para lanÃ§amentos automÃ¡ticos de materiais, vocÃª pode editar campos como o nÃºmero do pedido de compra, mas valores serÃ£o recalculados automaticamente com base no recebimento.
+                                    💡 Dica: Para lançamentos automáticos de materiais, você pode editar campos como o número do pedido de compra, mas valores serão recalculados automaticamente com base no recebimento.
                                 </p>
                             </div>
                         )}
@@ -2903,10 +2898,10 @@ export default function CostsPage() {
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                                     <FormField control={costEntryForm.control} name="orderId" render={({ field }) => (
                                         <FormItem>
-                                            <FormLabel>Ordem de ServiÃ§o (OS)</FormLabel>
+                                            <FormLabel>Ordem de Serviço (OS)</FormLabel>
                                             <div className="space-y-2">
                                                 <Input
-                                                    placeholder="ðŸ” Buscar OS por nÃºmero ou cliente..."
+                                                    placeholder="🔍 Buscar OS por número ou cliente..."
                                                     value={osSearchTerm}
                                                     onChange={(e) => setOsSearchTerm(e.target.value)}
                                                     className="mb-2"
@@ -2925,7 +2920,7 @@ export default function CostsPage() {
                                                 </Select>
                                                 {isEditingCost && (
                                                     <p className="text-xs text-muted-foreground">
-                                                        A OS nÃ£o pode ser alterada durante a ediÃ§Ã£o
+                                                        A OS não pode ser alterada durante a edição
                                                     </p>
                                                 )}
                                             </div>
@@ -2934,7 +2929,7 @@ export default function CostsPage() {
                                     )} />
                                     <FormField control={costEntryForm.control} name="description" render={({ field }) => (
                                         <FormItem>
-                                            <FormLabel>DescriÃ§Ã£o do Item/ServiÃ§o</FormLabel>
+                                            <FormLabel>Descrição do Item/Serviço</FormLabel>
                                             <div className="space-y-3">
                                                 <FormControl>
                                                     <Input 
@@ -2946,14 +2941,14 @@ export default function CostsPage() {
                                                 </FormControl>
                                                 {isEditingCost && editingCostEntry?.isFromRequisition && (
                                                     <p className="text-xs text-orange-600">
-                                                        âš ï¸ DescriÃ§Ã£o baseada na requisiÃ§Ã£o (nÃ£o editÃ¡vel)
+                                                        ⚠️ Descrição baseada na requisição (não editável)
                                                     </p>
                                                 )}
                                                 
                                                 {!(isEditingCost && editingCostEntry?.isFromRequisition) && (
                                                     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                                                         <div>
-                                                            <label className="text-sm font-medium">ðŸ“š Biblioteca de Insumos</label>
+                                                            <label className="text-sm font-medium">📚 Biblioteca de Insumos</label>
                                                             <Select onValueChange={handleInsumoSelect}>
                                                                 <SelectTrigger className="mt-1">
                                                                     <SelectValue placeholder="Selecione da biblioteca" />
@@ -2963,16 +2958,16 @@ export default function CostsPage() {
                                                                         <div key={categoria}>
                                                                             <div className="sticky top-0 bg-background p-2 border-b">
                                                                                 <div className="text-xs font-medium text-muted-foreground">
-                                                                                    {categoria === 'MATERIAS_PRIMAS' && 'ðŸ§± MATÃ‰RIAS PRIMAS'}
-                                                                                    {categoria === 'FERRAMENTAS_CORTE' && 'âš™ï¸ FERRAMENTAS DE CORTE'}
-                                                                                    {categoria === 'CONSUMIVEIS_USINAGEM' && 'ðŸ”§ CONSUMÃVEIS USINAGEM'}
-                                                                                    {categoria === 'FIXACAO' && 'ðŸ”© FIXAÃ‡ÃƒO'}
-                                                                                    {categoria === 'SOLDAGEM' && 'ðŸ”¥ SOLDAGEM'}
-                                                                                    {categoria === 'ACABAMENTO_PINTURA' && 'ðŸŽ¨ ACABAMENTO E PINTURA'}
-                                                                                    {categoria === 'LUBRIFICACAO' && 'ðŸ›¢ï¸ LUBRIFICAÃ‡ÃƒO'}
-                                                                                    {categoria === 'DISPOSITIVOS_FIXACAO' && 'ðŸ—œï¸ DISPOSITIVOS DE FIXAÃ‡ÃƒO'}
-                                                                                    {categoria === 'ELEMENTOS_MAQUINAS' && 'âš™ï¸ ELEMENTOS DE MÃQUINAS'}
-                                                                                    {categoria === 'INSTRUMENTOS_MEDICAO' && 'ðŸ“ INSTRUMENTOS DE MEDIÃ‡ÃƒO'}
+                                                                                    {categoria === 'MATERIAS_PRIMAS' && '🧱 MATÉRIAS PRIMAS'}
+                                                                                    {categoria === 'FERRAMENTAS_CORTE' && '⚙️ FERRAMENTAS DE CORTE'}
+                                                                                    {categoria === 'CONSUMIVEIS_USINAGEM' && '🔧 CONSUMÍVEIS USINAGEM'}
+                                                                                    {categoria === 'FIXACAO' && '🔩 FIXAÇÃO'}
+                                                                                    {categoria === 'SOLDAGEM' && '🔥 SOLDAGEM'}
+                                                                                    {categoria === 'ACABAMENTO_PINTURA' && '🎨 ACABAMENTO E PINTURA'}
+                                                                                    {categoria === 'LUBRIFICACAO' && '🛢️ LUBRIFICAÇÃO'}
+                                                                                    {categoria === 'DISPOSITIVOS_FIXACAO' && '🗜️ DISPOSITIVOS DE FIXAÇÃO'}
+                                                                                    {categoria === 'ELEMENTOS_MAQUINAS' && '⚙️ ELEMENTOS DE MÁQUINAS'}
+                                                                                    {categoria === 'INSTRUMENTOS_MEDICAO' && '📏 INSTRUMENTOS DE MEDIÇÃO'}
                                                                                 </div>
                                                                             </div>
                                                                             {itens.map((insumo: string) => (
@@ -2985,15 +2980,15 @@ export default function CostsPage() {
                                                         </div>
                                                         
                                                         <div>
-                                                            <label className="text-sm font-medium">ðŸ”§ EspecificaÃ§Ã£o</label>
+                                                            <label className="text-sm font-medium">🔧 Especificação</label>
                                                             <Input
-                                                                placeholder="Ex: diÃ¢metro 20mm, espessura 3mm"
+                                                                placeholder="Ex: diâmetro 20mm, espessura 3mm"
                                                                 value={itemSpecification}
                                                                 onChange={(e) => handleSpecificationChange(e.target.value)}
                                                                 className="mt-1"
                                                             />
                                                             <div className="text-xs text-muted-foreground mt-1">
-                                                                Adicione detalhes tÃ©cnicos do item
+                                                                Adicione detalhes técnicos do item
                                                             </div>
                                                         </div>
                                                     </div>
@@ -3006,7 +3001,7 @@ export default function CostsPage() {
                                                             <p className="font-medium mt-1">{selectedInsumo}</p>
                                                             {itemSpecification && (
                                                                 <p className="text-muted-foreground text-xs mt-1">
-                                                                    EspecificaÃ§Ã£o: {itemSpecification}
+                                                                    Especificação: {itemSpecification}
                                                                 </p>
                                                             )}
                                                         </div>
@@ -3033,7 +3028,7 @@ export default function CostsPage() {
                                             </FormControl>
                                             {isEditingCost && editingCostEntry?.isFromRequisition && (
                                                 <p className="text-xs text-orange-600">
-                                                    âš ï¸ Quantidade baseada na requisiÃ§Ã£o (nÃ£o editÃ¡vel)
+                                                    ⚠️ Quantidade baseada na requisição (não editável)
                                                 </p>
                                             )}
                                             <FormMessage />
@@ -3041,7 +3036,7 @@ export default function CostsPage() {
                                     )} />
                                     <FormField control={costEntryForm.control} name="unitCost" render={({ field }) => (
                                         <FormItem>
-                                            <FormLabel>Custo UnitÃ¡rio (R$)</FormLabel>
+                                            <FormLabel>Custo Unitário (R$)</FormLabel>
                                             <FormControl>
                                                 <Input 
                                                     type="number" 
@@ -3054,7 +3049,7 @@ export default function CostsPage() {
                                             </FormControl>
                                             {isEditingCost && editingCostEntry?.isFromRequisition && (
                                                 <p className="text-xs text-orange-600">
-                                                    âš ï¸ Custo calculado automaticamente (nÃ£o editÃ¡vel)
+                                                    ⚠️ Custo calculado automaticamente (não editável)
                                                 </p>
                                             )}
                                             <FormMessage />
@@ -3062,9 +3057,9 @@ export default function CostsPage() {
                                     )} />
                                     <FormField control={costEntryForm.control} name="purchaseOrderNumber" render={({ field }) => (
                                         <FormItem>
-                                            <FormLabel>NÂº Pedido de Compra MECALD</FormLabel>
+                                            <FormLabel>Nº Pedido de Compra MECALD</FormLabel>
                                             <FormControl><Input placeholder="Ex: PC-2024-001" {...field} value={field.value ?? ''} /></FormControl>
-                                            <FormDescription>NÃºmero do pedido interno da MECALD (opcional)</FormDescription>
+                                            <FormDescription>Número do pedido interno da MECALD (opcional)</FormDescription>
                                             <FormMessage />
                                         </FormItem>
                                     )} />
@@ -3077,8 +3072,8 @@ export default function CostsPage() {
                                     )}
                                     <Button type="submit" disabled={costEntryForm.formState.isSubmitting}>
                                         {costEntryForm.formState.isSubmitting 
-                                            ? (isEditingCost ? 'Salvando...' : 'LanÃ§ando...') 
-                                            : (isEditingCost ? 'Salvar AlteraÃ§Ãµes' : 'LanÃ§ar Custo')
+                                            ? (isEditingCost ? 'Salvando...' : 'Lançando...') 
+                                            : (isEditingCost ? 'Salvar Alterações' : 'Lançar Custo')
                                         }
                                     </Button>
                                 </div>
@@ -3091,19 +3086,19 @@ export default function CostsPage() {
                         <div>
                         <CardTitle>Custos Organizados por OS</CardTitle>
                         <CardDescription>
-                            Visualize e gerencie todos os lanÃ§amentos de custos organizados por Ordem de ServiÃ§o. 
-                            <strong>Os custos de materiais sÃ£o automaticamente calculados a partir dos valores das requisiÃ§Ãµes no painel de recebimento.</strong>
+                            Visualize e gerencie todos os lançamentos de custos organizados por Ordem de Serviço. 
+                            <strong>Os custos de materiais são automaticamente calculados a partir dos valores das requisições no painel de recebimento.</strong>
                         </CardDescription>
                         </div>
                                                 <div className="flex items-center gap-3">
                             <div className="text-xs text-muted-foreground flex items-center gap-2">
                                 <div className={`w-2 h-2 rounded-full ${isLoadingOrders ? 'bg-yellow-500 animate-pulse' : 'bg-green-500'}`}></div>
                                 <span>
-                                     {isLoadingOrders ? 'Carregando dados...' : (lastUpdateTime ? `Atualizado Ã s ${lastUpdateTime.toLocaleTimeString('pt-BR')}` : 'Sem dados')}
+                                     {isLoadingOrders ? 'Carregando dados...' : (lastUpdateTime ? `Atualizado às ${lastUpdateTime.toLocaleTimeString('pt-BR')}` : 'Sem dados')}
                                  </span>
                             </div>
                             <Button variant="outline" onClick={forceRefreshCosts} disabled={isLoadingOrders}>
-                                {isLoadingOrders ? 'Carregando...' : 'ðŸ”„ Atualizar'}
+                                {isLoadingOrders ? 'Carregando...' : '🔄 Atualizar'}
                             </Button>
                         </div>
                     </CardHeader>
@@ -3116,7 +3111,7 @@ export default function CostsPage() {
                                 <div className="space-y-4">
                                     {osSearchTerm && (
                                         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                            <span>ðŸ” Buscando por: "{osSearchTerm}"</span>
+                                            <span>🔍 Buscando por: "{osSearchTerm}"</span>
                                             <Button 
                                                 variant="ghost" 
                                                 size="sm" 
@@ -3128,7 +3123,7 @@ export default function CostsPage() {
                                         </div>
                                     )}
                                     
-                                    {/* Aviso se hÃ¡ requisiÃ§Ãµes com valores que ainda nÃ£o apareceram nos custos */}
+                                    {/* Aviso se há requisições com valores que ainda não apareceram nos custos */}
                                     {(() => {
                                         const reqsWithValues = requisitions.filter(req =>
                                             (req.orderId || req.orderNumber || req.internalOS) && req.totalValue && req.totalValue > 0
@@ -3144,8 +3139,8 @@ export default function CostsPage() {
                                         if (osWithoutCosts.length > 0) {
                                             return (
                                                 <div className="p-3 bg-orange-50 border border-orange-200 rounded-lg text-sm">
-                                                    âš ï¸ <span className="font-medium">{osWithoutCosts.length} requisiÃ§Ãµes</span> com valores nÃ£o apareceram nos custos. 
-                                                    <span className="text-orange-700"> A sincronizaÃ§Ã£o serÃ¡ automÃ¡tica em alguns instantes.</span>
+                                                    ⚠️ <span className="font-medium">{osWithoutCosts.length} requisições</span> com valores não apareceram nos custos. 
+                                                    <span className="text-orange-700"> A sincronização será automática em alguns instantes.</span>
                                                 </div>
                                             );
                                         }
@@ -3182,11 +3177,11 @@ export default function CostsPage() {
                                                                     const totalItems = orderReqs.reduce((sum, req) => sum + req.items.length, 0);
                                                                     
                                                                     if (!hasValues && totalItems > 0) {
-                                                                        return `Esta OS possui ${totalItems} itens em requisiÃ§Ãµes, mas ainda nÃ£o foram precificados`;
+                                                                        return `Esta OS possui ${totalItems} itens em requisições, mas ainda não foram precificados`;
                                                                     } else if (!hasValues) {
-                                                                        return "Esta OS nÃ£o possui requisiÃ§Ãµes de materiais";
+                                                                        return "Esta OS não possui requisições de materiais";
                                                                     }
-                                                                    return "Gerar relatÃ³rio de recebimento de materiais por fornecedor";
+                                                                    return "Gerar relatório de recebimento de materiais por fornecedor";
                                                                 })()}
                                                                 disabled={(() => {
                                                                     const orderReqs = requisitions.filter(req => req.orderId === order.id);
@@ -3198,11 +3193,11 @@ export default function CostsPage() {
                                                                     return !hasValues;
                                                                 })()}
                                                             >
-                                                                ðŸ“Š RelatÃ³rio
+                                                                📊 Relatório
                                                             </Button>
                                                         </div>
                                                         <div className="flex items-center gap-6 mt-1 text-sm text-muted-foreground">
-                                                            <span>{entriesCount} lanÃ§amento{entriesCount !== 1 ? 's' : ''}</span>
+                                                            <span>{entriesCount} lançamento{entriesCount !== 1 ? 's' : ''}</span>
                                                             <span className="font-semibold text-green-600">
                                                                 Total: {totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                             </span>
@@ -3216,7 +3211,7 @@ export default function CostsPage() {
                                                                 if (materialsCount > 0) {
                                                                     return (
                                                                         <Badge variant="secondary" className="text-xs bg-blue-100 text-blue-700">
-                                                                            ðŸ“¦ {materialsCount} materiais recebidos
+                                                                            📦 {materialsCount} materiais recebidos
                                                                         </Badge>
                                                                     );
                                                                 }
@@ -3230,12 +3225,12 @@ export default function CostsPage() {
                                                         <TableHeader>
                                                             <TableRow>
                                                                 <TableHead>Data</TableHead>
-                                                                <TableHead>DescriÃ§Ã£o</TableHead>
+                                                                <TableHead>Descrição</TableHead>
                                                                 <TableHead className="text-right">Qtd</TableHead>
                                                                 <TableHead className="text-right">Valor Unit.</TableHead>
                                                                 <TableHead className="text-right">Total</TableHead>
-                                                                <TableHead>LanÃ§ado por / PC</TableHead>
-                                                                <TableHead className="text-right">AÃ§Ãµes</TableHead>
+                                                                <TableHead>Lançado por / PC</TableHead>
+                                                                <TableHead className="text-right">Ações</TableHead>
                                                             </TableRow>
                                                         </TableHeader>
                                                         <TableBody>
@@ -3252,31 +3247,31 @@ export default function CostsPage() {
                                                                                                                                                                                                                                  {entry.isFromRequisition && (
                                                                              <div className="flex items-center gap-1 mt-1 flex-wrap">
                                                                                  <Badge variant="secondary" className="text-xs">
-                                                                                     ðŸ“‹ Materiais (Auto)
+                                                                                     📋 Materiais (Auto)
                                                                                  </Badge>
                                                                                  {entry.sourceType === 'requisition_total' && (
                                                                                      <Badge variant="outline" className="text-xs text-blue-600">
-                                                                                         ðŸ’° Valor do Recebimento
+                                                                                         💰 Valor do Recebimento
                                                                                      </Badge>
                                                                                  )}
                                                                                  {entry.isPending && (
                                                                                      <Badge variant="outline" className="text-xs text-orange-600">
-                                                                                         â³ Aguardando preÃ§os
+                                                                                         ⏳ Aguardando preços
                                                                                      </Badge>
                                                                                  )}
                                                                                  {!entry.isPending && entry.completionPercentage && entry.completionPercentage < 100 && (
                                                                                      <Badge variant="outline" className="text-xs text-blue-600">
-                                                                                         ðŸ”„ {entry.completionPercentage}% precificado
+                                                                                         🔄 {entry.completionPercentage}% precificado
                                                                                      </Badge>
                                                                                  )}
                                                                                  {entry.completionPercentage === 100 && (
                                                                                      <Badge variant="default" className="text-xs text-green-600">
-                                                                                         âœ… Completo
+                                                                                         ✅ Completo
                                                                                      </Badge>
                                                                                  )}
                                                                                  {entry.lastPriceUpdate && (
                                                                                      <Badge variant="outline" className="text-xs text-gray-500">
-                                                                                         ðŸ•’ {safeFormatDate(entry.lastPriceUpdate, 'dd/MM HH:mm')}
+                                                                                         🕒 {safeFormatDate(entry.lastPriceUpdate, 'dd/MM HH:mm')}
                                                                                      </Badge>
                                                                                  )}
                                                                              </div>
@@ -3284,7 +3279,7 @@ export default function CostsPage() {
                                                                             {entry.items && entry.items.length > 0 && (
                                                                                 <details className="mt-2">
                                                                                     <summary className="text-xs text-muted-foreground cursor-pointer hover:text-primary">
-                                                                                        Ver {entry.items.length} item(ns) â†“
+                                                                                        Ver {entry.items.length} item(ns) ↓
                                                                                     </summary>
                                                                                     <div className="mt-1 pl-2 border-l-2 border-muted">
                                                                                                                                                                                  {entry.items.map((item: any, idx: number) => (
@@ -3292,14 +3287,14 @@ export default function CostsPage() {
                                                                                                  <div className="flex items-center gap-2">
                                                                                                      <span className={`w-2 h-2 rounded-full ${item.hasPricing ? 'bg-green-500' : 'bg-orange-500'}`}></span>
                                                                                                      <span className="font-medium text-gray-800">{item.description}</span>
-                                                                                                     {item.hasPricing && <span className="text-green-600 text-xs">âœ“</span>}
+                                                                                                     {item.hasPricing && <span className="text-green-600 text-xs">✓</span>}
                                                                                                  </div>
                                                                                                  <div className="text-xs ml-4 mt-1">
                                                                                                      <span className="text-gray-600">Qtd: {item.quantity}</span>
-                                                                                                     {item.weight && <span className="text-gray-600"> â€¢ Peso: {item.weight}{item.weightUnit}</span>}
+                                                                                                     {item.weight && <span className="text-gray-600"> • Peso: {item.weight}{item.weightUnit}</span>}
                                                                                                      <br />
                                                                                                      <span className={`font-medium ${item.hasPricing ? 'text-green-700' : 'text-orange-600'}`}>
-                                                                                                         Valor: {item.value?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'NÃ£o informado'}
+                                                                                                         Valor: {item.value?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) || 'Não informado'}
                                                                                                      </span>
                                                                                                  </div>
                                                                                              </div>
@@ -3321,43 +3316,43 @@ export default function CostsPage() {
                                                                             <div>{entry.enteredBy}</div>
                                                                             {entry.purchaseOrderNumber && (
                                                                                 <div className="text-xs text-blue-600 font-medium mt-1">
-                                                                                    ðŸ“‹ PC: {entry.purchaseOrderNumber}
+                                                                                    📋 PC: {entry.purchaseOrderNumber}
                                                                                 </div>
                                                                             )}
                                                                             {entry.lastEditDate && (
                                                                                 <div className="text-xs text-orange-600 mt-1">
-                                                                                    âœï¸ Editado: {safeFormatDate(entry.lastEditDate, 'dd/MM/yy HH:mm')}
+                                                                                    ✏️ Editado: {safeFormatDate(entry.lastEditDate, 'dd/MM/yy HH:mm')}
                                                                                 </div>
                                                                             )}
                                                                         </div>
                                                                     </TableCell>
                                                                     <TableCell className="text-right">
                                                                         <div className="flex items-center justify-end gap-2">
-                                                                            {/* BotÃ£o de Editar - disponÃ­vel para todos os lanÃ§amentos */}
+                                                                            {/* Botão de Editar - disponível para todos os lançamentos */}
                                                                             <Button 
                                                                                 variant="ghost" 
                                                                                 size="icon" 
                                                                                 className="text-blue-600 hover:text-blue-800" 
                                                                                 onClick={() => handleEditCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
-                                                                                title={entry.isFromRequisition ? "Editar dados do lanÃ§amento (ex: nÂº pedido)" : "Editar lanÃ§amento"}
+                                                                                title={entry.isFromRequisition ? "Editar dados do lançamento (ex: nº pedido)" : "Editar lançamento"}
                                                                             >
                                                                                 <Pencil className="h-4 w-4" />
                                                                             </Button>
                                                                             
-                                                                            {/* BotÃ£o de Deletar - apenas para lanÃ§amentos manuais */}
+                                                                            {/* Botão de Deletar - apenas para lançamentos manuais */}
                                                                             {!entry.isFromRequisition && (
                                                                                 <Button 
                                                                                     variant="ghost" 
                                                                                     size="icon" 
                                                                                     className="text-destructive hover:text-destructive" 
                                                                                     onClick={() => handleDeleteCostEntryClick({...entry, orderId: order.id, internalOS: order.internalOS, customerName: order.customerName})}
-                                                                                    title="Excluir lanÃ§amento"
+                                                                                    title="Excluir lançamento"
                                                                                 >
                                                                                     <Trash2 className="h-4 w-4" />
                                                                                 </Button>
                                                                             )}
                                                                             
-                                                                            {/* Badge para lanÃ§amentos automÃ¡ticos */}
+                                                                            {/* Badge para lançamentos automáticos */}
                                                                             {entry.isFromRequisition && (
                                                                                 <Badge variant="outline" className="text-xs">
                                                                                     Auto
@@ -3379,12 +3374,12 @@ export default function CostsPage() {
                                 <div className="flex flex-col items-center justify-center text-center text-muted-foreground h-32 border-dashed border-2 rounded-lg">
                                     <PackageSearch className="h-8 w-8 mb-2" />
                                     <h3 className="font-semibold">
-                                        {osSearchTerm ? `Nenhuma OS encontrada para "${osSearchTerm}"` : "Nenhum Custo LanÃ§ado"}
+                                        {osSearchTerm ? `Nenhuma OS encontrada para "${osSearchTerm}"` : "Nenhum Custo Lançado"}
                                     </h3>
                                     <p className="text-sm">
                                         {osSearchTerm 
                                             ? "Tente buscar por outro termo ou limpe a busca para ver todas as OS."
-                                            : "Quando custos forem lanÃ§ados nas OS, eles aparecerÃ£o aqui organizados."
+                                            : "Quando custos forem lançados nas OS, eles aparecerão aqui organizados."
                                         }
                                     </p>
                                 </div>
@@ -3397,23 +3392,17 @@ export default function CostsPage() {
             <TabsContent value="appointments" className="space-y-4">
                 <Card>
                     <CardHeader>
-                        <CardTitle>QR Codes de Apontamento</CardTitle>
+                        <CardTitle>QR Code de Apontamento</CardTitle>
                         <CardDescription>
-                            QR Codes genÃ©ricos para impressÃ£o. ApÃ³s a leitura, o operador escolhe a OS, o item e a etapa.
+                            Um único QR Code para iniciar, pausar, retomar ou encerrar apontamentos de produção.
                         </CardDescription>
                     </CardHeader>
-                    <CardContent className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                        <div className="space-y-3 rounded-lg border p-4 text-center">
-                            <h3 className="font-semibold text-green-700">Abertura de Processo</h3>
+                    <CardContent>
+                        <div className="mx-auto max-w-xl space-y-3 rounded-lg border p-4 text-center">
+                            <h3 className="font-semibold text-green-700">Apontamento de Produção</h3>
                             {openQrUrl && <img src={openQrUrl} alt="QR Code para iniciar apontamento" className="mx-auto" />}
-                            <Button variant="outline" onClick={() => downloadQr(openQrUrl, 'qrcode-abertura-apontamento.png')} disabled={!openQrUrl}>
-                                <Download className="mr-2 h-4 w-4" /> Baixar QR Code
-                            </Button>
-                        </div>
-                        <div className="space-y-3 rounded-lg border p-4 text-center">
-                            <h3 className="font-semibold text-red-700">Fechamento ou Pausa</h3>
-                            {closeQrUrl && <img src={closeQrUrl} alt="QR Code para pausar ou encerrar apontamento" className="mx-auto" />}
-                            <Button variant="outline" onClick={() => downloadQr(closeQrUrl, 'qrcode-fechamento-apontamento.png')} disabled={!closeQrUrl}>
+                            <p className="text-sm text-muted-foreground">Na tela aberta pelo QR, escolha entre iniciar um novo apontamento ou gerenciar um apontamento existente.</p>
+                            <Button variant="outline" onClick={() => downloadQr(openQrUrl, 'qrcode-apontamento-producao.png')} disabled={!openQrUrl}>
                                 <Download className="mr-2 h-4 w-4" /> Baixar QR Code
                             </Button>
                         </div>
@@ -3424,7 +3413,7 @@ export default function CostsPage() {
                     <CardHeader className="flex flex-row items-center justify-between gap-4">
                         <div>
                             <CardTitle>Centros de custo por setor</CardTitle>
-                            <CardDescription>Defina o custo horÃ¡rio. O custo do apontamento serÃ¡: horas trabalhadas Ã— R$/h da etapa.</CardDescription>
+                            <CardDescription>Defina o custo horário. O custo do apontamento será: horas trabalhadas × R$/h da etapa.</CardDescription>
                         </div>
                         <Button onClick={saveCostCenters} disabled={isSavingCostCenters}>
                             {isSavingCostCenters ? 'Salvando...' : 'Salvar centros de custo'}
@@ -3446,7 +3435,7 @@ export default function CostsPage() {
                 <Card>
                     <CardHeader>
                         <div className="flex flex-wrap items-center justify-between gap-4">
-                            <div><CardTitle>Ordens de ServiÃ§o apontadas</CardTitle><CardDescription>Clique em uma OS para visualizar seus apontamentos.</CardDescription></div>
+                            <div><CardTitle>Ordens de Serviço apontadas</CardTitle><CardDescription>Clique em uma OS para visualizar seus apontamentos.</CardDescription></div>
                             <div className="flex items-center gap-2">
                                 <div className="relative w-[280px]"><Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="pl-9" placeholder="Buscar OS..." value={appointmentSearch} onChange={event => setAppointmentSearch(event.target.value)} /></div>
                                 <Button variant="outline" onClick={fetchAppointments} disabled={isLoadingAppointments}>{isLoadingAppointments ? 'Atualizando...' : 'Atualizar'}</Button>
@@ -3460,7 +3449,7 @@ export default function CostsPage() {
                             <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-3">
                                 {appointmentOrderGroups.map(group => (
                                     <button key={group.os} type="button" onClick={() => setSelectedAppointmentOS(current => current === group.os ? '' : group.os)} className={cn('rounded-lg border p-4 text-left transition-colors hover:bg-muted/50', selectedAppointmentOS === group.os && 'border-primary bg-primary/5 ring-1 ring-primary')}>
-                                        <div className="flex items-center justify-between"><span className="text-lg font-bold">OS {group.os}</span><Badge variant={group.openCount > 0 ? 'outline' : 'default'}>{group.openCount > 0 ? `${group.openCount} ativo(s)` : 'ConcluÃ­da'}</Badge></div>
+                                        <div className="flex items-center justify-between"><span className="text-lg font-bold">OS {group.os}</span><Badge variant={group.openCount > 0 ? 'outline' : 'default'}>{group.openCount > 0 ? `${group.openCount} ativo(s)` : 'Concluída'}</Badge></div>
                                         <div className="mt-3 grid grid-cols-3 gap-2 text-sm"><div><p className="text-muted-foreground">Registros</p><p className="font-semibold">{group.count}</p></div><div><p className="text-muted-foreground">Horas</p><p className="font-semibold">{group.totalHours.toFixed(2)}h</p></div><div><p className="text-muted-foreground">Custo</p><p className="font-semibold text-green-600">{group.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p></div></div>
                                     </button>
                                 ))}
@@ -3470,9 +3459,9 @@ export default function CostsPage() {
                         {selectedAppointmentOS && (() => {
                             const selectedEntries = appointments.filter(appointment => appointment.orderInternalOS === selectedAppointmentOS);
                             return <div className="overflow-hidden rounded-lg border">
-                                <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 p-4"><div><h3 className="font-semibold">Apontamentos da OS {selectedAppointmentOS}</h3><p className="text-sm text-muted-foreground">{selectedEntries.length} registro(s)</p></div><Button onClick={() => exportAppointmentsReport(selectedEntries, selectedAppointmentOS)}><Download className="mr-2 h-4 w-4" /> Exportar relatÃ³rio</Button></div>
-                                <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Etapa</TableHead><TableHead>Operador</TableHead><TableHead>InÃ­cio</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Horas</TableHead><TableHead className="text-right">R$/h</TableHead><TableHead className="text-right">Custo</TableHead><TableHead className="text-right">AÃ§Ãµes</TableHead></TableRow></TableHeader>
-                                <TableBody>{selectedEntries.map(appointment => <TableRow key={appointment.id}><TableCell>{appointment.itemDescription}</TableCell><TableCell>{appointment.stageName}</TableCell><TableCell>{appointment.operatorName}</TableCell><TableCell>{safeFormatDate(appointment.startedAt, 'dd/MM HH:mm', '-')}</TableCell><TableCell><Badge variant={appointment.status === 'ConcluÃ­do' ? 'default' : appointment.status === 'Pausado' ? 'secondary' : 'outline'} className={appointment.status === 'Aberto' ? 'bg-blue-500 text-white' : ''}>{appointment.status}</Badge></TableCell><TableCell className="text-right">{appointment.totalHours == null ? '-' : appointment.totalHours.toFixed(2)}</TableCell><TableCell className="text-right">{appointment.hourlyRate.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell><TableCell className="text-right font-medium text-green-600">{appointment.totalCost == null ? '-' : appointment.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" title={appointment.status === 'ConcluÃ­do' ? 'Editar apontamento' : 'SÃ³ apontamentos concluÃ­dos podem ser editados'} disabled={appointment.status !== 'ConcluÃ­do'} onClick={() => openAppointmentEdit(appointment)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Excluir apontamento" onClick={() => setAppointmentToDelete(appointment)}><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}</TableBody></Table>
+                                <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 p-4"><div><h3 className="font-semibold">Apontamentos da OS {selectedAppointmentOS}</h3><p className="text-sm text-muted-foreground">{selectedEntries.length} registro(s)</p></div><Button onClick={() => exportAppointmentsReport(selectedEntries, selectedAppointmentOS)}><Download className="mr-2 h-4 w-4" /> Exportar relatório</Button></div>
+                                <Table><TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Etapa</TableHead><TableHead>Operador</TableHead><TableHead>Início</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Horas</TableHead><TableHead className="text-right">R$/h</TableHead><TableHead className="text-right">Custo</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
+                                <TableBody>{selectedEntries.map(appointment => <TableRow key={appointment.id}><TableCell>{appointment.itemDescription}</TableCell><TableCell>{appointment.stageName}</TableCell><TableCell>{appointment.operatorName}</TableCell><TableCell>{safeFormatDate(appointment.startedAt, 'dd/MM HH:mm', '-')}</TableCell><TableCell><Badge variant={appointment.status === 'Concluído' ? 'default' : appointment.status === 'Pausado' ? 'secondary' : 'outline'} className={appointment.status === 'Aberto' ? 'bg-blue-500 text-white' : ''}>{appointment.status}</Badge></TableCell><TableCell className="text-right">{appointment.totalHours == null ? '-' : appointment.totalHours.toFixed(2)}</TableCell><TableCell className="text-right">{appointment.hourlyRate.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell><TableCell className="text-right font-medium text-green-600">{appointment.totalCost == null ? '-' : appointment.totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" title={appointment.status === 'Concluído' ? 'Editar apontamento' : 'Só apontamentos concluídos podem ser editados'} disabled={appointment.status !== 'Concluído'} onClick={() => openAppointmentEdit(appointment)}><Pencil className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-destructive hover:text-destructive" title="Excluir apontamento" onClick={() => setAppointmentToDelete(appointment)}><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}</TableBody></Table>
                             </div>;
                         })()}
                     </CardContent>
@@ -3483,7 +3472,7 @@ export default function CostsPage() {
 
       <Dialog open={Boolean(editingAppointment)} onOpenChange={open => !open && setEditingAppointment(null)}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Editar apontamento concluÃ­do</DialogTitle><DialogDescription>Ao salvar, o custo lanÃ§ado na OS serÃ¡ substituÃ­do pelo valor recalculado.</DialogDescription></DialogHeader>
+          <DialogHeader><DialogTitle>Editar apontamento concluído</DialogTitle><DialogDescription>Ao salvar, o custo lançado na OS será substituído pelo valor recalculado.</DialogDescription></DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2"><Label>Operador</Label><Input value={editAppointmentOperator} onChange={event => setEditAppointmentOperator(event.target.value)} /></div>
             <div className="grid grid-cols-2 gap-4">
@@ -3497,48 +3486,48 @@ export default function CostsPage() {
       </Dialog>
 
       <AlertDialog open={Boolean(appointmentToDelete)} onOpenChange={open => !open && setAppointmentToDelete(null)}>
-        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Excluir apontamento?</AlertDialogTitle><AlertDialogDescription>O apontamento de {appointmentToDelete?.stageName} da OS {appointmentToDelete?.orderInternalOS} serÃ¡ removido. Se houver custo lanÃ§ado, ele tambÃ©m serÃ¡ excluÃ­do da OS.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmDeleteAppointment} className="bg-destructive hover:bg-destructive/90">Excluir apontamento</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
+        <AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Excluir apontamento?</AlertDialogTitle><AlertDialogDescription>O apontamento de {appointmentToDelete?.stageName} da OS {appointmentToDelete?.orderInternalOS} será removido. Se houver custo lançado, ele também será excluído da OS.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Cancelar</AlertDialogCancel><AlertDialogAction onClick={confirmDeleteAppointment} className="bg-destructive hover:bg-destructive/90">Excluir apontamento</AlertDialogAction></AlertDialogFooter></AlertDialogContent>
       </AlertDialog>
 
       <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
-        <DialogContent className="sm:max-w-3xl"> {/* Aumentado para acomodar mais informaÃ§Ãµes */}
+        <DialogContent className="sm:max-w-3xl"> {/* Aumentado para acomodar mais informações */}
             <DialogHeader>
-                <DialogTitle>Atualizar Item de RequisiÃ§Ã£o</DialogTitle>
+                <DialogTitle>Atualizar Item de Requisição</DialogTitle>
                 <DialogDescription>
                     {selectedItem?.description}
                 </DialogDescription>
                 
-                {/* MELHORIA: Mostrar informaÃ§Ãµes detalhadas do item para melhor identificaÃ§Ã£o */}
+                {/* MELHORIA: Mostrar informações detalhadas do item para melhor identificação */}
                 <div className="mt-3 p-4 bg-blue-50 border border-blue-200 rounded-lg">
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
                         <div>
-                            <span className="font-semibold text-blue-800">ðŸ“ DimensÃ£o:</span>
+                            <span className="font-semibold text-blue-800">📏 Dimensão:</span>
                             <p className="font-medium">
                                 {(() => {
-                                    // Buscar dados completos do item na requisiÃ§Ã£o original
+                                    // Buscar dados completos do item na requisição original
                                     const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
                                     const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
-                                    return fullItem?.dimensao || 'NÃ£o especificada';
+                                    return fullItem?.dimensao || 'Não especificada';
                                 })()}
                             </p>
                         </div>
                         <div>
-                            <span className="font-semibold text-blue-800">ðŸ”§ Material:</span>
+                            <span className="font-semibold text-blue-800">🔧 Material:</span>
                             <p className="font-medium">
                                 {(() => {
                                     const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
                                     const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
-                                    return fullItem?.material || 'NÃ£o especificado';
+                                    return fullItem?.material || 'Não especificado';
                                 })()}
                             </p>
                         </div>
                         <div>
-                            <span className="font-semibold text-blue-800">ðŸ“¦ CÃ³digo:</span>
+                            <span className="font-semibold text-blue-800">📦 Código:</span>
                             <p className="font-medium">
                                 {(() => {
                                     const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
                                     const fullItem = fullReq?.items.find(i => i.id === selectedItem?.id);
-                                    return fullItem?.code || 'NÃ£o informado';
+                                    return fullItem?.code || 'Não informado';
                                 })()}
                             </p>
                         </div>
@@ -3546,7 +3535,7 @@ export default function CostsPage() {
                     
                     {/* Mostrar quantidade solicitada */}
                     <div className="mt-3 pt-3 border-t border-blue-200">
-                        <span className="font-semibold text-blue-800">ðŸ“Š Quantidade Solicitada:</span>
+                        <span className="font-semibold text-blue-800">📊 Quantidade Solicitada:</span>
                         <span className="ml-2 font-bold text-blue-900">
                             {selectedItem?.quantityRequested} {(() => {
                                 const fullReq = requisitions.find(r => r.id === selectedItem?.requisitionId);
@@ -3559,21 +3548,21 @@ export default function CostsPage() {
                 
                 <div className={`mt-3 p-3 rounded-lg border ${selectedItem?.weight ? 'bg-green-50 border-green-200' : 'bg-orange-50 border-orange-200'}`}>
                     <div className="flex items-center gap-2">
-                        <span className="font-semibold">âš–ï¸ Peso do Material:</span>
+                        <span className="font-semibold">⚖️ Peso do Material:</span>
                         <span className="text-lg font-bold">
                             {selectedItem?.weight ? (
                                 <span className="text-green-700">
                                     {selectedItem.weight} {selectedItem.weightUnit || 'kg'}
                                 </span>
                             ) : (
-                                <span className="text-orange-700">NÃ£o informado</span>
+                                <span className="text-orange-700">Não informado</span>
                             )}
                         </span>
                     </div>
                     
                     {selectedItem?.weight && selectedItem?.invoiceItemValue && selectedItem.weight > 0 && (
                         <div className="mt-2 text-sm text-green-600">
-                            ðŸ’° Custo por {selectedItem.weightUnit || 'kg'}: {' '}
+                            💰 Custo por {selectedItem.weightUnit || 'kg'}: {' '}
                             <span className="font-semibold">
                                 {(selectedItem.invoiceItemValue / selectedItem.weight).toLocaleString('pt-BR', { 
                                     style: 'currency', 
@@ -3585,9 +3574,9 @@ export default function CostsPage() {
                     
                     <div className="mt-2 text-xs">
                         {selectedItem?.weight ? (
-                            <span className="text-green-600">âœ… Peso cadastrado - Os custos serÃ£o calculados automaticamente</span>
+                            <span className="text-green-600">✅ Peso cadastrado - Os custos serão calculados automaticamente</span>
                         ) : (
-                            <span className="text-orange-600">âš ï¸ Informe o peso abaixo para cÃ¡lculo automÃ¡tico do custo por unidade</span>
+                            <span className="text-orange-600">⚠️ Informe o peso abaixo para cálculo automático do custo por unidade</span>
                         )}
                     </div>
                 </div>
@@ -3625,8 +3614,8 @@ export default function CostsPage() {
                         <FormField control={itemForm.control} name="weight" render={({ field }) => (
                             <FormItem>
                                 <FormLabel className="flex items-center gap-2">
-                                    âš–ï¸ Peso do Material
-                                    {!selectedItem?.weight && <span className="text-orange-500 text-xs">(ObrigatÃ³rio)</span>}
+                                    ⚖️ Peso do Material
+                                    {!selectedItem?.weight && <span className="text-orange-500 text-xs">(Obrigatório)</span>}
                                 </FormLabel>
                                 <FormControl>
                                     <Input 
@@ -3655,11 +3644,11 @@ export default function CostsPage() {
                                         <SelectItem value="g">g (grama)</SelectItem>
                                         <SelectItem value="t">t (tonelada)</SelectItem>
                                         <SelectItem value="m">m (metro)</SelectItem>
-                                        <SelectItem value="mÂ²">mÂ² (metro quadrado)</SelectItem>
-                                        <SelectItem value="mÂ³">mÂ³ (metro cÃºbico)</SelectItem>
+                                        <SelectItem value="m²">m² (metro quadrado)</SelectItem>
+                                        <SelectItem value="m³">m³ (metro cúbico)</SelectItem>
                                         <SelectItem value="l">l (litro)</SelectItem>
                                         <SelectItem value="un">un (unidade)</SelectItem>
-                                        <SelectItem value="pÃ§">pÃ§ (peÃ§a)</SelectItem>
+                                        <SelectItem value="pç">pç (peça)</SelectItem>
                                     </SelectContent>
                                 </Select>
                                 <FormMessage />
@@ -3668,8 +3657,8 @@ export default function CostsPage() {
                         <FormField control={itemForm.control} name="invoiceItemValue" render={({ field }) => (
                             <FormItem>
                                 <FormLabel className="flex items-center gap-2">
-                                    ðŸ’° Valor do Item (R$)
-                                    {!selectedItem?.invoiceItemValue && <span className="text-blue-500 text-xs">(Para cÃ¡lculo de custo)</span>}
+                                    💰 Valor do Item (R$)
+                                    {!selectedItem?.invoiceItemValue && <span className="text-blue-500 text-xs">(Para cálculo de custo)</span>}
                                 </FormLabel>
                                 <FormControl>
                                     <Input 
@@ -3686,10 +3675,10 @@ export default function CostsPage() {
                     </div>
                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <FormField control={itemForm.control} name="invoiceNumber" render={({ field }) => (
-                            <FormItem><FormLabel>Nota Fiscal</FormLabel><FormControl><Input placeholder="NÂº da NF-e" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                            <FormItem><FormLabel>Nota Fiscal</FormLabel><FormControl><Input placeholder="Nº da NF-e" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
                         <FormField control={itemForm.control} name="certificateNumber" render={({ field }) => (
-                            <FormItem><FormLabel>NÂº do Certificado</FormLabel><FormControl><Input placeholder="Certificado de qualidade/material" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                            <FormItem><FormLabel>Nº do Certificado</FormLabel><FormControl><Input placeholder="Certificado de qualidade/material" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -3697,9 +3686,9 @@ export default function CostsPage() {
                             <FormItem><FormLabel>Local de Armazenamento</FormLabel><FormControl><Input placeholder="Ex: Prateleira A-10" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                         )}/>
                     <FormField control={itemForm.control} name="inspectionStatus" render={({ field }) => (
-                        <FormItem><FormLabel>Status da InspeÃ§Ã£o</FormLabel>
+                        <FormItem><FormLabel>Status da Inspeção</FormLabel>
                             <Select onValueChange={field.onChange} defaultValue={field.value}><FormControl>
-                                <SelectTrigger><SelectValue placeholder="Selecione o status da inspeÃ§Ã£o" /></SelectTrigger>
+                                <SelectTrigger><SelectValue placeholder="Selecione o status da inspeção" /></SelectTrigger>
                             </FormControl><SelectContent>
                                 {inspectionStatuses.map(status => <SelectItem key={status} value={status}>{status}</SelectItem>)}
                             </SelectContent></Select><FormMessage />
@@ -3710,7 +3699,7 @@ export default function CostsPage() {
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsFormOpen(false)}>Cancelar</Button>
                         <Button type="submit" disabled={itemForm.formState.isSubmitting}>
-                            {itemForm.formState.isSubmitting ? "Salvando..." : "Salvar AtualizaÃ§Ãµes"}
+                            {itemForm.formState.isSubmitting ? "Salvando..." : "Salvar Atualizações"}
                         </Button>
                     </DialogFooter>
                 </form>
@@ -3729,19 +3718,19 @@ export default function CostsPage() {
                   <Tabs defaultValue="general" className="flex-1 flex flex-col min-h-0">
                     <TabsList>
                       <TabsTrigger value="general">Gerais</TabsTrigger>
-                      <TabsTrigger value="contact">Contato e EndereÃ§o</TabsTrigger>
-                      <TabsTrigger value="commercial">Comercial e BancÃ¡rio</TabsTrigger>
+                      <TabsTrigger value="contact">Contato e Endereço</TabsTrigger>
+                      <TabsTrigger value="commercial">Comercial e Bancário</TabsTrigger>
                       <TabsTrigger value="docs">Documentos</TabsTrigger>
                     </TabsList>
                     <ScrollArea className="flex-1 mt-4 pr-6">
                       <TabsContent value="general" className="space-y-4">
                         <FormField control={supplierForm.control} name="status" render={({ field }) => (<FormItem><FormLabel>Status</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue/></SelectTrigger></FormControl><SelectContent><SelectItem value="ativo">Ativo</SelectItem><SelectItem value="inativo">Inativo</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>RazÃ£o Social</FormLabel><FormControl><Input placeholder="Nome jurÃ­dico da empresa" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="razaoSocial" render={({ field }) => (<FormItem><FormLabel>Razão Social</FormLabel><FormControl><Input placeholder="Nome jurídico da empresa" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="nomeFantasia" render={({ field }) => (<FormItem><FormLabel>Nome Fantasia</FormLabel><FormControl><Input placeholder="Nome comercial (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <FormField control={supplierForm.control} name="cnpj" render={({ field }) => (<FormItem><FormLabel>CNPJ</FormLabel><FormControl><Input placeholder="00.000.000/0000-00" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-2 gap-4">
-                          <FormField control={supplierForm.control} name="inscricaoEstadual" render={({ field }) => (<FormItem><FormLabel>InscriÃ§Ã£o Estadual</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="inscricaoMunicipal" render={({ field }) => (<FormItem><FormLabel>InscriÃ§Ã£o Municipal</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="inscricaoEstadual" render={({ field }) => (<FormItem><FormLabel>Inscrição Estadual</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="inscricaoMunicipal" render={({ field }) => (<FormItem><FormLabel>Inscrição Municipal</FormLabel><FormControl><Input placeholder="Opcional" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                         <FormField control={supplierForm.control} name="segment" render={({ field }) => (
                             <FormItem>
@@ -3761,67 +3750,67 @@ export default function CostsPage() {
                                 <FormMessage />
                             </FormItem>
                         )} />
-                         {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>CÃ³digo: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {safeFormatDate(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm', 'N/A')}</p><p>Ãšltima atualizaÃ§Ã£o: {safeFormatDate(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm', 'N/A')}</p></div>)}
+                         {selectedSupplier && (<div className="text-xs text-muted-foreground space-y-1 pt-4"><p>Código: {selectedSupplier.supplierCode}</p><p>Cadastrado em: {safeFormatDate(selectedSupplier.firstRegistrationDate, 'dd/MM/yyyy HH:mm', 'N/A')}</p><p>Última atualização: {safeFormatDate(selectedSupplier.lastUpdate, 'dd/MM/yyyy HH:mm', 'N/A')}</p></div>)}
                       </TabsContent>
                       <TabsContent value="contact" className="space-y-4">
-                        <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do ResponsÃ¡vel Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="salesContactName" render={({ field }) => (<FormItem><FormLabel>Nome do Responsável Comercial</FormLabel><FormControl><Input placeholder="Nome do contato" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-2 gap-4">
                           <FormField control={supplierForm.control} name="telefone" render={({ field }) => (<FormItem><FormLabel>Telefone</FormLabel><FormControl><Input placeholder="(XX) XXXXX-XXXX" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                           <FormField control={supplierForm.control} name="primaryEmail" render={({ field }) => (<FormItem><FormLabel>E-mail Principal</FormLabel><FormControl><Input placeholder="contato@fornecedor.com (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                         <FormField control={supplierForm.control} name="address.street" render={({ field }) => (<FormItem><FormLabel>Logradouro</FormLabel><FormControl><Input placeholder="Rua, Avenida..." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         <div className="grid md:grid-cols-3 gap-4">
-                          <FormField control={supplierForm.control} name="address.number" render={({ field }) => (<FormItem><FormLabel>NÃºmero</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="address.number" render={({ field }) => (<FormItem><FormLabel>Número</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                           <FormField control={supplierForm.control} name="address.complement" render={({ field }) => (<FormItem><FormLabel>Complemento</FormLabel><FormControl><Input placeholder="Apto, Bloco, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                            <FormField control={supplierForm.control} name="address.zipCode" render={({ field }) => (<FormItem><FormLabel>CEP</FormLabel><FormControl><Input placeholder="00000-000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                         <div className="grid md:grid-cols-2 gap-4">
                           <FormField control={supplierForm.control} name="address.neighborhood" render={({ field }) => (<FormItem><FormLabel>Bairro</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                          <FormField control={supplierForm.control} name="address.cityState" render={({ field }) => (<FormItem><FormLabel>Cidade / Estado</FormLabel><FormControl><Input placeholder="Ex: SÃ£o Paulo / SP" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                          <FormField control={supplierForm.control} name="address.cityState" render={({ field }) => (<FormItem><FormLabel>Cidade / Estado</FormLabel><FormControl><Input placeholder="Ex: São Paulo / SP" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                         </div>
                       </TabsContent>
                       <TabsContent value="commercial" className="space-y-4">
-                        <Card><CardHeader><CardTitle className="text-lg">InformaÃ§Ãµes Comerciais</CardTitle></CardHeader>
+                        <Card><CardHeader><CardTitle className="text-lg">Informações Comerciais</CardTitle></CardHeader>
                             <CardContent className="space-y-4">
-                                <FormField control={supplierForm.control} name="commercialInfo.paymentTerms" render={({ field }) => (<FormItem><FormLabel>CondiÃ§Ãµes de Pagamento</FormLabel><FormControl><Input placeholder="Ex: 28 DDL" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                                <FormField control={supplierForm.control} name="commercialInfo.avgLeadTimeDays" render={({ field }) => (<FormItem><FormLabel>Prazo MÃ©dio de Entrega (dias)</FormLabel><FormControl><Input type="number" placeholder="Ex: 15" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                <FormField control={supplierForm.control} name="commercialInfo.paymentTerms" render={({ field }) => (<FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input placeholder="Ex: 28 DDL" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                <FormField control={supplierForm.control} name="commercialInfo.avgLeadTimeDays" render={({ field }) => (<FormItem><FormLabel>Prazo Médio de Entrega (dias)</FormLabel><FormControl><Input type="number" placeholder="Ex: 15" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                                 <FormField control={supplierForm.control} name="commercialInfo.shippingMethods" render={({ field }) => (<FormItem><FormLabel>Formas de Envio</FormLabel><FormControl><Input placeholder="Ex: Transportadora, Retirada" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                                 <FormField control={supplierForm.control} name="commercialInfo.shippingIncluded" render={({ field }) => (
                                     <FormItem className="flex flex-row items-start space-x-3 space-y-0 rounded-md border p-4">
                                         <FormControl><Checkbox checked={field.value} onCheckedChange={field.onChange} /></FormControl>
-                                        <div className="space-y-1 leading-none"><FormLabel>Frete incluso no preÃ§o?</FormLabel></div>
+                                        <div className="space-y-1 leading-none"><FormLabel>Frete incluso no preço?</FormLabel></div>
                                     </FormItem>
                                 )}/>
                             </CardContent>
                         </Card>
-                        <Card><CardHeader><CardTitle className="text-lg">Dados BancÃ¡rios</CardTitle></CardHeader>
+                        <Card><CardHeader><CardTitle className="text-lg">Dados Bancários</CardTitle></CardHeader>
                             <CardContent className="space-y-4">
                                 <FormField control={supplierForm.control} name="bankInfo.bank" render={({ field }) => (<FormItem><FormLabel>Banco</FormLabel><FormControl><Input placeholder="Nome do banco" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                                 <div className="grid md:grid-cols-2 gap-4">
-                                    <FormField control={supplierForm.control} name="bankInfo.agency" render={({ field }) => (<FormItem><FormLabel>AgÃªncia</FormLabel><FormControl><Input placeholder="0000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                                    <FormField control={supplierForm.control} name="bankInfo.agency" render={({ field }) => (<FormItem><FormLabel>Agência</FormLabel><FormControl><Input placeholder="0000" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                                     <FormField control={supplierForm.control} name="bankInfo.accountNumber" render={({ field }) => (<FormItem><FormLabel>Conta Corrente</FormLabel><FormControl><Input placeholder="00000-0" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                                 </div>
                                 <div className="grid md:grid-cols-2 gap-4">
-                                    <FormField control={supplierForm.control} name="bankInfo.accountType" render={({ field }) => (<FormItem><FormLabel>Tipo de Conta</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione..."/></SelectTrigger></FormControl><SelectContent><SelectItem value="Pessoa JurÃ­dica">Pessoa JurÃ­dica</SelectItem><SelectItem value="Pessoa FÃ­sica">Pessoa FÃ­sica</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
+                                    <FormField control={supplierForm.control} name="bankInfo.accountType" render={({ field }) => (<FormItem><FormLabel>Tipo de Conta</FormLabel><Select onValueChange={field.onChange} defaultValue={field.value}><FormControl><SelectTrigger><SelectValue placeholder="Selecione..."/></SelectTrigger></FormControl><SelectContent><SelectItem value="Pessoa Jurídica">Pessoa Jurídica</SelectItem><SelectItem value="Pessoa Física">Pessoa Física</SelectItem></SelectContent></Select><FormMessage /></FormItem>)}/>
                                     <FormField control={supplierForm.control} name="bankInfo.pix" render={({ field }) => (<FormItem><FormLabel>Chave PIX</FormLabel><FormControl><Input placeholder="CNPJ, e-mail, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                                 </div>
                             </CardContent>
                         </Card>
                       </TabsContent>
                       <TabsContent value="docs" className="space-y-4">
-                        <FormDescription>Anexe os documentos do fornecedor. Salve os arquivos em um serviÃ§o de nuvem (como Google Drive) e cole o link compartilhÃ¡vel aqui.</FormDescription>
+                        <FormDescription>Anexe os documentos do fornecedor. Salve os arquivos em um serviço de nuvem (como Google Drive) e cole o link compartilhável aqui.</FormDescription>
                         <FormField control={supplierForm.control} name="documentation.contratoSocialUrl" render={({ field }) => (<FormItem><FormLabel>Link do Contrato Social</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.cartaoCnpjUrl" render={({ field }) => (<FormItem><FormLabel>Link do CartÃ£o CNPJ</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.certidoesNegativasUrl" render={({ field }) => (<FormItem><FormLabel>Link das CertidÃµes Negativas</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.isoCertificateUrl" render={({ field }) => (<FormItem><FormLabel>Link do Certificado ISO (se aplicÃ¡vel)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
-                        <FormField control={supplierForm.control} name="documentation.alvaraUrl" render={({ field }) => (<FormItem><FormLabel>Link do AlvarÃ¡/LicenÃ§a (se aplicÃ¡vel)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.cartaoCnpjUrl" render={({ field }) => (<FormItem><FormLabel>Link do Cartão CNPJ</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.certidoesNegativasUrl" render={({ field }) => (<FormItem><FormLabel>Link das Certidões Negativas</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.isoCertificateUrl" render={({ field }) => (<FormItem><FormLabel>Link do Certificado ISO (se aplicável)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
+                        <FormField control={supplierForm.control} name="documentation.alvaraUrl" render={({ field }) => (<FormItem><FormLabel>Link do Alvará/Licença (se aplicável)</FormLabel><FormControl><Input placeholder="https:// (opcional)" {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>)}/>
                       </TabsContent>
                     </ScrollArea>
                   </Tabs>
                     <DialogFooter className="pt-4 border-t flex-shrink-0">
                         <Button type="button" variant="outline" onClick={() => setIsSupplierFormOpen(false)}>Cancelar</Button>
                         <Button type="submit" disabled={supplierForm.formState.isSubmitting}>
-                            {supplierForm.formState.isSubmitting ? "Salvando..." : (selectedSupplier?.id ? 'Salvar AlteraÃ§Ãµes' : 'Adicionar Fornecedor')}
+                            {supplierForm.formState.isSubmitting ? "Salvando..." : (selectedSupplier?.id ? 'Salvar Alterações' : 'Adicionar Fornecedor')}
                         </Button>
                     </DialogFooter>
                 </form>
@@ -3832,9 +3821,9 @@ export default function CostsPage() {
       <AlertDialog open={isDeleteAlertOpen} onOpenChange={setIsDeleteAlertOpen}>
         <AlertDialogContent>
             <AlertDialogHeader>
-                <AlertDialogTitle>VocÃª tem certeza?</AlertDialogTitle>
+                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
                 <AlertDialogDescription>
-                    Esta aÃ§Ã£o nÃ£o pode ser desfeita. Isso excluirÃ¡ permanentemente o fornecedor <span className="font-bold">{supplierToDelete?.nomeFantasia || supplierToDelete?.razaoSocial}</span>.
+                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o fornecedor <span className="font-bold">{supplierToDelete?.nomeFantasia || supplierToDelete?.razaoSocial}</span>.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -3849,9 +3838,9 @@ export default function CostsPage() {
       <AlertDialog open={isDeleteCostAlertOpen} onOpenChange={setIsDeleteCostAlertOpen}>
         <AlertDialogContent>
             <AlertDialogHeader>
-                <AlertDialogTitle>VocÃª tem certeza?</AlertDialogTitle>
+                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
                 <AlertDialogDescription>
-                    Esta aÃ§Ã£o nÃ£o pode ser desfeita. Isso excluirÃ¡ permanentemente o lanÃ§amento de custo: <span className="font-bold">{costEntryToDelete?.description}</span> no valor de <span className="font-bold">{costEntryToDelete?.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>.
+                    Esta ação não pode ser desfeita. Isso excluirá permanentemente o lançamento de custo: <span className="font-bold">{costEntryToDelete?.description}</span> no valor de <span className="font-bold">{costEntryToDelete?.totalCost?.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -3863,12 +3852,12 @@ export default function CostsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Modal do RelatÃ³rio de Recebimento de Materiais */}
+      {/* Modal do Relatório de Recebimento de Materiais */}
       <Dialog open={isReportModalOpen} onOpenChange={setIsReportModalOpen}>
         <DialogContent className="max-w-6xl h-[90vh] flex flex-col">
             <DialogHeader>
                 <DialogTitle className="flex items-center gap-2">
-                    ðŸ“Š RelatÃ³rio de Recebimento de Materiais
+                    📊 Relatório de Recebimento de Materiais
                 </DialogTitle>
                 <DialogDescription>
                     {selectedOrderForReport && (
@@ -3879,7 +3868,7 @@ export default function CostsPage() {
             
             {selectedOrderForReport && (() => {
                 const reportData = generateMaterialsReport(selectedOrderForReport);
-                if (!reportData) return <div>Erro ao gerar dados do relatÃ³rio</div>;
+                if (!reportData) return <div>Erro ao gerar dados do relatório</div>;
                 
                 return (
                     <div className="flex-1 flex flex-col min-h-0">
@@ -3901,7 +3890,7 @@ export default function CostsPage() {
                             </div>
                             <div className="text-center">
                                 <div className="text-2xl font-bold text-orange-600">{reportData.requisitionsCount}</div>
-                                <div className="text-sm text-muted-foreground">RequisiÃ§Ãµes</div>
+                                <div className="text-sm text-muted-foreground">Requisições</div>
                             </div>
                             <div className="text-center">
                                 <div className="text-2xl font-bold text-teal-600">
@@ -3911,10 +3900,10 @@ export default function CostsPage() {
                             </div>
                         </div>
 
-                        {/* Resumo por RequisiÃ§Ã£o */}
+                        {/* Resumo por Requisição */}
                         {reportData.requisitionSummary.length > 1 && (
                             <div className="mb-6">
-                                <h3 className="text-lg font-semibold mb-3">ðŸ“‹ Resumo por RequisiÃ§Ã£o</h3>
+                                <h3 className="text-lg font-semibold mb-3">📋 Resumo por Requisição</h3>
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                     {reportData.requisitionSummary.map(req => (
                                         <div key={req.requisitionNumber} className="p-3 border rounded-lg bg-white">
@@ -4018,7 +4007,7 @@ export default function CostsPage() {
                                                                  </TableCell>
                                                                  <TableCell className="text-sm">{item.invoiceNumber || '-'}</TableCell>
                                                                  <TableCell className="text-sm whitespace-nowrap">
-                                                                     {safeFormatDate(item.deliveryDate, 'dd/MM/yyyy', 'NÃ£o informada')}
+                                                                     {safeFormatDate(item.deliveryDate, 'dd/MM/yyyy', 'Não informada')}
                                                                  </TableCell>
                                                                  <TableCell className="text-sm">{item.requisitionNumber}</TableCell>
                                                                  <TableCell>
@@ -4045,17 +4034,17 @@ export default function CostsPage() {
                             </div>
                         </ScrollArea>
 
-                        {/* RodapÃ© com aÃ§Ãµes */}
+                        {/* Rodapé com ações */}
                         <div className="flex items-center justify-between pt-4 border-t">
                             <div className="text-xs text-muted-foreground">
-                                RelatÃ³rio gerado em: {safeFormatDate(reportData.reportDate, 'dd/MM/yyyy HH:mm')}
+                                Relatório gerado em: {safeFormatDate(reportData.reportDate, 'dd/MM/yyyy HH:mm')}
                             </div>
                             <div className="flex gap-2">
                                                                  <Button 
                                      variant="outline" 
                                      onClick={() => {
                                          // Gerar CSV
-                                         const csvHeaders = ['Fornecedor', 'Item', 'Material', 'Quantidade', 'Peso', 'Unidade Peso', 'Valor UnitÃ¡rio', 'Valor Total', 'Nota Fiscal', 'RequisiÃ§Ã£o', 'Entrada da NF', 'Status InspeÃ§Ã£o', '% do Total'];
+                                         const csvHeaders = ['Fornecedor', 'Item', 'Material', 'Quantidade', 'Peso', 'Unidade Peso', 'Valor Unitário', 'Valor Total', 'Nota Fiscal', 'Requisição', 'Entrada da NF', 'Status Inspeção', '% do Total'];
                                          const csvData = reportData.suppliers.flatMap(supplier => 
                                              supplier.items.map(item => {
                                                  const percentage = (item.totalValue / reportData.totalOrderCost) * 100;
@@ -4093,7 +4082,7 @@ export default function CostsPage() {
                                          window.URL.revokeObjectURL(url);
                                      }}
                                  >
-                                     ðŸ“Š Exportar CSV
+                                     📊 Exportar CSV
                                  </Button>
                                  <Button 
                                      variant="outline" 
@@ -4103,7 +4092,7 @@ export default function CostsPage() {
                                              printWindow.document.write(`
                                                  <html>
                                                      <head>
-                                                         <title>RelatÃ³rio - OS ${selectedOrderForReport.internalOS}</title>
+                                                         <title>Relatório - OS ${selectedOrderForReport.internalOS}</title>
                                                          <style>
                                                              body { font-family: Arial, sans-serif; margin: 20px; }
                                                              .header { text-align: center; margin-bottom: 30px; }
@@ -4119,7 +4108,7 @@ export default function CostsPage() {
                                                      </head>
                                                      <body>
                                                          <div class="header">
-                                                             <h1>RelatÃ³rio de Recebimento de Materiais</h1>
+                                                             <h1>Relatório de Recebimento de Materiais</h1>
                                                              <h2>OS: ${selectedOrderForReport.internalOS} - ${selectedOrderForReport.customerName}</h2>
                                                              <p>Gerado em: ${safeFormatDate(reportData.reportDate, 'dd/MM/yyyy HH:mm')}</p>
                                                          </div>
@@ -4138,7 +4127,7 @@ export default function CostsPage() {
                                                              </div>
                                                              <div class="summary-item">
                                                                  <h3 style="color: #ea580c; margin: 0;">${reportData.requisitionsCount}</h3>
-                                                                 <p style="margin: 5px 0 0 0;">RequisiÃ§Ãµes</p>
+                                                                 <p style="margin: 5px 0 0 0;">Requisições</p>
                                                              </div>
                                                          </div>
                                                          ${reportData.suppliers.map((supplier, index) => {
@@ -4162,7 +4151,7 @@ export default function CostsPage() {
                                                                                  <td style="text-align: right;">${item.unitValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
                                                                                  <td style="text-align: right; font-weight: bold;">${item.totalValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</td>
                                                                                  <td style="text-align: center;">${item.invoiceNumber || '-'}</td>
-                                                                                 <td style="text-align: center;">${safeFormatDate(item.deliveryDate, 'dd/MM/yyyy', 'NÃ£o informada')}</td>
+                                                                                 <td style="text-align: center;">${safeFormatDate(item.deliveryDate, 'dd/MM/yyyy', 'Não informada')}</td>
                                                                                  <td style="text-align: center;">${item.requisitionNumber}</td>
                                                                                  <td style="text-align: center; font-size: 11px;">${item.inspectionStatus || '-'}</td>
                                                                              </tr>
@@ -4182,7 +4171,7 @@ export default function CostsPage() {
                                          }
                                      }}
                                  >
-                                     ðŸ–¨ï¸ Imprimir
+                                     🖨️ Imprimir
                                  </Button>
                                 <Button variant="outline" onClick={() => setIsReportModalOpen(false)}>
                                     Fechar
@@ -4197,17 +4186,17 @@ export default function CostsPage() {
     </>
     );
     } catch (error) {
-        console.error("Erro crÃ­tico na renderizaÃ§Ã£o da pÃ¡gina:", error);
+        console.error("Erro crítico na renderização da página:", error);
         return (
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
                     <h1 className="text-3xl font-bold tracking-tight font-headline">Centro de Custos</h1>
                 </div>
                 <div className="flex flex-col items-center justify-center text-center text-destructive h-64 border-dashed border-2 rounded-lg">
-                    <h3 className="text-lg font-semibold">Erro ao carregar a pÃ¡gina</h3>
-                    <p className="text-sm">Ocorreu um erro inesperado. Recarregue a pÃ¡gina para tentar novamente.</p>
+                    <h3 className="text-lg font-semibold">Erro ao carregar a página</h3>
+                    <p className="text-sm">Ocorreu um erro inesperado. Recarregue a página para tentar novamente.</p>
                     <Button variant="outline" onClick={() => window.location.reload()} className="mt-4">
-                        ðŸ”„ Recarregar PÃ¡gina
+                        🔄 Recarregar Página
                     </Button>
                 </div>
             </div>
