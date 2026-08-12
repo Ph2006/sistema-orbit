@@ -1,7 +1,7 @@
 "use client";
 
 import React from "react";
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
@@ -192,6 +192,10 @@ const costCenterId = (sectorName: string) => sectorName.normalize('NFD')
 
 const normalizeOSNumber = (value?: string): string =>
     (value || '').trim().toLocaleLowerCase('pt-BR').replace(/\s+/g, '');
+
+const roundCurrency = (value: unknown): number => Math.round((Number(value) || 0) * 100) / 100;
+const currencyValuesAreEqual = (left: unknown, right: unknown): boolean =>
+    Math.abs(roundCurrency(left) - roundCurrency(right)) < 0.01;
 
 const requisitionSequence = (value?: string): number => {
     const digits = (value || '').replace(/\D/g, '');
@@ -682,6 +686,7 @@ export default function CostsPage() {
     const [editAppointmentRate, setEditAppointmentRate] = useState('');
     const [editAppointmentOperator, setEditAppointmentOperator] = useState('');
     const [appointmentToDelete, setAppointmentToDelete] = useState<ProductionAppointment | null>(null);
+    const isSyncingRequisitionsRef = useRef(false);
 
     const itemForm = useForm<ItemUpdateData>({
         resolver: zodResolver(itemUpdateSchema),
@@ -1160,6 +1165,17 @@ export default function CostsPage() {
     const confirmDeleteAppointment = async () => {
         if (!appointmentToDelete) return;
         try {
+            // Apontamentos abertos/pausados ainda não geraram custo na OS.
+            // Excluí-los diretamente evita uma leitura desnecessária da OS e funciona mesmo
+            // quando a cota de leituras do Firestore está temporariamente esgotada.
+            if (appointmentToDelete.status !== 'Concluído') {
+                await deleteDoc(doc(db, "companies", "mecald", "productionAppointments", appointmentToDelete.id));
+                setAppointments(current => current.filter(appointment => appointment.id !== appointmentToDelete.id));
+                setAppointmentToDelete(null);
+                toast({ title: 'Apontamento excluído' });
+                return;
+            }
+
             await runTransaction(db, async transaction => {
                 const appointmentRef = doc(db, "companies", "mecald", "productionAppointments", appointmentToDelete.id);
                 const orderRef = doc(db, "companies", "mecald", "orders", appointmentToDelete.orderId);
@@ -1232,8 +1248,11 @@ export default function CostsPage() {
     // Sincronizar requisições com OS automaticamente
     useEffect(() => {
         const syncRequisitionsWithOrders = async () => {
+            if (isSyncingRequisitionsRef.current) return;
             if (!requisitions.length || !orders.length || isLoadingRequisitions || isLoadingOrders) return;
-            
+
+            isSyncingRequisitionsRef.current = true;
+            try {
             console.log('🔄 ===== INICIANDO VERIFICAÇÃO DE SINCRONIZAÇÃO =====');
             console.log(`📊 Total de requisições: ${requisitions.length}`);
             console.log(`📊 Total de ordens: ${orders.length}`);
@@ -1288,9 +1307,9 @@ export default function CostsPage() {
                         }
                         
                         // Se não existe lançamento OU o lançamento existente tem valor diferente
-                        const needsUpdate = !existingReqCost || 
-                                          (existingReqCost.totalCost !== req.totalValue) ||
-                                          existingReqCost.isPending;
+                        const needsUpdate = !existingReqCost ||
+                                          !currencyValuesAreEqual(existingReqCost?.totalCost, req.totalValue) ||
+                                          Boolean(existingReqCost.isPending);
                         
                         if (needsUpdate) {
                             console.log(`🚀 EXECUTANDO SINCRONIZAÇÃO: Requisição ${req.requisitionNumber} -> OS ${req.orderId}`);
@@ -1334,6 +1353,9 @@ export default function CostsPage() {
                 console.log('✅ Nenhuma sincronização necessária - todos os dados estão atualizados');
             }
             console.log('🔄 ===== VERIFICAÇÃO DE SINCRONIZAÇÃO CONCLUÍDA =====');
+            } finally {
+                isSyncingRequisitionsRef.current = false;
+            }
         };
         
         // Sincronizar quando dados mudam - aguardar um pouco para garantir que tudo foi carregado
