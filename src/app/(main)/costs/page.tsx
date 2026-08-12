@@ -182,9 +182,8 @@ type ProductionAppointment = {
 type ProductionCostCenter = { id: string; sectorName: string; hourlyRate: number };
 
 const PRODUCTION_SECTORS = [
-  'PCP', 'Compras', 'Almoxarifado', 'Preparação', 'Montagem', 'Solda',
-  'Controle da qualidade', 'Jato', 'Pintura', 'Usinagem', 'Célula Robótica',
-  'Furação', 'Desempeno', 'Montagem Mecânica', 'Peritagem',
+  'Preparação', 'Administração', 'Montagem', 'Solda', 'Usinagem',
+  'Acabamento', 'Jato', 'Pintura', 'Improdutivo', 'Desempeno',
 ];
 
 const costCenterId = (sectorName: string) => sectorName.normalize('NFD')
@@ -1078,11 +1077,7 @@ export default function CostsPage() {
         link.click();
     };
 
-    const appointmentSectors = useMemo(() => [...new Set([
-        ...PRODUCTION_SECTORS,
-        ...appointments.map(appointment => appointment.stageName),
-        ...costCenters.map(center => center.sectorName),
-    ].filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR')), [appointments, costCenters]);
+    const appointmentSectors = useMemo(() => [...PRODUCTION_SECTORS], []);
 
     const appointmentOrderGroups = useMemo(() => {
         const search = appointmentSearch.trim().toLocaleLowerCase('pt-BR');
@@ -1140,18 +1135,21 @@ export default function CostsPage() {
                 const orderSnapshot = await transaction.get(orderRef);
                 if (!orderSnapshot.exists()) throw new Error('OS não encontrada');
                 const costEntries = Array.isArray(orderSnapshot.data().costEntries) ? orderSnapshot.data().costEntries : [];
-                const updatedEntry = {
+                const updatedEntry = cleanFirestoreData({
                     id: `apontamento-${editingAppointment.id}`,
                     description: `Mão de obra - ${editingAppointment.stageName} (${editingAppointment.itemDescription})`,
                     quantity: Number(hours.toFixed(4)), unitCost: rate, totalCost,
                     entryDate: Timestamp.now(), enteredBy: `Apontamento (${editAppointmentOperator.trim() || 'Não informado'})`,
                     isFromAppointment: true, appointmentId: editingAppointment.id,
-                };
+                });
+                const sanitizedEntries = costEntries
+                    .filter((entry: any) => entry.appointmentId !== editingAppointment.id)
+                    .map((entry: any) => cleanFirestoreData(entry));
                 transaction.update(appointmentRef, {
                     operatorName: editAppointmentOperator.trim() || 'Não informado', hourlyRate: rate,
                     totalHours: hours, accumulatedSeconds: Math.round(hours * 3600), totalCost, lastEditDate: Timestamp.now(),
                 });
-                transaction.update(orderRef, { costEntries: [...costEntries.filter((entry: any) => entry.appointmentId !== editingAppointment.id), updatedEntry] });
+                transaction.update(orderRef, { costEntries: [...sanitizedEntries, updatedEntry] });
             });
             setEditingAppointment(null);
             await fetchAppointments();
@@ -1172,7 +1170,8 @@ export default function CostsPage() {
             // de transações com falha, agravando o erro 429. Aproveitamos a OS já carregada.
             if (appointmentToDelete.status === 'Concluído' && loadedOrder) {
                 const updatedCostEntries = (Array.isArray(loadedOrder.costEntries) ? loadedOrder.costEntries : [])
-                    .filter((entry: any) => entry.appointmentId !== appointmentToDelete.id);
+                    .filter((entry: any) => entry.appointmentId !== appointmentToDelete.id)
+                    .map((entry: any) => cleanFirestoreData(entry));
                 const batch = writeBatch(db);
                 batch.update(doc(db, "companies", "mecald", "orders", appointmentToDelete.orderId), {
                     costEntries: updatedCostEntries,
