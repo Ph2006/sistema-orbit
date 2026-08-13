@@ -162,12 +162,34 @@ export default function AbrirApontamentoPage() {
     if (!item) return setAvailableStages([]);
 
     let template: any[] = [];
-    const costCenterRates = new Map<string, number>();
+    const costCenterRatesById = new Map<string, number>();
+    const costCenterRatesByName = new Map<string, number>();
+    const stageToCostCenterId = new Map<string, string>();
+
+    try {
+      // Carrega o vínculo real configurado em Produtos:
+      // nome da etapa -> ID do centro de custo.
+      const stagesSnapshot = await getDoc(doc(db, "companies", "mecald", "settings", "manufacturingStages"));
+      if (stagesSnapshot.exists()) {
+        asArray(stagesSnapshot.data().stages).forEach((stage: any) => {
+          const name = typeof stage === "string" ? stage : String(stage?.name || "");
+          const linkedCostCenterId = typeof stage === "object" ? String(stage?.costCenterId || "") : "";
+          if (name && linkedCostCenterId) {
+            stageToCostCenterId.set(normalizeStage(name), linkedCostCenterId);
+          }
+        });
+      }
+    } catch (error) {
+      console.warn("Não foi possível carregar o vínculo etapa → centro de custo:", error);
+    }
+
     try {
       const costCentersSnapshot = await getDocs(collection(db, "companies", "mecald", "productionCostCenters"));
       costCentersSnapshot.docs.forEach(costDoc => {
         const data = costDoc.data();
-        costCenterRates.set(normalizeStage(data.sectorName), Number(data.hourlyRate) || 0);
+        const hourlyRate = Number(data.hourlyRate) || 0;
+        costCenterRatesById.set(costDoc.id, hourlyRate);
+        costCenterRatesByName.set(normalizeStage(data.sectorName), hourlyRate);
       });
     } catch (error) {
       console.warn("Não foi possível carregar os centros de custo:", error);
@@ -183,9 +205,15 @@ export default function AbrirApontamentoPage() {
     const source = item.productionPlan.length ? item.productionPlan : template;
     const stages = source.map(stage => {
       const stageName = typeof stage === "string" ? stage : String(stage?.stageName || stage?.name || "");
-      const templateStage = template.find(candidate => String(candidate?.stageName || candidate?.name || "") === stageName);
-      const centerRate = costCenterRates.get(normalizeStage(stageName));
-      return { stageName, hourlyRate: Number(centerRate ?? templateStage?.hourlyRate ?? stage?.hourlyRate) || 0 };
+      const normalizedName = normalizeStage(stageName);
+      const linkedCostCenterId = stageToCostCenterId.get(normalizedName);
+      const rateById = linkedCostCenterId ? costCenterRatesById.get(linkedCostCenterId) : undefined;
+      const rateByName = costCenterRatesByName.get(normalizedName);
+
+      return {
+        stageName,
+        hourlyRate: rateById ?? rateByName ?? 0,
+      };
     }).filter(stage => stage.stageName);
     setAvailableStages([...new Map(stages.map(stage => [stage.stageName, stage])).values()]);
   };
