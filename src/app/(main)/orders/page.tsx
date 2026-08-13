@@ -393,6 +393,7 @@ const ScheduleDateInput = ({ date, onCommit, className }: ScheduleDateInputProps
 
   return (
     <Input
+      key={formattedDate || 'empty-date'}
       type="date"
       defaultValue={formattedDate}
       min="2000-01-01"
@@ -3692,6 +3693,7 @@ export default function OrdersPage() {
                         status: String(stage.status || 'Pendente'),
                         durationDays: Number(stage.durationDays) || 0,
                         useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                        workSchedule: stage.workSchedule || (stage.useBusinessDays === false ? 'especial' : 'normal'),
                         startDate: startTimestamp,
                         completedDate: endTimestamp,
                         // NOVO: Adicionar campos de recurso e supervisor
@@ -3715,17 +3717,31 @@ export default function OrdersPage() {
 
             console.log('💾 [handleSaveProgress] Plano convertido completo:', convertedProductionPlan.length, 'etapas');
 
-            // 3. Atualizar APENAS o item específico preservando TODOS os outros dados
-            const updatedItems = currentOrderData.items.map((item: any) => {
-                if (item.id === itemToTrack.id) {
-                    console.log('💾 [handleSaveProgress] ✓ Atualizando item alvo:', item.id);
+            // 3. Localizar o item por ID real ou, para pedidos antigos sem ID
+            // persistido, pela posição estável que ele ocupa no pedido carregado.
+            const currentItems = Array.isArray(currentOrderData.items) ? currentOrderData.items : [];
+            const selectedItemIndex = selectedOrder.items.findIndex(item => item.id === itemToTrack.id);
+            const persistedItemIndex = currentItems.findIndex((item: any) => item?.id && item.id === itemToTrack.id);
+            const targetItemIndex = persistedItemIndex >= 0 ? persistedItemIndex : selectedItemIndex;
+
+            if (targetItemIndex < 0 || targetItemIndex >= currentItems.length) {
+                throw new Error('Não foi possível identificar o item correto dentro da OS para salvar o cronograma.');
+            }
+
+            let targetItemWasUpdated = false;
+            const updatedItems = currentItems.map((item: any, itemIndex: number) => {
+                if (itemIndex === targetItemIndex) {
+                    console.log('💾 [handleSaveProgress] ✓ Atualizando item alvo:', item.id || `posição ${itemIndex + 1}`);
                     
                     // Limpar e validar dados do item
                     const cleanedItem = validateAndCleanItemData(item);
+                    // Persiste o ID que antes existia somente durante a leitura.
+                    cleanedItem.id = item.id || itemToTrack.id || `${selectedOrder.id}-${itemIndex}`;
                     
                     // Substituir APENAS o productionPlan
                     cleanedItem.productionPlan = convertedProductionPlan;
                     cleanedItem.lastProgressUpdate = Timestamp.now();
+                    targetItemWasUpdated = true;
                     
                     console.log('💾 [handleSaveProgress] ✓ Item atualizado com novo plano');
                     return cleanedItem;
@@ -3740,6 +3756,7 @@ export default function OrdersPage() {
                             status: String(stage.status || 'Pendente'),
                             durationDays: Number(stage.durationDays) || 0,
                             useBusinessDays: Boolean(stage.useBusinessDays !== false),
+                            workSchedule: stage.workSchedule || (stage.useBusinessDays === false ? 'especial' : 'normal'),
                             startDate: stage.startDate || null,
                             completedDate: stage.completedDate || null,
                             // NOVO: Preservar campos de recurso e supervisor
@@ -3751,6 +3768,10 @@ export default function OrdersPage() {
                     return cleanedItem;
                 }
             });
+
+            if (!targetItemWasUpdated) {
+                throw new Error('O item selecionado não recebeu o novo plano de produção.');
+            }
 
             console.log('💾 [handleSaveProgress] Total de itens processados:', updatedItems.length);
 
@@ -3779,9 +3800,27 @@ export default function OrdersPage() {
             const verificationSnap = await getDoc(orderRef);
             if (verificationSnap.exists()) {
                 const savedData = verificationSnap.data();
-                const savedItem = savedData.items.find((item: any) => item.id === itemToTrack.id);
+                const savedItems = Array.isArray(savedData.items) ? savedData.items : [];
+                const savedItem = savedItems[targetItemIndex];
                 
                 if (savedItem && savedItem.productionPlan) {
+                    const savedPlan = savedItem.productionPlan;
+                    const planWasPersisted = savedPlan.length === convertedProductionPlan.length
+                        && savedPlan.every((stage: any, index: number) => {
+                            const expectedStage = convertedProductionPlan[index];
+                            const savedStart = stage.startDate?.toDate?.().getTime?.() ?? null;
+                            const expectedStart = expectedStage.startDate?.toDate?.().getTime?.() ?? null;
+                            const savedEnd = stage.completedDate?.toDate?.().getTime?.() ?? null;
+                            const expectedEnd = expectedStage.completedDate?.toDate?.().getTime?.() ?? null;
+                            return stage.stageName === expectedStage.stageName
+                                && savedStart === expectedStart
+                                && savedEnd === expectedEnd;
+                        });
+
+                    if (!planWasPersisted) {
+                        throw new Error('A conferência após o salvamento encontrou datas diferentes das exibidas no cronograma.');
+                    }
+
                     console.log('✅ [handleSaveProgress] VERIFICAÇÃO: Dados salvos corretamente:', {
                         itemId: savedItem.id,
                         planStages: savedItem.productionPlan.length,
@@ -3793,10 +3832,10 @@ export default function OrdersPage() {
                         }))
                     });
                 } else {
-                    console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Item não encontrado ou sem plano');
+                    throw new Error('O item salvo não foi encontrado na conferência do Firestore.');
                 }
             } else {
-                console.error('❌ [handleSaveProgress] VERIFICAÇÃO FALHOU: Documento não existe');
+                throw new Error('A OS não foi encontrada na conferência após o salvamento.');
             }
 
             // 7. Verificar status geral
@@ -6381,17 +6420,9 @@ return (
                           <FormItem>
                             <FormLabel>Data de Entrega</FormLabel>
                             <FormControl>
-                              <Input
-                                type="date"
-                                value={field.value ? format(new Date(field.value), "yyyy-MM-dd") : ""}
-                                onChange={(e) => {
-                                  console.log('🔥 DATA ENTREGA ALTERADA:', e.target.value);
-                                  if (e.target.value) {
-                                    field.onChange(new Date(e.target.value));
-                                  } else {
-                                    field.onChange(null);
-                                  }
-                                }}
+                              <ScheduleDateInput
+                                date={field.value}
+                                onCommit={field.onChange}
                                 className="w-full"
                               />
                             </FormControl>
@@ -6599,31 +6630,10 @@ return (
                                         <FormItem>
                                           <FormLabel>Entrega do Item</FormLabel>
                                           <FormControl>
-                                            <Input
-                                              type="date"
-                                              value={
-                                                field.value 
-                                                  ? (field.value instanceof Date 
-                                                      ? format(field.value, "yyyy-MM-dd") 
-                                                      : format(new Date(field.value), "yyyy-MM-dd")
-                                                    )
-                                                  : ""
-                                              }
-                                              onChange={(e) => {
-                                                console.log('📅 [ITEM DELIVERY] Mudança detectada:', e.target.value);
-                                                if (e.target.value) {
-                                                  // Criar data de forma mais robusta
-                                                  const [year, month, day] = e.target.value.split('-').map(Number);
-                                                  const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
-                                                  console.log('📅 [ITEM DELIVERY] Nova data criada:', newDate);
-                                                  field.onChange(newDate);
-                                                } else {
-                                                  console.log('📅 [ITEM DELIVERY] Data limpa');
-                                                  field.onChange(null);
-                                                }
-                                              }}
+                                            <ScheduleDateInput
+                                              date={field.value}
+                                              onCommit={field.onChange}
                                               className="w-full"
-                                              placeholder="Selecione a data de entrega"
                                             />
                                           </FormControl>
                                           <FormMessage />
@@ -6672,28 +6682,9 @@ return (
                                               <FormItem>
                                                 <FormLabel>Data de Embarque *</FormLabel>
                                                 <FormControl>
-                                                  <Input
-                                                    type="date"
-                                                    value={
-                                                      field.value 
-                                                        ? (field.value instanceof Date 
-                                                            ? format(field.value, "yyyy-MM-dd") 
-                                                            : format(new Date(field.value), "yyyy-MM-dd")
-                                                          )
-                                                        : ""
-                                                    }
-                                                    onChange={(e) => {
-                                                      console.log('📅 [SHIPPING] Mudança detectada:', e.target.value);
-                                                      if (e.target.value) {
-                                                        const [year, month, day] = e.target.value.split('-').map(Number);
-                                                        const newDate = new Date(year, month - 1, day, 0, 0, 0, 0);
-                                                        console.log('📅 [SHIPPING] Nova data criada:', newDate);
-                                                        field.onChange(newDate);
-                                                      } else {
-                                                        console.log('📅 [SHIPPING] Data limpa');
-                                                        field.onChange(null);
-                                                      }
-                                                    }}
+                                                  <ScheduleDateInput
+                                                    date={field.value}
+                                                    onCommit={field.onChange}
                                                     className="w-full"
                                                   />
                                                 </FormControl>
