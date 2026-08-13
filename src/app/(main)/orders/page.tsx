@@ -3157,39 +3157,71 @@ export default function OrdersPage() {
             docPdf.text('CRONOGRAMA DE PRODUÇÃO', pageWidth / 2, yPos, { align: 'center' });
             yPos += 15;
 
-            // Informações do pedido em duas colunas
-            docPdf.setFontSize(10).setFont('helvetica', 'normal');
-            
-            // Coluna esquerda
+            // Dois cartões independentes impedem que nomes longos de clientes
+            // invadam a área reservada às datas e ao status do cronograma.
             const leftColumnX = 15;
-            let leftColumnY = yPos;
-            docPdf.setFont('helvetica', 'bold');
-            docPdf.text('DADOS DO PEDIDO:', leftColumnX, leftColumnY);
+            const columnsGap = 6;
+            const leftColumnWidth = 112;
+            const rightColumnX = leftColumnX + leftColumnWidth + columnsGap;
+            const rightColumnWidth = pageWidth - rightColumnX - 15;
+            const cardTop = yPos;
+            const cardPadding = 4;
+            const clientLines = docPdf.splitTextToSize(
+                selectedOrder.customer?.name || 'Cliente não informado',
+                leftColumnWidth - (cardPadding * 2)
+            );
+            const projectLines = selectedOrder.projectName
+                ? docPdf.splitTextToSize(selectedOrder.projectName, leftColumnWidth - (cardPadding * 2))
+                : [];
+            const leftCardHeight = 15 + (clientLines.length * 4) + (projectLines.length ? 5 + projectLines.length * 4 : 0);
+            const rightCardHeight = selectedOrder.deliveryDate ? 32 : 27;
+            const cardHeight = Math.max(36, leftCardHeight, rightCardHeight);
+
+            docPdf.setFillColor(248, 250, 252);
+            docPdf.setDrawColor(203, 213, 225);
+            docPdf.setLineWidth(0.25);
+            docPdf.roundedRect(leftColumnX, cardTop, leftColumnWidth, cardHeight, 2, 2, 'FD');
+            docPdf.roundedRect(rightColumnX, cardTop, rightColumnWidth, cardHeight, 2, 2, 'FD');
+
+            let leftColumnY = cardTop + 6;
+            docPdf.setTextColor(30, 64, 175).setFontSize(9).setFont('helvetica', 'bold');
+            docPdf.text('DADOS DO PEDIDO', leftColumnX + cardPadding, leftColumnY);
             leftColumnY += 6;
+            docPdf.setTextColor(15, 23, 42).setFontSize(8.5);
+            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX + cardPadding, leftColumnY);
+            leftColumnY += 5;
+            docPdf.text('Cliente:', leftColumnX + cardPadding, leftColumnY);
+            leftColumnY += 4;
             docPdf.setFont('helvetica', 'normal');
-            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX, leftColumnY);
-            leftColumnY += 5;
-            docPdf.text(`Cliente: ${selectedOrder.customer.name}`, leftColumnX, leftColumnY);
-            leftColumnY += 5;
-            if (selectedOrder.projectName) {
-                docPdf.text(`Projeto: ${selectedOrder.projectName}`, leftColumnX, leftColumnY);
-                leftColumnY += 5;
+            docPdf.text(clientLines, leftColumnX + cardPadding, leftColumnY);
+            leftColumnY += clientLines.length * 4;
+            if (projectLines.length) {
+                leftColumnY += 1;
+                docPdf.setFont('helvetica', 'bold');
+                docPdf.text('Projeto:', leftColumnX + cardPadding, leftColumnY);
+                leftColumnY += 4;
+                docPdf.setFont('helvetica', 'normal');
+                docPdf.text(projectLines, leftColumnX + cardPadding, leftColumnY);
             }
-            
-            // Coluna direita
-            const rightColumnX = pageWidth / 2 + 10;
-            let rightColumnY = yPos + 6; // Alinha com o início dos dados
-            docPdf.text(`OS Interna: ${selectedOrder.internalOS || 'N/A'}`, rightColumnX, rightColumnY);
-            rightColumnY += 5;
-            docPdf.text(`Data de Emissão: ${format(new Date(), "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
-            rightColumnY += 5;
-            if (selectedOrder.deliveryDate) {
-                docPdf.text(`Data de Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`, rightColumnX, rightColumnY);
+
+            let rightColumnY = cardTop + 6;
+            docPdf.setTextColor(30, 64, 175).setFontSize(9).setFont('helvetica', 'bold');
+            docPdf.text('CONTROLE DO CRONOGRAMA', rightColumnX + cardPadding, rightColumnY);
+            rightColumnY += 6;
+            docPdf.setTextColor(15, 23, 42).setFontSize(8.5).setFont('helvetica', 'normal');
+            const rightColumnLines = [
+                `OS Interna: ${selectedOrder.internalOS || 'N/A'}`,
+                `Emissão: ${format(new Date(), "dd/MM/yyyy")}`,
+                ...(selectedOrder.deliveryDate ? [`Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`] : []),
+                `Status: ${selectedOrder.status}`,
+            ];
+            rightColumnLines.forEach(line => {
+                docPdf.text(docPdf.splitTextToSize(line, rightColumnWidth - (cardPadding * 2)), rightColumnX + cardPadding, rightColumnY);
                 rightColumnY += 5;
-            }
-            docPdf.text(`Status: ${selectedOrder.status}`, rightColumnX, rightColumnY);
-            
-            yPos = Math.max(leftColumnY, rightColumnY) + 10;
+            });
+
+            docPdf.setTextColor(0, 0, 0);
+            yPos = cardTop + cardHeight + 10;
 
             // Progresso geral do pedido
             const orderProgress = calculateOrderProgress(selectedOrder);
@@ -3237,26 +3269,45 @@ export default function OrdersPage() {
                 if (item.productionPlan && item.productionPlan.length > 0) {
                     // Cabeçalho do item com código, descrição e quantidade na mesma linha
                     const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
-                    tableBody.push([{ 
+                    const itemProgress = calculateItemProgress(item);
+                    const progressColor: [number, number, number] = itemProgress < 30
+                        ? [220, 38, 38]
+                        : itemProgress < 70
+                            ? [217, 119, 6]
+                            : [22, 163, 74];
+                    const progressBackground: [number, number, number] = itemProgress < 30
+                        ? [254, 226, 226]
+                        : itemProgress < 70
+                            ? [254, 243, 199]
+                            : [220, 252, 231];
+
+                    tableBody.push([{
                         content: itemHeader, 
                         colSpan: 5, 
                         styles: { 
                             fontStyle: 'bold', 
-                            fillColor: '#f0f0f0',
-                            fontSize: 9
-                        } 
+                            fillColor: [30, 64, 175],
+                            textColor: [255, 255, 255],
+                            fontSize: 9.5,
+                            cellPadding: { top: 3, right: 3, bottom: 3, left: 3 }
+                        },
+                        itemRowType: 'header'
                     }]);
                     
                     // Linha com barra de progresso do item
-                    const itemProgress = calculateItemProgress(item);
-                    tableBody.push([{ 
-                        content: `Progresso: ${itemProgress.toFixed(1)}%`, 
+                    tableBody.push([{
+                        content: `Progresso do item: ${itemProgress.toFixed(1)}%`,
                         colSpan: 5, 
                         styles: { 
-                            fontSize: 8,
-                            textColor: '#666666',
-                            cellPadding: { top: 2, right: 3, bottom: 2, left: 3 }
-                        } 
+                            fontSize: 8.5,
+                            fontStyle: 'bold',
+                            fillColor: progressBackground,
+                            textColor: progressColor,
+                            cellPadding: { top: 2.5, right: 3, bottom: 2.5, left: 3 }
+                        },
+                        itemRowType: 'progress',
+                        itemProgress,
+                        progressColor
                     }]);
                     
                     // Etapas do item
@@ -3302,41 +3353,21 @@ export default function OrdersPage() {
                     }
                 },
                 didDrawCell: (data) => {
-                    // Verifica se é uma linha de progresso do item
-                    if (data.cell.raw && typeof data.cell.raw === 'string' && data.cell.raw.startsWith('Progresso:')) {
-                        const progressText = data.cell.raw as string;
-                        const progressMatch = progressText.match(/(\d+\.?\d*)%/);
-                        
-                        if (progressMatch) {
-                            const progress = parseFloat(progressMatch[1]);
-                            
-                            // Posição e dimensões da barra (ajustada para melhor posicionamento)
-                            const barX = data.cell.x + 80; // Posição após o texto "Progresso: XX.X%"
-                            const barY = data.cell.y + 3;
-                            const barWidth = 70;
-                            const barHeight = 5;
-                            
-                            // Fundo da barra (cinza claro)
-                            docPdf.setFillColor(230, 230, 230);
-                            docPdf.rect(barX, barY, barWidth, barHeight, 'F');
-                            
-                            // Barra de progresso colorida baseada na porcentagem
-                            const fillWidth = (progress / 100) * barWidth;
-                            if (fillWidth > 0) { // Só desenha se houver progresso
-                                if (progress < 30) {
-                                    docPdf.setFillColor(239, 68, 68); // Vermelho para progresso baixo
-                                } else if (progress < 70) {
-                                    docPdf.setFillColor(245, 158, 11); // Amarelo para progresso médio
-                                } else {
-                                    docPdf.setFillColor(34, 197, 94); // Verde para progresso alto
-                                }
-                                docPdf.rect(barX, barY, fillWidth, barHeight, 'F');
-                            }
-                            
-                            // Borda da barra para definir melhor o contorno
-                            docPdf.setDrawColor(0, 0, 0);
-                            docPdf.setLineWidth(0.2);
-                            docPdf.rect(barX, barY, barWidth, barHeight, 'S');
+                    const rawCell = data.cell.raw as any;
+                    if (rawCell?.itemRowType === 'progress') {
+                        const progress = Number(rawCell.itemProgress) || 0;
+                        const color = rawCell.progressColor as [number, number, number];
+                        const barX = data.cell.x + 48;
+                        const barY = data.cell.y + (data.cell.height - 4) / 2;
+                        const barWidth = Math.max(20, data.cell.width - 53);
+                        const barHeight = 4;
+
+                        docPdf.setFillColor(226, 232, 240);
+                        docPdf.roundedRect(barX, barY, barWidth, barHeight, 1, 1, 'F');
+                        const fillWidth = Math.min(barWidth, Math.max(0, (progress / 100) * barWidth));
+                        if (fillWidth > 0) {
+                            docPdf.setFillColor(color[0], color[1], color[2]);
+                            docPdf.roundedRect(barX, barY, fillWidth, barHeight, 1, 1, 'F');
                         }
                     }
                 },
