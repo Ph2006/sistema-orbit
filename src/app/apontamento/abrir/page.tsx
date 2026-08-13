@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, Timestamp, updateDoc, where, writeBatch } from "firebase/firestore";
-import { getAuth, signInAnonymously } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -15,6 +15,12 @@ type StageOption = { stageName: string; hourlyRate: number };
 type ItemOption = { id: string; code: string; description: string; productionPlan: any[] };
 type OrderOption = { id: string; internalOS: string; customerName: string; items: ItemOption[] };
 type ActiveAppointment = { id: string; orderId: string; orderInternalOS: string; itemId: string; itemCode?: string; itemDescription: string; stageName: string; hourlyRate: number; status: 'Aberto' | 'Pausado'; operatorName: string; startedAt: any; lastResumedAt?: any; accumulatedSeconds: number };
+
+const isInAppBrowser = () => {
+  if (typeof navigator === "undefined") return false;
+  const ua = navigator.userAgent || "";
+  return /FBAN|FBAV|Instagram|WhatsApp|Line\//i.test(ua);
+};
 
 const asArray = (value: any): any[] => Array.isArray(value)
   ? value
@@ -63,7 +69,12 @@ export default function AbrirApontamentoPage() {
         // sessão anterior no navegador, cria uma sessão anônima antes de ler o
         // Firestore. Assim, as regras podem continuar exigindo request.auth.
         const auth = getAuth(db.app);
-        await auth.authStateReady();
+        await new Promise<void>((resolve) => {
+          const unsubscribe = onAuthStateChanged(auth, () => {
+            unsubscribe();
+            resolve();
+          });
+        });
         if (!auth.currentUser) {
           await signInAnonymously(auth);
         }
@@ -95,11 +106,13 @@ export default function AbrirApontamentoPage() {
         if (cancelled) return;
 
         const code = String((error as { code?: string })?.code || "");
+        const rawMessage = String((error as { message?: string })?.message || "");
+
         const message = code === "auth/operation-not-allowed"
           ? "A autenticação anônima ainda não está habilitada no Firebase Authentication."
           : code === "permission-denied" || code === "firestore/permission-denied"
             ? "A sessão foi criada, mas as regras do Firestore não permitem consultar as OS para o apontamento."
-            : "Não foi possível carregar as Ordens de Serviço. Verifique a conexão e tente novamente.";
+            : `Erro inesperado${code ? ` (${code})` : ""}: ${rawMessage || "sem detalhes"}.`;
 
         setOrders([]);
         setOrdersLoadError(message);
@@ -255,6 +268,15 @@ export default function AbrirApontamentoPage() {
 
   return <main className="mx-auto max-w-2xl p-4 md:p-6">
     <Card><CardHeader><CardTitle>Apontamento de Produção</CardTitle><CardDescription>Inicie um processo ou gerencie um apontamento já aberto usando o mesmo QR Code.</CardDescription></CardHeader>
+      {isInAppBrowser() && (
+        <div className="mx-6 mb-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-900">
+          <p className="font-medium">Abra este link no navegador do celular</p>
+          <p className="mt-1 text-sm">
+            Você está usando o navegador interno de um app (WhatsApp/Instagram). Ele bloqueia o login necessário para carregar as OS.
+            Toque nos <strong>⋯</strong> no canto superior e escolha <strong>"Abrir no navegador"</strong> (Chrome ou Safari).
+          </p>
+        </div>
+      )}
       <CardContent className="space-y-5">
         <div className="grid grid-cols-2 gap-2 rounded-lg bg-muted p-1">
           <Button variant={mode === 'start' ? 'default' : 'ghost'} onClick={() => changeMode('start')}>Iniciar novo</Button>
