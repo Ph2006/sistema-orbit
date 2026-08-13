@@ -2539,75 +2539,106 @@ export default function OrdersPage() {
       setEditedPlan(newPlan);
     };
 
-    // NOVA FUNÇÃO SIMPLES PARA RECÁLCULO SEQUENCIAL
+    // Recalcula o cronograma usando uma capacidade de 1 dia por data.
+    // Durações fracionárias compartilham a mesma data apenas enquanto a soma
+    // não ultrapassar 1. Ao esgotar a capacidade, a próxima etapa avança.
     const recalculateSequentialTasks = (
       plan: ProductionStage[],
       fromIndex: number,
       preserveCurrentEndDate: boolean = false
     ) => {
       console.log('🔄 Recalculando tarefas sequenciais a partir do índice:', fromIndex);
-      
-      // Primeiro, calcular a data de conclusão da tarefa atual
-      const currentStage = plan[fromIndex];
-      if (!preserveCurrentEndDate && currentStage.startDate && currentStage.durationDays) {
-        const duration = Math.max(0.125, Number(currentStage.durationDays));
-        const useBusinessDays = currentStage.useBusinessDays !== false;
-        
-        if (duration <= 1) {
-          // Tarefas de 1 dia ou menos: terminam no mesmo dia
-          currentStage.completedDate = new Date(currentStage.startDate);
-        } else {
-          // Tarefas de mais de 1 dia
-          if (useBusinessDays) {
-            // Dias úteis: adicionar dias úteis
-            currentStage.completedDate = addBusinessDaysSimple(currentStage.startDate, Math.ceil(duration) - 1);
-          } else {
-            // Dias corridos: adicionar dias normais
-            currentStage.completedDate = new Date(currentStage.startDate);
-            currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration) - 1);
-          }
-        }
-      }
-      
-      // Agora recalcular todas as tarefas seguintes SEQUENCIALMENTE
-      for (let i = fromIndex + 1; i < plan.length; i++) {
-        const previousStage = plan[i - 1];
-        const currentStage = plan[i];
-        
-        if (previousStage.completedDate) {
-          // CORREÇÃO PRINCIPAL: A próxima tarefa SEMPRE inicia no mesmo dia que a anterior termina
-          currentStage.startDate = new Date(previousStage.completedDate);
-          
-          // Calcular data de conclusão
-          const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
-          const useBusinessDays = currentStage.useBusinessDays !== false;
 
-          // Uma tarefa em horário normal nunca pode começar em fim de semana
-          // ou feriado, inclusive após um término digitado manualmente.
-          if (useBusinessDays && !isBusinessDay(currentStage.startDate)) {
-            currentStage.startDate = getNextBusinessDay(currentStage.startDate);
-          }
-          
-          if (duration <= 1) {
-            // Tarefas de 1 dia ou menos: terminam no mesmo dia
-            currentStage.completedDate = new Date(currentStage.startDate);
-          } else {
-            // Tarefas de mais de 1 dia
-            if (useBusinessDays) {
-              currentStage.completedDate = addBusinessDaysSimple(currentStage.startDate, Math.ceil(duration) - 1);
-            } else {
-              // Dias corridos
-              currentStage.completedDate = new Date(currentStage.startDate);
-              currentStage.completedDate.setDate(currentStage.completedDate.getDate() + Math.ceil(duration) - 1);
-            }
-          }
-          
-          console.log(`✅ Etapa ${i + 1}: ${currentStage.stageName} | Início: ${currentStage.startDate.toLocaleDateString()} | Fim: ${currentStage.completedDate.toLocaleDateString()}`);
-        } else {
-          // Se a etapa anterior não tem data de conclusão, limpar as datas desta etapa
-          currentStage.startDate = null;
-          currentStage.completedDate = null;
+      if (!plan[fromIndex]) return;
+
+      const EPSILON = 0.000001;
+      const normalizeDate = (value: Date, useBusinessDays: boolean) => {
+        let date = new Date(value);
+        date.setHours(0, 0, 0, 0);
+        if (useBusinessDays) {
+          while (!isBusinessDay(date)) date = addDays(date, 1);
         }
+        return date;
+      };
+      const nextWorkingDate = (value: Date, useBusinessDays: boolean) => {
+        let date = addDays(value, 1);
+        if (useBusinessDays) {
+          while (!isBusinessDay(date)) date = addDays(date, 1);
+        }
+        return date;
+      };
+      const scheduleStage = (stage: ProductionStage, date: Date, availableCapacity: number) => {
+        const useBusinessDays = stage.useBusinessDays !== false;
+        let workingDate = normalizeDate(date, useBusinessDays);
+        let capacity = Math.min(1, Math.max(0, availableCapacity));
+        let remaining = Math.max(0.125, Number(stage.durationDays) || 1);
+
+        if (capacity <= EPSILON) {
+          workingDate = nextWorkingDate(workingDate, useBusinessDays);
+          capacity = 1;
+        }
+
+        const startDate = new Date(workingDate);
+        while (remaining > capacity + EPSILON) {
+          remaining -= capacity;
+          workingDate = nextWorkingDate(workingDate, useBusinessDays);
+          capacity = 1;
+        }
+
+        const completedDate = new Date(workingDate);
+        const remainingCapacity = Math.max(0, capacity - remaining);
+        return {
+          startDate,
+          completedDate,
+          nextDate: remainingCapacity <= EPSILON
+            ? nextWorkingDate(completedDate, useBusinessDays)
+            : completedDate,
+          nextCapacity: remainingCapacity <= EPSILON ? 1 : remainingCapacity,
+        };
+      };
+
+      const currentStage = plan[fromIndex];
+      if (!currentStage.startDate) {
+        for (let i = fromIndex + 1; i < plan.length; i++) {
+          plan[i].startDate = null;
+          plan[i].completedDate = null;
+        }
+        return;
+      }
+
+      let cursorDate: Date;
+      let cursorCapacity: number;
+
+      if (preserveCurrentEndDate && currentStage.completedDate) {
+        const useBusinessDays = currentStage.useBusinessDays !== false;
+        const duration = Math.max(0.125, Number(currentStage.durationDays) || 1);
+        const fractionalPart = duration % 1;
+        const preservedEnd = normalizeDate(currentStage.completedDate, useBusinessDays);
+
+        if (fractionalPart > EPSILON) {
+          cursorDate = preservedEnd;
+          cursorCapacity = 1 - fractionalPart;
+        } else {
+          cursorDate = nextWorkingDate(preservedEnd, useBusinessDays);
+          cursorCapacity = 1;
+        }
+      } else {
+        const result = scheduleStage(currentStage, currentStage.startDate, 1);
+        currentStage.startDate = result.startDate;
+        currentStage.completedDate = result.completedDate;
+        cursorDate = result.nextDate;
+        cursorCapacity = result.nextCapacity;
+      }
+
+      for (let i = fromIndex + 1; i < plan.length; i++) {
+        const stage = plan[i];
+        const result = scheduleStage(stage, cursorDate, cursorCapacity);
+        stage.startDate = result.startDate;
+        stage.completedDate = result.completedDate;
+        cursorDate = result.nextDate;
+        cursorCapacity = result.nextCapacity;
+
+        console.log(`✅ Etapa ${i + 1}: ${stage.stageName} | Início: ${stage.startDate.toLocaleDateString()} | Fim: ${stage.completedDate.toLocaleDateString()}`);
       }
       
       // DEBUG: Mostrar análise detalhada do acúmulo
@@ -3476,6 +3507,13 @@ export default function OrdersPage() {
                     startDate: null,
                     completedDate: null,
                 }));
+            }
+
+            // Corrige previsões antigas que deixavam todas as durações
+            // fracionárias na mesma data. Etapas concluídas permanecem intactas.
+            const firstOpenStageIndex = finalPlan.findIndex(stage => stage.status !== 'Concluído');
+            if (firstOpenStageIndex >= 0 && finalPlan[firstOpenStageIndex].startDate) {
+                recalculateSequentialTasks(finalPlan, firstOpenStageIndex);
             }
 
             setEditedPlan(finalPlan);
