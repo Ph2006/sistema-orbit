@@ -3108,6 +3108,16 @@ export default function OrdersPage() {
         toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
 
         try {
+            // A lateral pode continuar com uma referência antiga após o usuário
+            // salvar o progresso. Antes de gerar o PDF, busca novamente a lista
+            // processada do Firestore e usa exclusivamente o pedido mais recente.
+            const latestOrders = await fetchOrders();
+            const exportOrder = latestOrders.find(order => order.id === selectedOrder.id);
+            if (!exportOrder) {
+                throw new Error('Não foi possível localizar a versão mais recente do pedido.');
+            }
+
+            setSelectedOrder(exportOrder);
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
             const docSnap = await getDoc(companyRef);
             const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
@@ -3167,14 +3177,14 @@ export default function OrdersPage() {
             const cardTop = yPos;
             const cardPadding = 4;
             const clientLines = docPdf.splitTextToSize(
-                selectedOrder.customer?.name || 'Cliente não informado',
+                exportOrder.customer?.name || 'Cliente não informado',
                 leftColumnWidth - (cardPadding * 2)
             );
-            const projectLines = selectedOrder.projectName
-                ? docPdf.splitTextToSize(selectedOrder.projectName, leftColumnWidth - (cardPadding * 2))
+            const projectLines = exportOrder.projectName
+                ? docPdf.splitTextToSize(exportOrder.projectName, leftColumnWidth - (cardPadding * 2))
                 : [];
             const leftCardHeight = 15 + (clientLines.length * 4) + (projectLines.length ? 5 + projectLines.length * 4 : 0);
-            const rightCardHeight = selectedOrder.deliveryDate ? 32 : 27;
+            const rightCardHeight = exportOrder.deliveryDate ? 32 : 27;
             const cardHeight = Math.max(36, leftCardHeight, rightCardHeight);
 
             docPdf.setFillColor(248, 250, 252);
@@ -3188,7 +3198,7 @@ export default function OrdersPage() {
             docPdf.text('DADOS DO PEDIDO', leftColumnX + cardPadding, leftColumnY);
             leftColumnY += 6;
             docPdf.setTextColor(15, 23, 42).setFontSize(8.5);
-            docPdf.text(`Pedido Nº: ${selectedOrder.quotationNumber}`, leftColumnX + cardPadding, leftColumnY);
+            docPdf.text(`Pedido Nº: ${exportOrder.quotationNumber}`, leftColumnX + cardPadding, leftColumnY);
             leftColumnY += 5;
             docPdf.text('Cliente:', leftColumnX + cardPadding, leftColumnY);
             leftColumnY += 4;
@@ -3210,10 +3220,10 @@ export default function OrdersPage() {
             rightColumnY += 6;
             docPdf.setTextColor(15, 23, 42).setFontSize(8.5).setFont('helvetica', 'normal');
             const rightColumnLines = [
-                `OS Interna: ${selectedOrder.internalOS || 'N/A'}`,
+                `OS Interna: ${exportOrder.internalOS || 'N/A'}`,
                 `Emissão: ${format(new Date(), "dd/MM/yyyy")}`,
-                ...(selectedOrder.deliveryDate ? [`Entrega: ${format(selectedOrder.deliveryDate, "dd/MM/yyyy")}`] : []),
-                `Status: ${selectedOrder.status}`,
+                ...(exportOrder.deliveryDate ? [`Entrega: ${format(exportOrder.deliveryDate, "dd/MM/yyyy")}`] : []),
+                `Status: ${exportOrder.status}`,
             ];
             rightColumnLines.forEach(line => {
                 docPdf.text(docPdf.splitTextToSize(line, rightColumnWidth - (cardPadding * 2)), rightColumnX + cardPadding, rightColumnY);
@@ -3224,7 +3234,7 @@ export default function OrdersPage() {
             yPos = cardTop + cardHeight + 10;
 
             // Progresso geral do pedido
-            const orderProgress = calculateOrderProgress(selectedOrder);
+            const orderProgress = calculateOrderProgress(exportOrder);
             
             // Título do progresso geral
             docPdf.setFontSize(10).setFont('helvetica', 'bold');
@@ -3265,7 +3275,7 @@ export default function OrdersPage() {
 
             // Tabela do cronograma
             const tableBody: any[][] = [];
-            selectedOrder.items.forEach(item => {
+            exportOrder.items.forEach(item => {
                 if (item.productionPlan && item.productionPlan.length > 0) {
                     // Cabeçalho do item com código, descrição e quantidade na mesma linha
                     const itemHeader = `Item: ${item.code ? `[${item.code}] ` : ''}${item.description} (Qtd: ${item.quantity})`;
@@ -3377,7 +3387,7 @@ export default function OrdersPage() {
             // Histórico completo de chamados de engenharia da OS.
             const ticketsSnapshot = await getDocs(query(
                 collection(db, "companies", "mecald", "engineeringTickets"),
-                where("orderId", "==", selectedOrder.id)
+                where("orderId", "==", exportOrder.id)
             ));
             const ticketsData = ticketsSnapshot.docs.map(ticketDoc => {
                 const data = ticketDoc.data();
@@ -3476,7 +3486,7 @@ export default function OrdersPage() {
                 );
             }
 
-            docPdf.save(`Cronograma_Pedido_${selectedOrder.quotationNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
+            docPdf.save(`Cronograma_Pedido_${exportOrder.quotationNumber}_${format(new Date(), 'yyyyMMdd')}.pdf`);
 
         } catch (error) {
             console.error("Error generating schedule PDF:", error);
