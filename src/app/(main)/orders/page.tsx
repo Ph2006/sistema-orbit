@@ -165,6 +165,13 @@ type EngineeringTicketAlert = {
     dueDate?: Date | null;
 };
 
+type EngineeringTicketHistory = Omit<EngineeringTicketAlert, 'status'> & {
+    status: string;
+    resolvedDate?: Date | null;
+    daysOpen: number;
+    isResolved: boolean;
+};
+
 const ACTIVE_ENGINEERING_TICKET_STATUSES = new Set([
     'Aberto',
     'Em Análise',
@@ -637,6 +644,7 @@ export default function OrdersPage() {
     const [isSheetOpen, setIsSheetOpen] = useState(false);
     const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
     const [activeEngineeringTickets, setActiveEngineeringTickets] = useState<EngineeringTicketAlert[]>([]);
+    const [engineeringTicketsHistory, setEngineeringTicketsHistory] = useState<EngineeringTicketHistory[]>([]);
     const [isCostAnalysisOpen, setIsCostAnalysisOpen] = useState(false);
     const [isLoadingCostAnalysis, setIsLoadingCostAnalysis] = useState(false);
     const [costAnalysis, setCostAnalysis] = useState<OrderCostAnalysis | null>(null);
@@ -677,6 +685,7 @@ export default function OrdersPage() {
     useEffect(() => {
         if (!isSheetOpen || !selectedOrder?.id) {
             setActiveEngineeringTickets([]);
+            setEngineeringTicketsHistory([]);
             return;
         }
 
@@ -688,12 +697,8 @@ export default function OrdersPage() {
         const unsubscribe = onSnapshot(
             ticketsQuery,
             snapshot => {
-                const tickets = snapshot.docs
-                    .map(ticketDoc => {
+                const tickets = snapshot.docs.map(ticketDoc => {
                         const data = ticketDoc.data();
-                        if (!ACTIVE_ENGINEERING_TICKET_STATUSES.has(String(data.status || 'Aberto'))) {
-                            return null;
-                        }
 
                         const toDate = (value: any): Date | null => {
                             if (!value) return null;
@@ -702,6 +707,20 @@ export default function OrdersPage() {
                             return Number.isNaN(parsed.getTime()) ? null : parsed;
                         };
 
+                        const status = String(data.status || 'Aberto');
+                        const createdDate = toDate(data.createdDate);
+                        const resolvedDate = toDate(
+                            data.resolvedDate
+                            || data.resolvedAt
+                            || data.closedAt
+                            || (status === 'Resolvido' ? data.updatedAt : null)
+                        );
+                        const isResolved = status === 'Resolvido';
+                        const endReference = isResolved && resolvedDate ? resolvedDate : new Date();
+                        const daysOpen = createdDate
+                            ? Math.max(0, Math.ceil((endReference.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)))
+                            : 0;
+
                         return {
                             id: ticketDoc.id,
                             ticketNumber: data.ticketNumber || `ENG-${ticketDoc.id.slice(0, 6).toUpperCase()}`,
@@ -709,15 +728,29 @@ export default function OrdersPage() {
                             orderId: data.orderId,
                             itemId: data.itemId || null,
                             priority: data.priority || 'Média',
-                            status: data.status || 'Aberto',
+                            status,
                             category: data.category || '',
                             requestedBy: data.requestedBy || '',
                             assignedTo: data.assignedTo || '',
-                            createdDate: toDate(data.createdDate),
+                            createdDate,
                             dueDate: toDate(data.dueDate),
-                        } as EngineeringTicketAlert;
-                    })
-                    .filter((ticket): ticket is EngineeringTicketAlert => Boolean(ticket));
+                            resolvedDate,
+                            daysOpen,
+                            isResolved,
+                        } as EngineeringTicketHistory;
+                    });
+
+                const history = [...tickets].sort((a, b) =>
+                    (b.createdDate?.getTime() || 0) - (a.createdDate?.getTime() || 0)
+                );
+                setEngineeringTicketsHistory(history);
+
+                const activeTickets: EngineeringTicketAlert[] = tickets
+                    .filter(ticket => ACTIVE_ENGINEERING_TICKET_STATUSES.has(ticket.status))
+                    .map(ticket => ({
+                        ...ticket,
+                        status: ticket.status as EngineeringTicketAlert['status'],
+                    }));
 
                 const priorityWeight: Record<EngineeringTicketAlert['priority'], number> = {
                     'Crítica': 4,
@@ -726,15 +759,16 @@ export default function OrdersPage() {
                     'Baixa': 1,
                 };
 
-                tickets.sort((a, b) =>
+                activeTickets.sort((a, b) =>
                     priorityWeight[b.priority] - priorityWeight[a.priority]
                     || (b.createdDate?.getTime() || 0) - (a.createdDate?.getTime() || 0)
                 );
-                setActiveEngineeringTickets(tickets);
+                setActiveEngineeringTickets(activeTickets);
             },
             error => {
                 console.error('Erro ao acompanhar chamados de engenharia do pedido:', error);
                 setActiveEngineeringTickets([]);
+                setEngineeringTicketsHistory([]);
             }
         );
 
@@ -2497,6 +2531,9 @@ export default function OrdersPage() {
       } else if (field === 'completedDate' && preserveManualEndDate) {
         // Preserva o fim digitado, mas atualiza todas as etapas posteriores.
         recalculateSequentialTasks(newPlan, stageIndex, true);
+      } else if (field === 'status') {
+        // Preserva a data real da etapa alterada e recalcula toda a cadeia seguinte.
+        recalculateSequentialTasks(newPlan, stageIndex, true);
       }
       
       setEditedPlan(newPlan);
@@ -3275,6 +3312,93 @@ export default function OrdersPage() {
                 margin: { left: 15, right: 15 }
             });
 
+            // Histórico completo de chamados de engenharia da OS.
+            const ticketsSnapshot = await getDocs(query(
+                collection(db, "companies", "mecald", "engineeringTickets"),
+                where("orderId", "==", selectedOrder.id)
+            ));
+            const ticketsData = ticketsSnapshot.docs.map(ticketDoc => {
+                const data = ticketDoc.data();
+                const toDate = (value: any): Date | null => {
+                    if (!value) return null;
+                    if (typeof value.toDate === 'function') return value.toDate();
+                    const parsed = new Date(value);
+                    return Number.isNaN(parsed.getTime()) ? null : parsed;
+                };
+                const status = String(data.status || 'Aberto');
+                const createdDate = toDate(data.createdDate);
+                const resolvedDate = toDate(
+                    data.resolvedDate
+                    || data.resolvedAt
+                    || data.closedAt
+                    || (status === 'Resolvido' ? data.updatedAt : null)
+                );
+                const isResolved = status === 'Resolvido';
+                const endReference = isResolved && resolvedDate ? resolvedDate : new Date();
+                const daysOpen = createdDate
+                    ? Math.max(0, Math.ceil((endReference.getTime() - createdDate.getTime()) / (1000 * 60 * 60 * 24)))
+                    : 0;
+
+                return {
+                    ticketNumber: data.ticketNumber || ticketDoc.id.slice(0, 8).toUpperCase(),
+                    title: String(data.title || '-'),
+                    status,
+                    priority: String(data.priority || 'Média'),
+                    createdDate,
+                    resolvedDate,
+                    isResolved,
+                    daysOpen,
+                };
+            }).sort((a, b) => (b.createdDate?.getTime() || 0) - (a.createdDate?.getTime() || 0));
+
+            if (ticketsData.length > 0) {
+                const pageHeight = docPdf.internal.pageSize.height;
+                const currentY = (docPdf as any).lastAutoTable.finalY + 12;
+                if (currentY + 30 > pageHeight - 20) {
+                    docPdf.addPage();
+                    yPos = 15;
+                } else {
+                    yPos = currentY;
+                }
+
+                docPdf.setFontSize(12).setFont('helvetica', 'bold');
+                docPdf.text('HISTÓRICO DE CHAMADOS DE ENGENHARIA', 15, yPos);
+                yPos += 3;
+
+                const openCount = ticketsData.filter(ticket => !ticket.isResolved).length;
+                docPdf.setFontSize(9).setFont('helvetica', 'normal');
+                docPdf.text(`${ticketsData.length} chamado(s) no total, ${openCount} ainda em aberto.`, 15, yPos + 4);
+
+                autoTable(docPdf, {
+                    startY: yPos + 8,
+                    head: [['Nº', 'Título', 'Status', 'Prioridade', 'Aberto em', 'Resolvido em', 'Dias em aberto']],
+                    body: ticketsData.map(ticket => [
+                        ticket.ticketNumber,
+                        ticket.title.length > 35 ? `${ticket.title.substring(0, 35)}...` : ticket.title,
+                        ticket.status,
+                        ticket.priority,
+                        ticket.createdDate ? format(ticket.createdDate, 'dd/MM/yy') : '-',
+                        ticket.resolvedDate ? format(ticket.resolvedDate, 'dd/MM/yy') : '-',
+                        `${ticket.daysOpen} dia(s)`,
+                    ]),
+                    styles: { fontSize: 8, cellPadding: 2 },
+                    headStyles: { fillColor: [37, 99, 235], fontSize: 8.5, textColor: 255 },
+                    didParseCell: data => {
+                        if (data.section !== 'body') return;
+                        const ticket = ticketsData[data.row.index];
+                        if (data.column.index === 2) {
+                            data.cell.styles.textColor = ticket.isResolved ? [21, 128, 61] : [185, 28, 28];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                        if (data.column.index === 6 && !ticket.isResolved && ticket.daysOpen > 5) {
+                            data.cell.styles.textColor = [185, 28, 28];
+                            data.cell.styles.fontStyle = 'bold';
+                        }
+                    },
+                    margin: { left: 15, right: 15 },
+                });
+            }
+
             // Rodapé com informações adicionais
             const finalY = (docPdf as any).lastAutoTable.finalY;
             const pageHeight = docPdf.internal.pageSize.height;
@@ -3675,6 +3799,9 @@ export default function OrdersPage() {
             }
             return stage;
         });
+        if (updatedPlan.length > 0) {
+            recalculateSequentialTasks(updatedPlan, 0);
+        }
         setEditedPlan(updatedPlan);
         toast({
             title: "Agendamento automático aplicado",
@@ -3683,8 +3810,8 @@ export default function OrdersPage() {
     };
 
     const markPreviousAsCompleted = () => {
+        const currentIndex = editedPlan.findIndex(s => s.status === 'Em Andamento');
         const updatedPlan = editedPlan.map((stage, index) => {
-            const currentIndex = editedPlan.findIndex(s => s.status === 'Em Andamento');
             if (index < currentIndex && stage.status !== 'Concluído') {
                 return {
                     ...stage,
@@ -3694,6 +3821,9 @@ export default function OrdersPage() {
             }
             return stage;
         });
+        if (currentIndex > 0) {
+            recalculateSequentialTasks(updatedPlan, currentIndex, true);
+        }
         setEditedPlan(updatedPlan);
         toast({
             title: "Etapas anteriores marcadas como concluídas",
@@ -6631,6 +6761,64 @@ return (
                             {ticket.ticketNumber} · {ticket.status} · Prioridade {ticket.priority}
                           </Badge>
                         ))}
+                      </CardContent>
+                    </Card>
+                  )}
+
+                  {engineeringTicketsHistory.length > 0 && (
+                    <Card>
+                      <CardHeader className="pb-3">
+                        <CardTitle className="flex items-center gap-2">
+                          <ClipboardList className="h-5 w-5" />
+                          Histórico de Chamados de Engenharia
+                        </CardTitle>
+                        <CardDescription>
+                          {engineeringTicketsHistory.filter(ticket => !ticket.isResolved).length} aberto(s) de {engineeringTicketsHistory.length} total.
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent>
+                        <div className="overflow-x-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow>
+                                <TableHead>Número</TableHead>
+                                <TableHead>Item</TableHead>
+                                <TableHead>Status</TableHead>
+                                <TableHead>Aberto em</TableHead>
+                                <TableHead>Resolvido em</TableHead>
+                                <TableHead className="text-right">Dias em aberto</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {engineeringTicketsHistory.map(ticket => {
+                                const itemDescription = selectedOrder?.items.find(item => item.id === ticket.itemId)?.description;
+                                return (
+                                  <TableRow key={ticket.id}>
+                                    <TableCell className="font-medium">{ticket.ticketNumber}</TableCell>
+                                    <TableCell className="max-w-[220px] truncate text-sm text-muted-foreground">
+                                      {itemDescription || '-'}
+                                    </TableCell>
+                                    <TableCell>
+                                      <Badge
+                                        variant={ticket.isResolved ? 'default' : 'destructive'}
+                                        className={ticket.isResolved ? 'bg-green-600 hover:bg-green-600/90' : ''}
+                                      >
+                                        {ticket.status}
+                                      </Badge>
+                                    </TableCell>
+                                    <TableCell className="text-sm">{ticket.createdDate ? format(ticket.createdDate, 'dd/MM/yy') : '-'}</TableCell>
+                                    <TableCell className="text-sm">{ticket.resolvedDate ? format(ticket.resolvedDate, 'dd/MM/yy') : '-'}</TableCell>
+                                    <TableCell className="text-right">
+                                      <span className={ticket.daysOpen > 5 && !ticket.isResolved ? 'font-bold text-red-600' : ''}>
+                                        {ticket.daysOpen} dia{ticket.daysOpen !== 1 ? 's' : ''}
+                                      </span>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
                       </CardContent>
                     </Card>
                   )}
