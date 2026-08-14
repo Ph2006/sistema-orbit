@@ -272,20 +272,56 @@ export default function AbrirApontamentoPage() {
     finally { setSavingAppointmentId(''); }
   };
 
+  // Revalida a tarifa no momento do encerramento. Assim, apontamentos ainda
+  // abertos usam o centro de custo vigente, sem alterar o histórico concluído.
+  const getCurrentHourlyRate = async (stageName: string, fallback: number) => {
+    try {
+      let linkedCostCenterId = "";
+      const stagesSnapshot = await getDoc(doc(db, "companies", "mecald", "settings", "manufacturingStages"));
+      if (stagesSnapshot.exists()) {
+        const match = asArray(stagesSnapshot.data().stages).find((stage: any) =>
+          normalizeStage(typeof stage === "string" ? stage : stage?.name) === normalizeStage(stageName)
+        );
+        linkedCostCenterId = typeof match === "object" ? String(match?.costCenterId || "") : "";
+      }
+
+      if (linkedCostCenterId) {
+        const costCenterSnapshot = await getDoc(doc(db, "companies", "mecald", "productionCostCenters", linkedCostCenterId));
+        if (costCenterSnapshot.exists()) {
+          return Number(costCenterSnapshot.data().hourlyRate) || fallback;
+        }
+      }
+
+      const costCentersSnapshot = await getDocs(collection(db, "companies", "mecald", "productionCostCenters"));
+      const bySectorName = costCentersSnapshot.docs.find(costCenterDoc =>
+        normalizeStage(costCenterDoc.data().sectorName) === normalizeStage(stageName)
+      );
+      if (bySectorName) return Number(bySectorName.data().hourlyRate) || fallback;
+    } catch (error) {
+      console.warn("Não foi possível buscar a taxa atual do centro de custo:", error);
+    }
+
+    return fallback;
+  };
+
   const closeAppointment = async (appointment: ActiveAppointment) => {
     setSavingAppointmentId(appointment.id);
     try {
+      const currentRate = await getCurrentHourlyRate(appointment.stageName, Number(appointment.hourlyRate) || 0);
       const seconds = (Number(appointment.accumulatedSeconds) || 0) + currentSeconds(appointment);
       const hours = seconds / 3600;
-      const totalCost = Math.round(hours * (Number(appointment.hourlyRate) || 0) * 100) / 100;
+      const totalCost = Math.round(hours * currentRate * 100) / 100;
       const costEntry = {
         id: `apontamento-${appointment.id}`,
         description: `Mão de obra - ${appointment.stageName} (${appointment.itemDescription})`,
-        quantity: Number(hours.toFixed(4)), unitCost: Number(appointment.hourlyRate) || 0, totalCost,
+        quantity: Number(hours.toFixed(4)), unitCost: currentRate, totalCost,
         entryDate: Timestamp.now(), enteredBy: `Apontamento (${appointment.operatorName})`, isFromAppointment: true, appointmentId: appointment.id,
       };
       const batch = writeBatch(db);
-      batch.update(doc(db, "companies", "mecald", "productionAppointments", appointment.id), { status: 'Concluído', closedAt: Timestamp.now(), accumulatedSeconds: seconds, totalHours: hours, totalCost });
+      batch.update(doc(db, "companies", "mecald", "productionAppointments", appointment.id), {
+        status: 'Concluído', closedAt: Timestamp.now(), accumulatedSeconds: seconds,
+        totalHours: hours, totalCost, hourlyRate: currentRate,
+      });
       batch.update(doc(db, "companies", "mecald", "orders", appointment.orderId), { costEntries: arrayUnion(costEntry) });
       await batch.commit();
       toast({ title: 'Apontamento encerrado', description: `${hours.toFixed(2)}h — ${totalCost.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}` });
