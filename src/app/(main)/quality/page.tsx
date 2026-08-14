@@ -1125,6 +1125,13 @@ export default function QualityPage() {
           ...docItem,
           uploadedAt: convertFirestoreDate(docItem.uploadedAt),
         }));
+
+        // Os prazos dos itens também chegam como Timestamp. Sem esta
+        // conversão, o zodResolver rejeita actionPlan silenciosamente.
+        const actionPlan = (data.actionPlan || []).map((planItem: any) => ({
+          ...planItem,
+          deadline: convertFirestoreDate(planItem.deadline),
+        }));
         
         return {
           id: doc.id,
@@ -1132,6 +1139,7 @@ export default function QualityPage() {
           openingDate,
           deadline,
           documents, // ✅ DOCUMENTOS COM DATAS CONVERTIDAS
+          actionPlan,
           orderNumber: order?.number || 'N/A',
           itemName: item?.description || 'N/A',
           itemCode: item?.code || 'N/A',
@@ -7124,6 +7132,12 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
         uploadedAt: Timestamp.fromDate(doc.uploadedAt),
       }));
 
+      // Mantém todos os prazos do plano no mesmo formato no Firestore.
+      const actionPlanToSave = (values.actionPlan || []).map(item => ({
+        ...item,
+        deadline: Timestamp.fromDate(item.deadline),
+      }));
+
       // ✅ LIMPAR FIVE WHYS DE CAMPOS UNDEFINED
       const cleanedFiveWhys = values.fiveWhys ? cleanObject({
         why1: values.fiveWhys.why1,
@@ -7157,7 +7171,7 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
         linkedRncId: values.linkedRncId || null,
         responsibleActionPlan: values.responsibleActionPlan || null,
         fiveWhys: cleanedFiveWhys, // ✅ USAR FIVE WHYS LIMPO
-        actionPlan: values.actionPlan || [],
+        actionPlan: actionPlanToSave,
         photos: values.photos || [],
         documents: documentsToSave,
         updatedAt: Timestamp.now(),
@@ -7166,6 +7180,19 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
 
       // ✅ REMOVER TODOS OS CAMPOS NULL/UNDEFINED DO OBJETO FINAL
       const finalData = cleanObject(dataToSave);
+
+      // Documentos e fotos em base64 podem ultrapassar o limite de 1 MiB do
+      // Firestore. Reserva margem para os metadados internos do documento.
+      const dataSizeBytes = new Blob([JSON.stringify(finalData)]).size;
+      const dataSizeKB = dataSizeBytes / 1024;
+      if (dataSizeKB > 900) {
+        showToast({
+          variant: "destructive",
+          title: "Plano de ação muito grande para salvar",
+          description: `O plano possui ${dataSizeKB.toFixed(0)} KB. O limite seguro é 900 KB; remova fotos ou documentos.`,
+        });
+        return;
+      }
 
       if (selectedOccurrence) {
         await updateDoc(
@@ -7200,10 +7227,40 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
   };
 
   // ===== FUNÇÃO DE EXPORTAÇÃO DE PLANO DE AÇÃO PARA PDF =====
-  const handleActionPlanPDF = async (occurrence: Occurrence) => {
+  const handleActionPlanPDF = async (occurrenceParam: Occurrence) => {
     showToast({ title: "Gerando PDF do Plano de Ação..." });
     
     try {
+      // O relatório deve refletir o último salvamento, não a cópia mantida
+      // pelo estado local da tela.
+      const occurrenceRef = doc(db, "companies", "mecald", "actionPlans", occurrenceParam.id);
+      const occurrenceSnap = await getDoc(occurrenceRef);
+      if (!occurrenceSnap.exists()) {
+        throw new Error('Plano de ação não encontrado no Firestore.');
+      }
+      const stored = occurrenceSnap.data();
+      const occurrence: Occurrence = {
+        ...occurrenceParam,
+        ...stored,
+        id: occurrenceParam.id,
+        openingDate: convertFirestoreDate(stored.openingDate ?? occurrenceParam.openingDate),
+        deadline: stored.deadline
+          ? convertFirestoreDate(stored.deadline)
+          : occurrenceParam.deadline,
+        documents: (stored.documents || occurrenceParam.documents || []).map((item: any) => ({
+          ...item,
+          uploadedAt: convertFirestoreDate(item.uploadedAt),
+        })),
+        actionPlan: (stored.actionPlan || occurrenceParam.actionPlan || []).map((item: any) => ({
+          ...item,
+          deadline: convertFirestoreDate(item.deadline),
+        })),
+        fiveWhys: stored.fiveWhys ?? occurrenceParam.fiveWhys,
+        orderNumber: occurrenceParam.orderNumber,
+        itemName: occurrenceParam.itemName,
+        itemCode: occurrenceParam.itemCode,
+      } as Occurrence;
+
       const companyRef = doc(db, "companies", "mecald", "settings", "company");
       const companySnap = await getDoc(companyRef);
       const companyData: CompanyData = companySnap.exists() ? companySnap.data() as any : {};
@@ -7895,7 +7952,20 @@ function OccurrenceFormDialog({ open, onOpenChange, form, onSubmit, occurrence, 
         </DialogHeader>
 
         <Form {...form}>
-          <form onSubmit={form.handleSubmit(onSubmit)} className="flex-1 flex flex-col min-h-0">
+          <form
+            onSubmit={form.handleSubmit(onSubmit, (errors: any) => {
+              console.error("Erros de validação do plano de ação:", errors);
+              const invalidFields = Object.keys(errors);
+              toast({
+                variant: "destructive",
+                title: "Não foi possível salvar o plano",
+                description: invalidFields.length
+                  ? `Revise os campos: ${invalidFields.join(", ")}.`
+                  : "Existem campos inválidos ou incompletos no formulário.",
+              });
+            })}
+            className="flex-1 flex flex-col min-h-0"
+          >
             <ScrollArea className="flex-1 pr-4">
               <div className="space-y-4 p-2">
                 
