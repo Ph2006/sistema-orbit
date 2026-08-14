@@ -1140,6 +1140,8 @@ export default function QualityPage() {
           deadline,
           documents, // ✅ DOCUMENTOS COM DATAS CONVERTIDAS
           actionPlan,
+          createdAt: data.createdAt ? convertFirestoreDate(data.createdAt) : undefined,
+          updatedAt: data.updatedAt ? convertFirestoreDate(data.updatedAt) : undefined,
           orderNumber: order?.number || 'N/A',
           itemName: item?.description || 'N/A',
           itemCode: item?.code || 'N/A',
@@ -7041,8 +7043,11 @@ function ActionPlansTab({ orders = [], teamMembers = [], toast, user, reports = 
 
   const handleEditOccurrence = (occurrence: Occurrence) => {
     setSelectedOccurrence(occurrence);
+    // Metadados de auditoria são controlados pelo sistema e não devem entrar
+    // no formulário nem na validação do zodResolver.
+    const { createdAt, updatedAt, createdBy, ...editableFields } = occurrence;
     occurrenceForm.reset({
-      ...occurrence,
+      ...editableFields,
       openingDate: new Date(occurrence.openingDate),
       deadline: occurrence.deadline ? new Date(occurrence.deadline) : undefined,
       documents: occurrence.documents?.map(doc => ({
