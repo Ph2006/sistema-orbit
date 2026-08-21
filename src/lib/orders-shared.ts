@@ -95,7 +95,7 @@ export const calculateTotalWeight = (items: OrderItem[]): number => {
 
 export const calculateItemProgress = (item: OrderItem): number => {
   if (item.productionPlan && item.productionPlan.length > 0) {
-    const completedStages = item.productionPlan.filter(p => p.status === 'ConcluÃ­do').length;
+    const completedStages = item.productionPlan.filter(p => p.status === 'Concluído').length;
     return (completedStages / item.productionPlan.length) * 100;
   }
   if (item.code && item.code.trim() !== "") return 0;
