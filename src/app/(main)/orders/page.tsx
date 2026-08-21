@@ -3032,6 +3032,24 @@ export default function OrdersPage() {
         }
     };
 
+    const publishScheduleSnapshot = async (order: Order, token: string) => {
+        const companyRef = doc(db, "companies", "mecald", "settings", "company");
+        const companySnap = await getDoc(companyRef);
+        const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
+
+        await setDoc(doc(db, "public_schedules", token), {
+            ...serializeOrderForPublicShare(order),
+            companySnapshot: {
+                nomeFantasia: companyData.nomeFantasia || '',
+                logo: companyData.logo || null,
+                endereco: companyData.endereco || '',
+                cnpj: companyData.cnpj || '',
+                email: companyData.email || '',
+                celular: companyData.celular || '',
+            },
+        });
+    };
+
     const handleGenerateScheduleLink = async () => {
         if (!selectedOrder) return;
         setIsGeneratingScheduleLink(true);
@@ -3050,24 +3068,9 @@ export default function OrdersPage() {
             const freshOrder = latestOrders.find(order => order.id === selectedOrder.id);
             if (!freshOrder) throw new Error("Não foi possível carregar os dados atualizados.");
 
-            const companyRef = doc(db, "companies", "mecald", "settings", "company");
-            const companySnap = await getDoc(companyRef);
-            const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
+            await publishScheduleSnapshot(freshOrder, token);
 
-            const publicRef = doc(db, "public_schedules", token);
-            await setDoc(publicRef, {
-                ...serializeOrderForPublicShare(freshOrder),
-                companySnapshot: {
-                    nomeFantasia: companyData.nomeFantasia || '',
-                    logo: companyData.logo || null,
-                    endereco: companyData.endereco || '',
-                    cnpj: companyData.cnpj || '',
-                    email: companyData.email || '',
-                    celular: companyData.celular || '',
-                },
-            });
-
-            setScheduleShareLink(`${window.location.origin}/cronograma/${token}`);
+            setScheduleShareLink(`${window.location.origin}/cronograma?token=${encodeURIComponent(token)}`);
             setIsScheduleLinkDialogOpen(true);
         } catch (error) {
             console.error("Erro ao gerar link do cronograma:", error);
@@ -3465,6 +3468,21 @@ export default function OrdersPage() {
                     ...updatedOrderInList,
                     status: updatedOrderInList.status as any,
                 });
+
+                const scheduleToken = String(currentOrderData.scheduleAccessToken || '').trim();
+                if (scheduleToken) {
+                    try {
+                        await publishScheduleSnapshot(updatedOrderInList, scheduleToken);
+                        console.log('✅ [handleSaveProgress] Cronograma público sincronizado');
+                    } catch (publicScheduleError) {
+                        console.error('Erro ao sincronizar cronograma público:', publicScheduleError);
+                        toast({
+                            variant: "destructive",
+                            title: "Progresso salvo, mas o link não foi atualizado",
+                            description: "Gere novamente o Link do Cronograma para sincronizar a versão pública.",
+                        });
+                    }
+                }
                 console.log('✅ [handleSaveProgress] Estado local atualizado com sucesso');
             } else {
                 console.warn('⚠️ [handleSaveProgress] Pedido não encontrado após recarregamento');
