@@ -1,7 +1,6 @@
 // IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
-import { serializeOrderForPublicShare } from "@/lib/orders-shared";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -18,6 +17,7 @@ import {
   calculateTotalWeight,
   calculateItemProgress,
   calculateOrderProgress,
+  serializeOrderForPublicShare,
 } from "@/lib/orders-shared";
 import { downloadSchedulePdf } from "@/lib/generateSchedulePdf";
 import { useAuth } from "../layout";
@@ -596,6 +596,9 @@ export default function OrdersPage() {
     const [selectedItems, setSelectedItems] = useState<Set<string>>(new Set());
     const [packingSlipQuantities, setPackingSlipQuantities] = useState<Map<string, number>>(new Map());
     const [isPackingSlipDialogOpen, setIsPackingSlipDialogOpen] = useState(false);
+    const [isScheduleLinkDialogOpen, setIsScheduleLinkDialogOpen] = useState(false);
+    const [scheduleShareLink, setScheduleShareLink] = useState("");
+    const [isGeneratingScheduleLink, setIsGeneratingScheduleLink] = useState(false);
     const [isEditing, setIsEditing] = useState(false);
     const { toast } = useToast();
     const { user, loading: authLoading } = useAuth();
@@ -3029,6 +3032,55 @@ export default function OrdersPage() {
         }
     };
 
+    const handleGenerateScheduleLink = async () => {
+        if (!selectedOrder) return;
+        setIsGeneratingScheduleLink(true);
+        try {
+            const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
+            const orderSnap = await getDoc(orderRef);
+            if (!orderSnap.exists()) throw new Error("Pedido não encontrado.");
+
+            let token: string = orderSnap.data().scheduleAccessToken;
+            if (!token) {
+                token = crypto.randomUUID();
+                await updateDoc(orderRef, { scheduleAccessToken: token });
+            }
+
+            const latestOrders = await fetchOrders();
+            const freshOrder = latestOrders.find(order => order.id === selectedOrder.id);
+            if (!freshOrder) throw new Error("Não foi possível carregar os dados atualizados.");
+
+            const companyRef = doc(db, "companies", "mecald", "settings", "company");
+            const companySnap = await getDoc(companyRef);
+            const companyData: CompanyData = companySnap.exists() ? companySnap.data() as CompanyData : {};
+
+            const publicRef = doc(db, "public_schedules", token);
+            await setDoc(publicRef, {
+                ...serializeOrderForPublicShare(freshOrder),
+                companySnapshot: {
+                    nomeFantasia: companyData.nomeFantasia || '',
+                    logo: companyData.logo || null,
+                    endereco: companyData.endereco || '',
+                    cnpj: companyData.cnpj || '',
+                    email: companyData.email || '',
+                    celular: companyData.celular || '',
+                },
+            });
+
+            setScheduleShareLink(`${window.location.origin}/cronograma/${token}`);
+            setIsScheduleLinkDialogOpen(true);
+        } catch (error) {
+            console.error("Erro ao gerar link do cronograma:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao gerar link",
+                description: "Não foi possível gerar o link do cronograma.",
+            });
+        } finally {
+            setIsGeneratingScheduleLink(false);
+        }
+    };
+
     const handleOpenProgressModal = async (item: OrderItem) => {
         setItemToTrack(item);
         setIsProgressModalOpen(true);
@@ -4806,7 +4858,7 @@ export default function OrdersPage() {
     };
 
     // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
-    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent, resetPackingSlipQuantities, setIsPackingSlipDialogOpen }) => (
+    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent, resetPackingSlipQuantities, setIsPackingSlipDialogOpen, onGenerateScheduleLink, isGeneratingScheduleLink }) => (
         <SheetFooter className="flex-shrink-0 pt-4 border-t">
             <div className="flex items-center justify-between w-full gap-4 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -4825,6 +4877,11 @@ export default function OrdersPage() {
                     <Button onClick={handleExportSchedule} variant="outline">
                         <CalendarClock className="mr-2 h-4 w-4" />
                         Exportar Cronograma
+                    </Button>
+
+                    <Button onClick={onGenerateScheduleLink} variant="outline" disabled={isGeneratingScheduleLink}>
+                        <Send className="mr-2 h-4 w-4" />
+                        {isGeneratingScheduleLink ? "Gerando link..." : "Link do Cronograma"}
                     </Button>
 
                     <Button
@@ -6775,6 +6832,8 @@ return (
               selectedItems={selectedItems}
               handleGeneratePackingSlip={handleGeneratePackingSlip}
               handleExportSchedule={handleExportSchedule}
+              onGenerateScheduleLink={handleGenerateScheduleLink}
+              isGeneratingScheduleLink={isGeneratingScheduleLink}
               setIsEditing={setIsEditing}
               handleDeleteClick={handleDeleteClick}
               onDataBookSent={handleDataBookSent}
@@ -6787,6 +6846,37 @@ return (
     )}
   </SheetContent>
     </Sheet>
+
+    <Dialog open={isScheduleLinkDialogOpen} onOpenChange={setIsScheduleLinkDialogOpen}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Link do Cronograma</DialogTitle>
+          <DialogDescription>
+            Envie este link ao cliente. Ele poderá clicar a qualquer momento para baixar
+            o cronograma publicado para este pedido. O endereço permanece o mesmo nas próximas atualizações.
+          </DialogDescription>
+        </DialogHeader>
+        <div className="flex items-center gap-2">
+          <Input readOnly value={scheduleShareLink} />
+          <Button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(scheduleShareLink);
+                toast({ title: "Link copiado!" });
+              } catch (error) {
+                console.error("Erro ao copiar link:", error);
+                toast({ variant: "destructive", title: "Não foi possível copiar o link" });
+              }
+            }}
+          >
+            Copiar
+          </Button>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setIsScheduleLinkDialogOpen(false)}>Fechar</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={isCostAnalysisOpen} onOpenChange={setIsCostAnalysisOpen}>
       <DialogContent className="sm:max-w-6xl w-[95vw] max-h-[92vh] flex flex-col overflow-hidden">
