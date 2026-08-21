@@ -1,6 +1,7 @@
 // IMPORTANTE: este arquivo deve permanecer salvo em UTF-8.
 "use client";
 
+import { serializeOrderForPublicShare } from "@/lib/orders-shared";
 import React, { useState, useEffect, useMemo, useCallback, useRef } from "react";
 import { useForm, useFieldArray } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
