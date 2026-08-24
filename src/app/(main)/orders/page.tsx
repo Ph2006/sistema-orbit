@@ -3113,13 +3113,14 @@ export default function OrdersPage() {
             if (item.productionPlan && item.productionPlan.length > 0) {
                 finalPlan = item.productionPlan.map(stage => {
                     const templateData = productTemplateMap.get(stage.stageName) || {};
+                    const workSchedule = stage.workSchedule ?? templateData.workSchedule ?? 'normal';
                     
                     return {
                         stageName: stage.stageName || '',
                         status: stage.status || 'Pendente',
                         durationDays: stage.durationDays ?? templateData.durationDays ?? 0,
-                        workSchedule: stage.workSchedule ?? templateData.workSchedule ?? 'normal',
-                        useBusinessDays: stage.workSchedule === 'normal',
+                        workSchedule,
+                        useBusinessDays: workSchedule === 'normal',
                         startDate: stage.startDate ? safeToDate(stage.startDate) : null,
                         completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
                     };
