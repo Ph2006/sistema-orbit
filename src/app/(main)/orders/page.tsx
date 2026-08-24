@@ -19,7 +19,6 @@ import {
   calculateOrderProgress,
   serializeOrderForPublicShare,
 } from "@/lib/orders-shared";
-import { downloadSchedulePdf } from "@/lib/generateSchedulePdf";
 import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
@@ -3004,34 +3003,6 @@ export default function OrdersPage() {
         }
     };
 
-    const handleExportSchedule = async () => {
-        if (!selectedOrder) return;
-
-        toast({ title: "Gerando Cronograma...", description: "Por favor, aguarde." });
-
-        try {
-            const latestOrders = await fetchOrders();
-            const exportOrder = latestOrders.find(order => order.id === selectedOrder.id);
-            if (!exportOrder) {
-                throw new Error('Não foi possível localizar a versão mais recente do pedido.');
-            }
-            setSelectedOrder(exportOrder);
-
-            const companyRef = doc(db, "companies", "mecald", "settings", "company");
-            const docSnap = await getDoc(companyRef);
-            const companyData: CompanyData = docSnap.exists() ? docSnap.data() as CompanyData : {};
-
-            await downloadSchedulePdf(exportOrder, companyData);
-        } catch (error) {
-            console.error("Error generating schedule PDF:", error);
-            toast({
-                variant: "destructive",
-                title: "Erro ao gerar cronograma",
-                description: "Não foi possível gerar o arquivo PDF.",
-            });
-        }
-    };
-
     const publishScheduleSnapshot = async (order: Order, token: string) => {
         const companyRef = doc(db, "companies", "mecald", "settings", "company");
         const companySnap = await getDoc(companyRef);
@@ -4877,7 +4848,7 @@ export default function OrdersPage() {
     };
 
     // FOOTER DO MODAL ATUALIZADO (sem botões de debug)
-    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, handleExportSchedule, setIsEditing, handleDeleteClick, onDataBookSent, resetPackingSlipQuantities, setIsPackingSlipDialogOpen, onGenerateScheduleLink, isGeneratingScheduleLink }) => (
+    const UpdatedSheetFooter = ({ selectedOrder, selectedItems, handleGeneratePackingSlip, setIsEditing, handleDeleteClick, onDataBookSent, resetPackingSlipQuantities, setIsPackingSlipDialogOpen, onGenerateScheduleLink, isGeneratingScheduleLink }) => (
         <SheetFooter className="flex-shrink-0 pt-4 border-t">
             <div className="flex items-center justify-between w-full gap-4 flex-wrap">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -4893,11 +4864,6 @@ export default function OrdersPage() {
                             Gerar Romaneio ({selectedItems.size} {selectedItems.size === 1 ? 'item' : 'itens'})
                         </Button>
                     )}
-                    <Button onClick={handleExportSchedule} variant="outline">
-                        <CalendarClock className="mr-2 h-4 w-4" />
-                        Exportar Cronograma
-                    </Button>
-
                     <Button onClick={onGenerateScheduleLink} variant="outline" disabled={isGeneratingScheduleLink}>
                         <Send className="mr-2 h-4 w-4" />
                         {isGeneratingScheduleLink ? "Gerando link..." : "Link do Cronograma"}
@@ -6850,7 +6816,6 @@ return (
               selectedOrder={selectedOrder}
               selectedItems={selectedItems}
               handleGeneratePackingSlip={handleGeneratePackingSlip}
-              handleExportSchedule={handleExportSchedule}
               onGenerateScheduleLink={handleGenerateScheduleLink}
               isGeneratingScheduleLink={isGeneratingScheduleLink}
               setIsEditing={setIsEditing}
