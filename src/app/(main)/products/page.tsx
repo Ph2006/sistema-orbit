@@ -35,24 +35,29 @@ import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
+// Horas Ãºteis de trabalho por dia â€” ajuste conforme a jornada da sua empresa
+const USEFUL_HOURS_PER_DAY = 8;
+
+const hoursToDays = (hours: number): number => hours / USEFUL_HOURS_PER_DAY;
+
 const planStageSchema = z.object({
   stageName: z.string(),
-  durationDays: z.coerce.number().min(0).optional(),
+  hours: z.coerce.number().min(0).optional(),
 });
 
 const productSchema = z.object({
-  code: z.string().min(1, { message: "O código do produto é obrigatório." }),
-  description: z.string().min(3, { message: "A descrição é obrigatória." }),
-  unitPrice: z.coerce.number().min(0, { message: "O preço unitário deve ser um número positivo." }),
+  code: z.string().min(1, { message: "O cÃ³digo do produto Ã© obrigatÃ³rio." }),
+  description: z.string().min(3, { message: "A descriÃ§Ã£o Ã© obrigatÃ³ria." }),
+  unitPrice: z.coerce.number().min(0, { message: "O preÃ§o unitÃ¡rio deve ser um nÃºmero positivo." }),
   unitWeight: z.coerce.number().min(0).optional(),
   productionPlanTemplate: z.array(planStageSchema).optional(),
 });
 
 const materialSchema = z.object({
   id: z.string().optional(),
-  category: z.string().min(1, "Categoria obrigatória"),
-  description: z.string().min(3, "Descrição obrigatória"),
-  pricePerKg: z.coerce.number().min(0, "Preço deve ser positivo"),
+  category: z.string().min(1, "Categoria obrigatÃ³ria"),
+  description: z.string().min(3, "DescriÃ§Ã£o obrigatÃ³ria"),
+  pricePerKg: z.coerce.number().min(0, "PreÃ§o deve ser positivo"),
   unit: z.string().default("kg"),
   specification: z.string().optional(),
 });
@@ -104,23 +109,31 @@ interface ManufacturingStage {
 
 type Product = z.infer<typeof productSchema> & { id: string, manufacturingStages?: string[] };
 
-// Função para calcular o lead time total de um produto
+// FunÃ§Ã£o para calcular o lead time total de um produto
 const calculateLeadTime = (product: Product): number => {
   if (!product.productionPlanTemplate || product.productionPlanTemplate.length === 0) {
     return 0;
   }
   
-  const totalDays = product.productionPlanTemplate.reduce((total, stage) => {
-    return total + (stage.durationDays || 0);
-  }, 0);
+  const totalHours = product.productionPlanTemplate.reduce(
+    (total, stage) => total + (stage.hours || 0), 0
+  );
   
-  return Math.round(totalDays);
+  return Math.ceil(totalHours / USEFUL_HOURS_PER_DAY);
 };
 
-// Função para obter badge de lead time com cor baseada na duração
+const getMachiningHoursFromPlan = (product: Product | null | undefined): number => {
+  if (!product?.productionPlanTemplate) return 0;
+  const stage = product.productionPlanTemplate.find(s =>
+    s.stageName.toLowerCase().includes('usinagem')
+  );
+  return stage?.hours || 0;
+};
+
+// FunÃ§Ã£o para obter badge de lead time com cor baseada na duraÃ§Ã£o
 const getLeadTimeBadge = (leadTime: number) => {
   if (leadTime === 0) {
-    return { variant: "outline" as const, text: "Não definido", color: "text-muted-foreground" };
+    return { variant: "outline" as const, text: "NÃ£o definido", color: "text-muted-foreground" };
   } else if (leadTime <= 7) {
     return { variant: "default" as const, text: `${leadTime} dias`, color: "bg-green-600 hover:bg-green-700" };
   } else if (leadTime <= 21) {
@@ -130,7 +143,7 @@ const getLeadTimeBadge = (leadTime: number) => {
   }
 };
 
-    // Interfaces para calculadora de preços
+    // Interfaces para calculadora de preÃ§os
     interface Material {
     id: string;
     category: string;
@@ -196,15 +209,15 @@ const getLeadTimeBadge = (leadTime: number) => {
     "Barras Chatas",
     "Barras Quadradas",
     "Barras Sextavadas",
-    "Aço Inox 304",
-    "Aço Inox 316",
-    "Alumínio",
+    "AÃ§o Inox 304",
+    "AÃ§o Inox 316",
+    "AlumÃ­nio",
     "Cobre",
     "Bronze",
-    "Latão",
-    "Aço Carbono",
-    "Aço Liga",
-    "Consumíveis Soldagem",
+    "LatÃ£o",
+    "AÃ§o Carbono",
+    "AÃ§o Liga",
+    "ConsumÃ­veis Soldagem",
     "Parafusos e Fixadores",
     "Eletrodos",
     "Gases",
@@ -300,37 +313,37 @@ const getLeadTimeBadge = (leadTime: number) => {
     { id: "tubo-1-din2440", category: "Tubos com Costura", description: 'Tubo 1" DIN 2440', pricePerKg: 9.27, unit: "kg" },
     { id: "tubo-2-din2440", category: "Tubos com Costura", description: 'Tubo 2" DIN 2440 ASTM A53', pricePerKg: 9.55, unit: "kg" },
     
-    // Aço Inox 304
-    { id: "chapa-inox304-1mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 1mm", pricePerKg: 35.00, unit: "kg" },
-    { id: "chapa-inox304-2mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 2mm", pricePerKg: 34.50, unit: "kg" },
-    { id: "chapa-inox304-3mm", category: "Aço Inox 304", description: "Chapa Inox 304 - 3mm", pricePerKg: 34.00, unit: "kg" },
-    { id: "tubo-inox304-1", category: "Aço Inox 304", description: 'Tubo Inox 304 - 1"', pricePerKg: 42.00, unit: "kg" },
-    { id: "tubo-inox304-2", category: "Aço Inox 304", description: 'Tubo Inox 304 - 2"', pricePerKg: 41.50, unit: "kg" },
+    // AÃ§o Inox 304
+    { id: "chapa-inox304-1mm", category: "AÃ§o Inox 304", description: "Chapa Inox 304 - 1mm", pricePerKg: 35.00, unit: "kg" },
+    { id: "chapa-inox304-2mm", category: "AÃ§o Inox 304", description: "Chapa Inox 304 - 2mm", pricePerKg: 34.50, unit: "kg" },
+    { id: "chapa-inox304-3mm", category: "AÃ§o Inox 304", description: "Chapa Inox 304 - 3mm", pricePerKg: 34.00, unit: "kg" },
+    { id: "tubo-inox304-1", category: "AÃ§o Inox 304", description: 'Tubo Inox 304 - 1"', pricePerKg: 42.00, unit: "kg" },
+    { id: "tubo-inox304-2", category: "AÃ§o Inox 304", description: 'Tubo Inox 304 - 2"', pricePerKg: 41.50, unit: "kg" },
     
-    // Aço Inox 316
-    { id: "chapa-inox316-1mm", category: "Aço Inox 316", description: "Chapa Inox 316 - 1mm", pricePerKg: 48.00, unit: "kg" },
-    { id: "chapa-inox316-2mm", category: "Aço Inox 316", description: "Chapa Inox 316 - 2mm", pricePerKg: 47.50, unit: "kg" },
-    { id: "tubo-inox316-1", category: "Aço Inox 316", description: 'Tubo Inox 316 - 1"', pricePerKg: 55.00, unit: "kg" },
+    // AÃ§o Inox 316
+    { id: "chapa-inox316-1mm", category: "AÃ§o Inox 316", description: "Chapa Inox 316 - 1mm", pricePerKg: 48.00, unit: "kg" },
+    { id: "chapa-inox316-2mm", category: "AÃ§o Inox 316", description: "Chapa Inox 316 - 2mm", pricePerKg: 47.50, unit: "kg" },
+    { id: "tubo-inox316-1", category: "AÃ§o Inox 316", description: 'Tubo Inox 316 - 1"', pricePerKg: 55.00, unit: "kg" },
     
-    // Alumínio
-    { id: "chapa-aluminio-1mm", category: "Alumínio", description: "Chapa Alumínio 1100 - 1mm", pricePerKg: 28.00, unit: "kg" },
-    { id: "chapa-aluminio-2mm", category: "Alumínio", description: "Chapa Alumínio 1100 - 2mm", pricePerKg: 27.50, unit: "kg" },
-    { id: "perfil-aluminio-u", category: "Alumínio", description: "Perfil Alumínio U 50x25mm", pricePerKg: 29.00, unit: "kg" },
-    { id: "tubo-aluminio-1", category: "Alumínio", description: 'Tubo Alumínio 1"', pricePerKg: 30.00, unit: "kg" },
+    // AlumÃ­nio
+    { id: "chapa-aluminio-1mm", category: "AlumÃ­nio", description: "Chapa AlumÃ­nio 1100 - 1mm", pricePerKg: 28.00, unit: "kg" },
+    { id: "chapa-aluminio-2mm", category: "AlumÃ­nio", description: "Chapa AlumÃ­nio 1100 - 2mm", pricePerKg: 27.50, unit: "kg" },
+    { id: "perfil-aluminio-u", category: "AlumÃ­nio", description: "Perfil AlumÃ­nio U 50x25mm", pricePerKg: 29.00, unit: "kg" },
+    { id: "tubo-aluminio-1", category: "AlumÃ­nio", description: 'Tubo AlumÃ­nio 1"', pricePerKg: 30.00, unit: "kg" },
     
     // Cobre e Ligas
     { id: "barra-cobre-1", category: "Cobre", description: 'Barra Cobre 1"', pricePerKg: 65.00, unit: "kg" },
     { id: "chapa-cobre-1mm", category: "Cobre", description: "Chapa Cobre 1mm", pricePerKg: 68.00, unit: "kg" },
     { id: "barra-bronze-1", category: "Bronze", description: 'Barra Bronze 1"', pricePerKg: 55.00, unit: "kg" },
-    { id: "barra-latao-1", category: "Latão", description: 'Barra Latão 1"', pricePerKg: 48.00, unit: "kg" },
+    { id: "barra-latao-1", category: "LatÃ£o", description: 'Barra LatÃ£o 1"', pricePerKg: 48.00, unit: "kg" },
     
-    // Consumíveis
+    // ConsumÃ­veis
     { id: "eletrodo-e6013", category: "Eletrodos", description: "Eletrodo E6013 - 3,25mm", pricePerKg: 18.50, unit: "kg" },
     { id: "eletrodo-e7018", category: "Eletrodos", description: "Eletrodo E7018 - 3,25mm", pricePerKg: 22.00, unit: "kg" },
-    { id: "arame-mig-er70s", category: "Consumíveis Soldagem", description: "Arame MIG ER70S-6", pricePerKg: 16.50, unit: "kg" },
-    { id: "arame-inox-308", category: "Consumíveis Soldagem", description: "Arame Inox 308L", pricePerKg: 85.00, unit: "kg" },
-    { id: "gas-argonio", category: "Gases", description: "Argônio Industrial", pricePerKg: 45.00, unit: "m³" },
-    { id: "gas-co2", category: "Gases", description: "CO2 Industrial", pricePerKg: 35.00, unit: "m³" },
+    { id: "arame-mig-er70s", category: "ConsumÃ­veis Soldagem", description: "Arame MIG ER70S-6", pricePerKg: 16.50, unit: "kg" },
+    { id: "arame-inox-308", category: "ConsumÃ­veis Soldagem", description: "Arame Inox 308L", pricePerKg: 85.00, unit: "kg" },
+    { id: "gas-argonio", category: "Gases", description: "ArgÃ´nio Industrial", pricePerKg: 45.00, unit: "mÂ³" },
+    { id: "gas-co2", category: "Gases", description: "CO2 Industrial", pricePerKg: 35.00, unit: "mÂ³" },
     
     // Parafusos e Fixadores
     { id: "parafuso-m10", category: "Parafusos e Fixadores", description: "Parafuso M10 - Zincado", pricePerKg: 25.00, unit: "kg" },
@@ -339,8 +352,8 @@ const getLeadTimeBadge = (leadTime: number) => {
     { id: "arruela-m10", category: "Parafusos e Fixadores", description: "Arruela M10 - Zincada", pricePerKg: 20.00, unit: "kg" },
     ];
 
-// Converte medidas comerciais (frações, polegadas, milímetros, M e SCH)
-// em uma chave numérica para ordenar tecnicamente cada classe de material.
+// Converte medidas comerciais (fraÃ§Ãµes, polegadas, milÃ­metros, M e SCH)
+// em uma chave numÃ©rica para ordenar tecnicamente cada classe de material.
 const parseCommercialMeasure = (rawValue: string): number => {
   const value = rawValue.trim().replace(',', '.');
   const mixedFraction = value.match(/^(\d+)(?:\s+|\.)(\d+)\/(\d+)$/);
@@ -364,13 +377,13 @@ const getMaterialDimensionKey = (material: Material): number[] => {
     dimensions.push(parseCommercialMeasure(match[1]) * 25.4);
   }
 
-  // Medidas explicitamente cadastradas em milímetros.
+  // Medidas explicitamente cadastradas em milÃ­metros.
   const millimeterPattern = /(\d+(?:[.,]\d+)?)\s*mm\b/gi;
   for (const match of description.matchAll(millimeterPattern)) {
     dimensions.push(Number(match[1].replace(',', '.')));
   }
 
-  // Perfis no padrão 50x25 mm ou W 250 x 22,5 kg/m.
+  // Perfis no padrÃ£o 50x25 mm ou W 250 x 22,5 kg/m.
   if (dimensions.length === 0) {
     const dimensionalPair = description.match(/(\d+(?:[.,]\d+)?)\s*[xX]\s*(\d+(?:[.,]\d+)?)/);
     if (dimensionalPair) {
@@ -381,19 +394,19 @@ const getMaterialDimensionKey = (material: Material): number[] => {
     }
   }
 
-  // Tubos que foram cadastrados sem o símbolo de polegada: TUBO 3 SCH 160.
+  // Tubos que foram cadastrados sem o sÃ­mbolo de polegada: TUBO 3 SCH 160.
   if (dimensions.length === 0 && /tubo/i.test(description)) {
     const tubeDiameter = description.match(/tubo\s+(\d+(?:[.,]\d+)?(?:\s+\d+\/\d+|\.\d+\/\d+|\/\d+)?)/i);
     if (tubeDiameter) dimensions.push(parseCommercialMeasure(tubeDiameter[1]) * 25.4);
   }
 
-  // Roscas e fixadores métricos: M6, M8, M10, M12...
+  // Roscas e fixadores mÃ©tricos: M6, M8, M10, M12...
   if (dimensions.length === 0) {
     const metricThread = description.match(/\bM\s*(\d+(?:[.,]\d+)?)/i);
     if (metricThread) dimensions.push(Number(metricThread[1].replace(',', '.')));
   }
 
-  // Schedule fica como critério secundário após o diâmetro do tubo.
+  // Schedule fica como critÃ©rio secundÃ¡rio apÃ³s o diÃ¢metro do tubo.
   const schedule = description.match(/\bSCH\s*(\d+)/i);
   if (schedule) dimensions.push(Number(schedule[1]));
 
@@ -416,7 +429,7 @@ const compareMaterialsByDimension = (a: Material, b: Material): number => {
   });
 };
 
-// Função para exportar relatório em PDF usando canvas e jsPDF
+// FunÃ§Ã£o para exportar relatÃ³rio em PDF usando canvas e jsPDF
 const exportCalculatorReportPDF = (
   calculatorItems: Array<{
     id: string;
@@ -425,7 +438,7 @@ const exportCalculatorReportPDF = (
     productDescription: string;
     quantity: number;
     leadTime: number;
-    stages: Array<{ stageName: string; durationDays: number }>;
+    stages: Array<{ stageName: string; hours?: number }>;
   }>,
   calculatorResults: {
     isViable: boolean;
@@ -473,8 +486,8 @@ const exportCalculatorReportPDF = (
     currentY += lineHeight / 2;
   };
 
-  addText('MECALD - RELATÓRIO DE ANÁLISE DE PRAZOS', margin, 16, true);
-  addText(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, margin, 10);
+  addText('MECALD - RELATÃ“RIO DE ANÃLISE DE PRAZOS', margin, 16, true);
+  addText(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm", { locale: ptBR })}`, margin, 10);
   addLine();
   
   ctx.beginPath();
@@ -483,7 +496,7 @@ const exportCalculatorReportPDF = (
   ctx.stroke();
   currentY += lineHeight;
   
-  addText('DADOS DA SOLICITAÇÃO', margin, 14, true);
+  addText('DADOS DA SOLICITAÃ‡ÃƒO', margin, 14, true);
   addText(`Data de entrega solicitada: ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}`);
   addText(`Quantidade de itens: ${calculatorItems.length}`);
   addLine();
@@ -495,40 +508,40 @@ const exportCalculatorReportPDF = (
     if (item.stages.length > 0) {
       addText('   Etapas:', margin + 20, 10);
       item.stages.forEach(stage => {
-        addText(`     • ${stage.stageName}: ${stage.durationDays || 0} dias`, margin + 40, 9);
+        addText(`     â€¢ ${stage.stageName}: ${stage.hours || 0} horas`, margin + 40, 9);
       });
     }
   });
   addLine();
   
   if (calculatorResults) {
-    addText('RESULTADO DA ANÁLISE', margin, 14, true);
-    addText(`Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}`, margin, 12, true);
-    addText(`Confiança: ${calculatorResults.confidence}%`);
+    addText('RESULTADO DA ANÃLISE', margin, 14, true);
+    addText(`Status: ${calculatorResults.isViable ? 'VIÃVEL' : 'INVIÃVEL'}`, margin, 12, true);
+    addText(`ConfianÃ§a: ${calculatorResults.confidence}%`);
     addText(`Data sugerida: ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`);
     addText(`Lead time ajustado: ${calculatorResults.totalAdjustedLeadTime} dias`);
     addLine();
     
-    addText('ANÁLISE POR SETOR', margin, 14, true);
+    addText('ANÃLISE POR SETOR', margin, 14, true);
     calculatorResults.analysis.forEach(analysis => {
-      addText(`• ${analysis.stageName}${analysis.bottleneck ? ' (GARGALO)' : ''}`, margin, 11, true);
+      addText(`â€¢ ${analysis.stageName}${analysis.bottleneck ? ' (GARGALO)' : ''}`, margin, 11, true);
       addText(`  Tempo original: ${analysis.originalDuration} dias`, margin + 20, 10);
       addText(`  Tempo ajustado: ${analysis.adjustedDuration} dias`, margin + 20, 10);
       addText(`  Carga atual: ${Math.round(analysis.workload * 100)}%`, margin + 20, 10);
     });
     addLine();
     
-    addText('RECOMENDAÇÕES', margin, 14, true);
+    addText('RECOMENDAÃ‡Ã•ES', margin, 14, true);
     if (!calculatorResults.isViable) {
-      addText('• Prazo inviável para a data solicitada', margin, 11);
-      addText(`• Considere reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`, margin, 11);
+      addText('â€¢ Prazo inviÃ¡vel para a data solicitada', margin, 11);
+      addText(`â€¢ Considere reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`, margin, 11);
     }
     if (calculatorResults.confidence < 70) {
-      addText('• Baixa confiança devido à alta carga dos setores', margin, 11);
-      addText('• Monitore de perto a execução', margin, 11);
+      addText('â€¢ Baixa confianÃ§a devido Ã  alta carga dos setores', margin, 11);
+      addText('â€¢ Monitore de perto a execuÃ§Ã£o', margin, 11);
     }
     if (calculatorResults.analysis.some(a => a.bottleneck)) {
-      addText('• Gargalos identificados - considere realocação de recursos', margin, 11);
+      addText('â€¢ Gargalos identificados - considere realocaÃ§Ã£o de recursos', margin, 11);
     }
   }
   
@@ -564,7 +577,7 @@ export default function ProductsPage() {
   const [newStageCostCenterId, setNewStageCostCenterId] = useState("");
   const [activeTab, setActiveTab] = useState("catalog");
 
-  // ─── NOVO: conjunto de códigos com precificação salva ───────────────────────
+  // â”€â”€â”€ NOVO: conjunto de cÃ³digos com precificaÃ§Ã£o salva â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [savedPricingCodes, setSavedPricingCodes] = useState<Set<string>>(new Set());
 
   // Estados da calculadora de prazos
@@ -575,7 +588,7 @@ export default function ProductsPage() {
     productDescription: string;
     quantity: number;
     leadTime: number;
-    stages: Array<{ stageName: string; durationDays: number }>;
+    stages: Array<{ stageName: string; hours?: number }>;
   }>>([]);
   const [selectedProductForCalculator, setSelectedProductForCalculator] = useState<string>("");
   const [calculatorQuantity, setCalculatorQuantity] = useState<number>(1);
@@ -598,7 +611,7 @@ export default function ProductsPage() {
   
   const [sectorWorkload, setSectorWorkload] = useState<Record<string, number>>({});
 
-    // Estados da calculadora de preços
+    // Estados da calculadora de preÃ§os
     const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
     const [machineHourRate, setMachineHourRate] = useState<number>(150);
     const [consumablesCostPerKg, setConsumablesCostPerKg] = useState<number>(0);
@@ -622,7 +635,7 @@ export default function ProductsPage() {
     const [isMaterialDialogOpen, setIsMaterialDialogOpen] = useState(false);
     const [materialSearchQuery, setMaterialSearchQuery] = useState("");
 
-  // ─── Plano de Fabricação ───
+  // â”€â”€â”€ Plano de FabricaÃ§Ã£o â”€â”€â”€
   const [selectedProductForPlan, setSelectedProductForPlan] = useState<Product | null>(null);
   const [planProductSearch, setPlanProductSearch] = useState<string>("");
   const [planDrawingNumber, setPlanDrawingNumber] = useState<string>("");
@@ -638,7 +651,7 @@ export default function ProductsPage() {
   const [planCreators, setPlanCreators] = useState<string[]>([]);
   const [newPlanCreator, setNewPlanCreator] = useState<string>("");
 
-  // Combinar materiais padrão com personalizados
+  // Combinar materiais padrÃ£o com personalizados
   const allMaterials = useMemo(() => {
     const deletedIds = customMaterials
       .filter((m: any) => m.deleted === true)
@@ -665,7 +678,7 @@ export default function ProductsPage() {
     });
   }, [customMaterials]);
 
-  // Função para simular carga de trabalho dos setores
+  // FunÃ§Ã£o para simular carga de trabalho dos setores
   const simulateSectorWorkload = useCallback(() => {
     const workload: Record<string, number> = {};
     manufacturingStages.forEach(stage => {
@@ -780,13 +793,13 @@ export default function ProductsPage() {
     if (!newStageCostCenterId) {
       toast({
         variant: "destructive",
-        title: "Centro de custo obrigatório",
+        title: "Centro de custo obrigatÃ³rio",
         description: "Selecione a qual centro de custo esta etapa pertence.",
       });
       return;
     }
     if (manufacturingStages.some(stage => stage.name.toLowerCase() === stageToAdd.toLowerCase())) {
-      toast({ variant: "destructive", title: "Etapa já existe" });
+      toast({ variant: "destructive", title: "Etapa jÃ¡ existe" });
       return;
     }
     const selectedCenter = costCenters.find(center => center.id === newStageCostCenterId);
@@ -814,9 +827,14 @@ export default function ProductsPage() {
       const querySnapshot = await getDocs(collection(db, "companies", "mecald", "products"));
       const productsList = querySnapshot.docs.map((doc) => {
         const data = doc.data();
-        const planTemplate = data.productionPlanTemplate || (data.manufacturingStages && Array.isArray(data.manufacturingStages)
-            ? data.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        const rawPlanTemplate = data.productionPlanTemplate || (data.manufacturingStages && Array.isArray(data.manufacturingStages)
+            ? data.manufacturingStages.map((stage: string) => ({ stageName: stage, hours: 0 }))
             : []);
+        // Compatibilidade com produtos antigos, cujos tempos foram salvos em dias.
+        const planTemplate = rawPlanTemplate.map((stage: { stageName: string; hours?: number; durationDays?: number }) => ({
+          stageName: stage.stageName,
+          hours: stage.hours ?? ((stage.durationDays ?? 0) * USEFUL_HOURS_PER_DAY),
+        }));
 
         return {
           id: doc.id,
@@ -830,7 +848,7 @@ export default function ProductsPage() {
       toast({
         variant: "destructive",
         title: "Erro ao buscar produtos",
-        description: "Ocorreu um erro ao carregar o catálogo de produtos.",
+        description: "Ocorreu um erro ao carregar o catÃ¡logo de produtos.",
       });
     } finally {
       setIsLoading(false);
@@ -849,7 +867,7 @@ export default function ProductsPage() {
     }
   }, []);
 
-  // ─── NOVO: busca todos os códigos que já têm precificação salva ─────────────
+  // â”€â”€â”€ NOVO: busca todos os cÃ³digos que jÃ¡ tÃªm precificaÃ§Ã£o salva â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const fetchSavedPricingCodes = useCallback(async () => {
     try {
       const snap = await getDocs(collection(db, "companies", "mecald", "pricingCalculations"));
@@ -859,7 +877,7 @@ export default function ProductsPage() {
     }
   }, []);
 
-  // ─── NOVO: salva o resultado da precificação no Firestore ───────────────────
+  // â”€â”€â”€ NOVO: salva o resultado da precificaÃ§Ã£o no Firestore â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const savePricingCalculation = useCallback(async (
     calculation: PricingCalculation,
     composition: MaterialCompositionItem[],
@@ -875,7 +893,7 @@ export default function ProductsPage() {
         updatedAt: Timestamp.now(),
       }, { merge: true });
 
-      // O preço final salvo no cadastro do produto já inclui IRPJ e CSLL.
+      // O preÃ§o final salvo no cadastro do produto jÃ¡ inclui IRPJ e CSLL.
       const productRef = doc(db, "companies", "mecald", "products", calculation.productId);
       await setDoc(productRef, {
         unitPrice: calculation.finalPrice,
@@ -888,18 +906,19 @@ export default function ProductsPage() {
           : product
       ));
       setSavedPricingCodes(prev => new Set([...prev, calculation.productCode]));
-      toast({ title: "Precificação salva!", description: "Os dados foram armazenados e serão carregados automaticamente." });
+      toast({ title: "PrecificaÃ§Ã£o salva!", description: "Os dados foram armazenados e serÃ£o carregados automaticamente." });
     } catch (error) {
       console.error("Error saving pricing calculation:", error);
-      toast({ variant: "destructive", title: "Erro ao salvar precificação" });
+      toast({ variant: "destructive", title: "Erro ao salvar precificaÃ§Ã£o" });
     }
   }, [toast]);
 
-  // ─── NOVO: carrega precificação salva ao selecionar produto ────────────────
+  // â”€â”€â”€ NOVO: carrega precificaÃ§Ã£o salva ao selecionar produto â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const loadSavedPricing = useCallback(async (productCode: string) => {
     try {
       const docRef = doc(db, "companies", "mecald", "pricingCalculations", productCode);
       const snap = await getDoc(docRef);
+      const product = products.find(p => p.code === productCode) || null;
       if (snap.exists()) {
         const data = snap.data();
         const composition: MaterialCompositionItem[] = data.materialComposition || [];
@@ -908,29 +927,29 @@ export default function ProductsPage() {
         setProfitMargin(data.profitMargin ?? 30);
         setIrpjRate(data.irpjRate ?? 4.8);
         setCsllRate(data.csllRate ?? 2.88);
-        setMachiningHours(data.machiningHours ?? 0);
+        setMachiningHours(data.machiningHours ?? getMachiningHoursFromPlan(product));
         toast({
-          title: "Precificação carregada!",
+          title: "PrecificaÃ§Ã£o carregada!",
           description: `Dados anteriores de ${productCode} recuperados.`,
         });
       } else {
         setMaterialComposition([]);
         setPricingCalculation(null);
-        setMachiningHours(0);
+        setMachiningHours(getMachiningHoursFromPlan(product));
         setIrpjRate(4.8);
         setCsllRate(2.88);
       }
     } catch (error) {
       console.error("Error loading saved pricing:", error);
     }
-  }, [toast]);
+  }, [toast, products]);
 
   const copySavedPricingToSelectedProduct = useCallback(async () => {
     if (!selectedProductForPricing || !copyPricingSourceId) {
       toast({
         variant: "destructive",
-        title: "Seleção incompleta",
-        description: "Selecione o produto de origem da precificação.",
+        title: "SeleÃ§Ã£o incompleta",
+        description: "Selecione o produto de origem da precificaÃ§Ã£o.",
       });
       return;
     }
@@ -944,7 +963,7 @@ export default function ProductsPage() {
       const sourceSnapshot = await getDoc(sourceRef);
 
       if (!sourceSnapshot.exists()) {
-        throw new Error(`O produto ${sourceProduct.code} não possui precificação salva.`);
+        throw new Error(`O produto ${sourceProduct.code} nÃ£o possui precificaÃ§Ã£o salva.`);
       }
 
       const sourceData = sourceSnapshot.data() as PricingCalculation & {
@@ -972,7 +991,7 @@ export default function ProductsPage() {
         updatedAt: Timestamp.now(),
       });
 
-      // Mantém o preço unitário do catálogo sincronizado com a cópia.
+      // MantÃ©m o preÃ§o unitÃ¡rio do catÃ¡logo sincronizado com a cÃ³pia.
       const targetProductRef = doc(db, "companies", "mecald", "products", selectedProductForPricing.id);
       await setDoc(targetProductRef, {
         unitPrice: Number(sourceData.finalPrice) || 0,
@@ -1014,15 +1033,15 @@ export default function ProductsPage() {
       setCopyPricingSearch("");
 
       toast({
-        title: "Precificação copiada!",
-        description: `${sourceProduct.code} foi copiado para ${selectedProductForPricing.code}. A análise de custos dos pedidos já usará os novos valores.`,
+        title: "PrecificaÃ§Ã£o copiada!",
+        description: `${sourceProduct.code} foi copiado para ${selectedProductForPricing.code}. A anÃ¡lise de custos dos pedidos jÃ¡ usarÃ¡ os novos valores.`,
       });
     } catch (error) {
-      console.error("Erro ao copiar precificação:", error);
+      console.error("Erro ao copiar precificaÃ§Ã£o:", error);
       toast({
         variant: "destructive",
-        title: "Erro ao copiar precificação",
-        description: error instanceof Error ? error.message : "Não foi possível concluir a cópia.",
+        title: "Erro ao copiar precificaÃ§Ã£o",
+        description: error instanceof Error ? error.message : "NÃ£o foi possÃ­vel concluir a cÃ³pia.",
       });
     } finally {
       setIsCopyingPricing(false);
@@ -1063,7 +1082,7 @@ export default function ProductsPage() {
       toast({
         title: materialToEdit ? "Material atualizado!" : "Material adicionado!",
         description: isDefaultMaterial 
-          ? "Material padrão customizado com sucesso" 
+          ? "Material padrÃ£o customizado com sucesso" 
           : undefined
       });
       
@@ -1101,7 +1120,7 @@ export default function ProductsPage() {
       setCustomMaterials(updatedCustomMaterials);
       toast({ 
         title: "Material removido!",
-        description: isDefault ? "Material padrão ocultado da sua biblioteca" : undefined
+        description: isDefault ? "Material padrÃ£o ocultado da sua biblioteca" : undefined
       });
     } catch (error) {
       console.error("Error deleting material:", error);
@@ -1144,7 +1163,7 @@ export default function ProductsPage() {
     }
   }, []);
 
-  // Adiciona um criador à lista
+  // Adiciona um criador Ã  lista
   const addPlanCreator = useCallback(async () => {
     const name = newPlanCreator.trim();
     if (!name) return;
@@ -1154,14 +1173,14 @@ export default function ProductsPage() {
       setPlanCreators(prev => Array.from(new Set([...prev, name])));
       setPlanCreator(name);
       setNewPlanCreator("");
-      toast({ title: "Responsável adicionado!" });
+      toast({ title: "ResponsÃ¡vel adicionado!" });
     } catch (error) {
       console.error("Error adding creator:", error);
-      toast({ variant: "destructive", title: "Erro ao adicionar responsável" });
+      toast({ variant: "destructive", title: "Erro ao adicionar responsÃ¡vel" });
     }
   }, [newPlanCreator, toast]);
 
-  // Busca quais desenhos já têm plano salvo (para indicador visual)
+  // Busca quais desenhos jÃ¡ tÃªm plano salvo (para indicador visual)
   const fetchSavedPlanDrawings = useCallback(async () => {
     try {
       const snap = await getDocs(collection(db, "companies", "mecald", "manufacturingPlans"));
@@ -1171,7 +1190,7 @@ export default function ProductsPage() {
     }
   }, []);
 
-  // Gera numeração de controle automática (PF-ANO-0001)
+  // Gera numeraÃ§Ã£o de controle automÃ¡tica (PF-ANO-0001)
   const generatePlanControlNumber = useCallback(async () => {
     const year = new Date().getFullYear();
     try {
@@ -1189,12 +1208,12 @@ export default function ProductsPage() {
     setPlanTasks(stages.map(s => ({
       stageName: s.stageName,
       instructions: "",
-      deadlineDays: s.durationDays || 0,
+      deadlineDays: Math.ceil(hoursToDays(s.hours || 0)),
       images: [],
     })));
   }, []);
 
-  // Carrega plano salvo a partir do número do desenho
+  // Carrega plano salvo a partir do nÃºmero do desenho
   const loadManufacturingPlan = useCallback(async (drawingNumber: string) => {
     const id = drawingNumber.trim();
     if (!id) return;
@@ -1240,7 +1259,7 @@ export default function ProductsPage() {
             canvas.width = width;
             canvas.height = height;
             const ctx = canvas.getContext('2d');
-            if (!ctx) return reject(new Error("Canvas não suportado"));
+            if (!ctx) return reject(new Error("Canvas nÃ£o suportado"));
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, width, height);
             ctx.drawImage(img, 0, 0, width, height);
@@ -1288,18 +1307,18 @@ export default function ProductsPage() {
     }
   }, [toast]);
 
-  // Salva o plano (chave = número do desenho)
+  // Salva o plano (chave = nÃºmero do desenho)
   const saveManufacturingPlan = useCallback(async () => {
     if (!planDrawingNumber.trim()) {
-      toast({ variant: "destructive", title: "Número do desenho obrigatório", description: "Informe o número do desenho para salvar." });
+      toast({ variant: "destructive", title: "NÃºmero do desenho obrigatÃ³rio", description: "Informe o nÃºmero do desenho para salvar." });
       return;
     }
     if (planDrawingNumber.includes('/')) {
-      toast({ variant: "destructive", title: "Número inválido", description: "O número do desenho não pode conter '/'." });
+      toast({ variant: "destructive", title: "NÃºmero invÃ¡lido", description: "O nÃºmero do desenho nÃ£o pode conter '/'." });
       return;
     }
     if (!planCreator) {
-      toast({ variant: "destructive", title: "Selecione o criador", description: "Informe quem está criando este plano." });
+      toast({ variant: "destructive", title: "Selecione o criador", description: "Informe quem estÃ¡ criando este plano." });
       return;
     }
     setIsSavingPlan(true);
@@ -1325,7 +1344,7 @@ export default function ProductsPage() {
         updatedAt: Timestamp.now(),
       }, { merge: true });
       setSavedPlanDrawings(prev => new Set([...prev, id]));
-      toast({ title: "Plano salvo!", description: `Controle ${control} • Desenho ${id}` });
+      toast({ title: "Plano salvo!", description: `Controle ${control} â€¢ Desenho ${id}` });
     } catch (error) {
       console.error("Error saving plan:", error);
       toast({ variant: "destructive", title: "Erro ao salvar plano" });
@@ -1348,7 +1367,7 @@ export default function ProductsPage() {
   
   const syncCatalog = useCallback(async () => {
     setIsSyncing(true);
-    toast({ title: "Sincronizando...", description: "Buscando produtos em orçamentos e pedidos existentes." });
+    toast({ title: "Sincronizando...", description: "Buscando produtos em orÃ§amentos e pedidos existentes." });
     
     try {
         const [quotationsSnapshot, ordersSnapshot] = await Promise.all([
@@ -1378,7 +1397,7 @@ export default function ProductsPage() {
 
                         const productData = {
                             code: productCode,
-                            description: item.description || existingData.description || "Sem descrição",
+                            description: item.description || existingData.description || "Sem descriÃ§Ã£o",
                             unitPrice: Number(item.unitPrice) || existingData.unitPrice || 0,
                             unitWeight: Number(item.unitWeight) || existingData.unitWeight || 0,
                         };
@@ -1392,7 +1411,7 @@ export default function ProductsPage() {
         ordersSnapshot.forEach(processDocumentItems);
         
         if (productsToSync.size === 0 && skippedCodes.length === 0) {
-            toast({ title: "Nenhum produto novo encontrado", description: "Seu catálogo já parece estar atualizado." });
+            toast({ title: "Nenhum produto novo encontrado", description: "Seu catÃ¡logo jÃ¡ parece estar atualizado." });
             setIsSyncing(false);
             return;
         }
@@ -1411,11 +1430,11 @@ export default function ProductsPage() {
 
         let description = `${productsToSync.size} produtos foram adicionados ou atualizados.`;
         if (skippedCodes.length > 0) {
-            description += ` ${skippedCodes.length} código(s) foram ignorados por conterem caracteres inválidos (ex: /).`
+            description += ` ${skippedCodes.length} cÃ³digo(s) foram ignorados por conterem caracteres invÃ¡lidos (ex: /).`
         }
 
         toast({ 
-            title: "Sincronização Concluída!", 
+            title: "SincronizaÃ§Ã£o ConcluÃ­da!", 
             description: description,
             duration: skippedCodes.length > 0 ? 8000 : 5000,
         });
@@ -1423,15 +1442,15 @@ export default function ProductsPage() {
 
     } catch (error: any) {
         console.error("Error syncing catalog: ", error);
-        let description = "Não foi possível sincronizar os produtos. Tente novamente.";
+        let description = "NÃ£o foi possÃ­vel sincronizar os produtos. Tente novamente.";
         if (error.code === 'permission-denied') {
-            description = "Erro de permissão. Verifique as regras de segurança do seu Firestore.";
+            description = "Erro de permissÃ£o. Verifique as regras de seguranÃ§a do seu Firestore.";
         } else if (error.message && (error.message.includes('Document path') || error.message.includes('invalid'))) {
-            description = "Um ou mais produtos nos orçamentos ou pedidos possuem um código inválido. Corrija-os e tente novamente.";
+            description = "Um ou mais produtos nos orÃ§amentos ou pedidos possuem um cÃ³digo invÃ¡lido. Corrija-os e tente novamente.";
         }
         toast({
             variant: "destructive",
-            title: "Erro na Sincronização",
+            title: "Erro na SincronizaÃ§Ã£o",
             description: description,
         });
     } finally {
@@ -1444,8 +1463,8 @@ export default function ProductsPage() {
         if (values.code.includes('/')) {
             toast({
                 variant: "destructive",
-                title: "Código Inválido",
-                description: "O código do produto não pode conter o caractere '/'."
+                title: "CÃ³digo InvÃ¡lido",
+                description: "O cÃ³digo do produto nÃ£o pode conter o caractere '/'."
             });
             return;
         }
@@ -1486,7 +1505,7 @@ export default function ProductsPage() {
   const handleEditClick = (product: Product) => {
     setSelectedProduct(product);
     const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
-        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, hours: 0 }))
         : []);
     form.reset({
       ...product,
@@ -1508,12 +1527,12 @@ export default function ProductsPage() {
     
     setSelectedProduct(null);
     const planTemplate = product.productionPlanTemplate || (product.manufacturingStages 
-        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, durationDays: 0 }))
+        ? product.manufacturingStages.map((stage: string) => ({ stageName: stage, hours: 0 }))
         : []);
     
     form.reset({
       code: finalCode,
-      description: `${product.description} (Cópia)`,
+      description: `${product.description} (CÃ³pia)`,
       unitPrice: product.unitPrice,
       unitWeight: product.unitWeight || 0,
       productionPlanTemplate: planTemplate
@@ -1522,7 +1541,7 @@ export default function ProductsPage() {
     
     toast({
       title: "Produto duplicado!",
-      description: `Os dados de "${product.description}" foram copiados. Ajuste o código e descrição conforme necessário.`,
+      description: `Os dados de "${product.description}" foram copiados. Ajuste o cÃ³digo e descriÃ§Ã£o conforme necessÃ¡rio.`,
     });
   };
   
@@ -1535,7 +1554,7 @@ export default function ProductsPage() {
     if (!productToDelete) return;
     try {
       await deleteDoc(doc(db, "companies", "mecald", "products", productToDelete.id));
-      toast({ title: "Produto excluído!", description: "O produto foi removido do catálogo." });
+      toast({ title: "Produto excluÃ­do!", description: "O produto foi removido do catÃ¡logo." });
       setProductToDelete(null);
       setIsDeleteDialogOpen(false);
       await fetchProducts();
@@ -1544,7 +1563,7 @@ export default function ProductsPage() {
       toast({
         variant: "destructive",
         title: "Erro ao excluir",
-        description: "Não foi possível remover o produto. Tente novamente.",
+        description: "NÃ£o foi possÃ­vel remover o produto. Tente novamente.",
       });
     }
   };
@@ -1692,7 +1711,7 @@ export default function ProductsPage() {
     const selectedCenter = costCenters.find(center => center.id === newStageCostCenterIdForEdit);
 
     if (manufacturingStages.some((stage, index) => stage.name.toLowerCase() === newName.toLowerCase() && index !== stageToEdit.index)) {
-        toast({ variant: "destructive", title: "Nome duplicado", description: "Esta etapa já existe." });
+        toast({ variant: "destructive", title: "Nome duplicado", description: "Esta etapa jÃ¡ existe." });
         return;
     }
 
@@ -1787,15 +1806,15 @@ export default function ProductsPage() {
       ).length;
       await setDoc(stagesDocRef, { stages: migrated }, { merge: true });
       toast({
-        title: "Vinculação concluída!",
+        title: "VinculaÃ§Ã£o concluÃ­da!",
         description: linkedCount > 0
           ? `${linkedCount} etapa(s) foram vinculadas automaticamente.`
-          : "Nenhuma correspondência nova foi encontrada.",
+          : "Nenhuma correspondÃªncia nova foi encontrada.",
       });
       await fetchStages();
     } catch (error) {
       console.error("Error migrating stages to cost centers:", error);
-      toast({ variant: "destructive", title: "Erro na vinculação automática" });
+      toast({ variant: "destructive", title: "Erro na vinculaÃ§Ã£o automÃ¡tica" });
     }
   }, [manufacturingStages, costCenters, stagesDocRef, fetchStages, toast]);
 
@@ -1819,8 +1838,8 @@ export default function ProductsPage() {
     if (!selectedProductForCalculator || calculatorQuantity <= 0) {
       toast({
         variant: "destructive",
-        title: "Dados inválidos",
-        description: "Selecione um produto e informe uma quantidade válida."
+        title: "Dados invÃ¡lidos",
+        description: "Selecione um produto e informe uma quantidade vÃ¡lida."
       });
       return;
     }
@@ -1857,31 +1876,19 @@ export default function ProductsPage() {
       return;
     }
 
-    const stageMaxDuration: Record<string, number> = {};
-    
-    calculatorItems.forEach(item => {
-      item.stages.forEach(stage => {
-        const stageDuration = (stage.durationDays || 0) * item.quantity;
-        stageMaxDuration[stage.stageName] = Math.max(
-          stageMaxDuration[stage.stageName] || 0,
-          stageDuration
-        );
-      });
-    });
-
     const baseLeadTime = Math.max(...calculatorItems.map(item => {
-      return item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+      return item.stages.reduce((sum, stage) => sum + hoursToDays(stage.hours || 0), 0);
     }));
     const longestProductItem = calculatorItems.find(item => {
-      const itemLeadTime = item.stages.reduce((sum, stage) => sum + (stage.durationDays || 0), 0);
+      const itemLeadTime = item.stages.reduce((sum, stage) => sum + hoursToDays(stage.hours || 0), 0);
       return itemLeadTime === baseLeadTime;
     });
 
     if (!longestProductItem) {
       toast({
         variant: "destructive",
-        title: "Erro de cálculo",
-        description: "Não foi possível identificar o produto crítico."
+        title: "Erro de cÃ¡lculo",
+        description: "NÃ£o foi possÃ­vel identificar o produto crÃ­tico."
       });
       return;
     }
@@ -1904,10 +1911,11 @@ export default function ProductsPage() {
       } else {
         adjustmentFactor = 0.8 + currentWorkload * 0.4;
       }
-      const adjustedDuration = Math.ceil((stage.durationDays || 0) * adjustmentFactor);
+      const originalDuration = hoursToDays(stage.hours || 0);
+      const adjustedDuration = Math.ceil(originalDuration * adjustmentFactor);
       return {
         stageName: stage.stageName,
-        originalDuration: stage.durationDays || 0,
+        originalDuration,
         adjustedDuration,
         workload: currentWorkload,
         bottleneck: isBottleneck
@@ -1960,16 +1968,16 @@ export default function ProductsPage() {
         title: "Nenhum produto para exportar",
         description: searchQuery
           ? `Nenhum produto encontrado para "${searchQuery}".`
-          : "O catálogo está vazio.",
+          : "O catÃ¡logo estÃ¡ vazio.",
       });
       return;
     }
 
     const data = filteredProducts.map((product) => ({
-      Código: product.code,
-      Descrição: product.description,
-      "Preço Unitário (R$)": product.unitPrice,
-      "Peso Unitário (kg)": product.unitWeight || 0,
+      CÃ³digo: product.code,
+      DescriÃ§Ã£o: product.description,
+      "PreÃ§o UnitÃ¡rio (R$)": product.unitPrice,
+      "Peso UnitÃ¡rio (kg)": product.unitWeight || 0,
       "Lead Time (dias)": calculateLeadTime(product),
     }));
 
@@ -1984,13 +1992,13 @@ export default function ProductsPage() {
     ];
 
     const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Catálogo de Produtos");
+    XLSX.utils.book_append_sheet(wb, ws, "CatÃ¡logo de Produtos");
 
     const fileName = `catalogo-produtos-mecald-${format(new Date(), "yyyyMMdd-HHmm")}.xlsx`;
     XLSX.writeFile(wb, fileName);
 
     toast({
-      title: "Catálogo exportado!",
+      title: "CatÃ¡logo exportado!",
       description: `${filteredProducts.length} produtos exportados para Excel.`,
     });
   };
@@ -2000,7 +2008,7 @@ export default function ProductsPage() {
       toast({
         variant: "destructive",
         title: "Lista vazia",
-        description: "Adicione produtos à análise antes de exportar o relatório."
+        description: "Adicione produtos Ã  anÃ¡lise antes de exportar o relatÃ³rio."
       });
       return;
     }
@@ -2013,7 +2021,7 @@ export default function ProductsPage() {
       <html>
         <head>
           <meta charset="utf-8">
-          <title>Relatório de Análise de Prazos - MECALD</title>
+          <title>RelatÃ³rio de AnÃ¡lise de Prazos - MECALD</title>
           <style>
             body { font-family: Arial, sans-serif; margin: 20px; line-height: 1.6; }
             .header { text-align: center; margin-bottom: 30px; border-bottom: 2px solid #333; padding-bottom: 20px; }
@@ -2040,12 +2048,12 @@ export default function ProductsPage() {
         <body>
           <div class="header">
             <div class="company-logo">MECALD</div>
-            <div class="report-title">RELATÓRIO DE ANÁLISE DE VIABILIDADE DE PRAZOS</div>
-            <div class="report-date">Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</div>
+            <div class="report-title">RELATÃ“RIO DE ANÃLISE DE VIABILIDADE DE PRAZOS</div>
+            <div class="report-date">Gerado em: ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm", { locale: ptBR })}</div>
           </div>
 
           <div class="section">
-            <div class="section-title">DADOS DA SOLICITAÇÃO</div>
+            <div class="section-title">DADOS DA SOLICITAÃ‡ÃƒO</div>
             <p><strong>Data de entrega solicitada:</strong> ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}</p>
             <p><strong>Quantidade de itens analisados:</strong> ${calculatorItems.length}</p>
             <p><strong>Lead time total estimado:</strong> ${calculatorResults?.totalAdjustedLeadTime || 0} dias</p>
@@ -2058,9 +2066,9 @@ export default function ProductsPage() {
                 <h4>${index + 1}. ${item.productCode} - ${item.productDescription}</h4>
                 <p><strong>Quantidade:</strong> ${item.quantity} | <strong>Lead time base:</strong> ${item.leadTime} dias</p>
                 ${item.stages.length > 0 ? `
-                  <p><strong>Etapas de produção:</strong></p>
+                  <p><strong>Etapas de produÃ§Ã£o:</strong></p>
                   <ul>
-                    ${item.stages.map(stage => `<li>${stage.stageName}: ${stage.durationDays || 0} dias</li>`).join('')}
+                    ${item.stages.map(stage => `<li>${stage.stageName}: ${stage.hours || 0} horas</li>`).join('')}
                   </ul>
                 ` : '<p>Nenhuma etapa definida</p>'}
               </div>
@@ -2069,17 +2077,17 @@ export default function ProductsPage() {
 
           ${calculatorResults ? `
             <div class="section">
-              <div class="section-title">RESULTADO DA ANÁLISE</div>
+              <div class="section-title">RESULTADO DA ANÃLISE</div>
               <div class="result-box ${calculatorResults.isViable ? 'viable' : 'not-viable'}">
-                <h2>${calculatorResults.isViable ? '✓ PRAZO VIÁVEL' : '✗ PRAZO INVIÁVEL'}</h2>
-                <p><strong>Nível de confiança:</strong> ${calculatorResults.confidence}%</p>
+                <h2>${calculatorResults.isViable ? 'âœ“ PRAZO VIÃVEL' : 'âœ— PRAZO INVIÃVEL'}</h2>
+                <p><strong>NÃ­vel de confianÃ§a:</strong> ${calculatorResults.confidence}%</p>
                 <p><strong>Data sugerida para entrega:</strong> ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}</p>
                 <p><strong>Lead time ajustado:</strong> ${calculatorResults.totalAdjustedLeadTime} dias</p>
               </div>
             </div>
 
             <div class="section">
-              <div class="section-title">ANÁLISE DETALHADA POR SETOR</div>
+              <div class="section-title">ANÃLISE DETALHADA POR SETOR</div>
               <table>
                 <thead>
                   <tr>
@@ -2105,38 +2113,38 @@ export default function ProductsPage() {
             </div>
 
             <div class="section">
-              <div class="section-title">RECOMENDAÇÕES</div>
+              <div class="section-title">RECOMENDAÃ‡Ã•ES</div>
               ${!calculatorResults.isViable ? `
                 <div class="recommendation rec-danger">
-                  <strong>⚠️ Prazo Inviável</strong><br>
-                  O prazo solicitado não pode ser cumprido. Recomenda-se reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })} ou posterior.
+                  <strong>âš ï¸ Prazo InviÃ¡vel</strong><br>
+                  O prazo solicitado nÃ£o pode ser cumprido. Recomenda-se reagendar para ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })} ou posterior.
                 </div>
               ` : ''}
               ${calculatorResults.confidence < 70 ? `
                 <div class="recommendation rec-warning">
-                  <strong>⚠️ Baixa Confiança (${calculatorResults.confidence}%)</strong><br>
-                  A alta carga dos setores produtivos pode causar atrasos. Recomenda-se monitoramento constante e planos de contingência.
+                  <strong>âš ï¸ Baixa ConfianÃ§a (${calculatorResults.confidence}%)</strong><br>
+                  A alta carga dos setores produtivos pode causar atrasos. Recomenda-se monitoramento constante e planos de contingÃªncia.
                 </div>
               ` : ''}
               ${calculatorResults.analysis.some(a => a.bottleneck) ? `
                 <div class="recommendation rec-warning">
-                  <strong>🚨 Gargalos Identificados</strong><br>
-                  Os seguintes setores estão operando próximo ao limite: 
+                  <strong>ðŸš¨ Gargalos Identificados</strong><br>
+                  Os seguintes setores estÃ£o operando prÃ³ximo ao limite: 
                   ${calculatorResults.analysis.filter(a => a.bottleneck).map(a => a.stageName).join(', ')}.<br>
-                  Considere: realocação de recursos, horas extras, terceirização ou renegociação de prazos.
+                  Considere: realocaÃ§Ã£o de recursos, horas extras, terceirizaÃ§Ã£o ou renegociaÃ§Ã£o de prazos.
                 </div>
               ` : ''}
               ${calculatorResults.isViable && calculatorResults.confidence >= 70 ? `
                 <div class="recommendation rec-info">
-                  <strong>✅ Análise Positiva</strong><br>
-                  O prazo é viável com boa margem de segurança. Mantenha o monitoramento regular do progresso.
+                  <strong>âœ… AnÃ¡lise Positiva</strong><br>
+                  O prazo Ã© viÃ¡vel com boa margem de seguranÃ§a. Mantenha o monitoramento regular do progresso.
                 </div>
               ` : ''}
             </div>
           ` : ''}
 
           <div class="section" style="margin-top: 40px; font-size: 10px; color: #666; text-align: center;">
-            <p>Este relatório foi gerado automaticamente pelo sistema MECALD em ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}</p>
+            <p>Este relatÃ³rio foi gerado automaticamente pelo sistema MECALD em ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm", { locale: ptBR })}</p>
           </div>
 
           <script>
@@ -2150,8 +2158,8 @@ export default function ProductsPage() {
     printWindow.document.close();
 
     toast({
-      title: "Relatório gerado!",
-      description: "O relatório será aberto em uma nova janela para impressão/salvamento em PDF."
+      title: "RelatÃ³rio gerado!",
+      description: "O relatÃ³rio serÃ¡ aberto em uma nova janela para impressÃ£o/salvamento em PDF."
     });
   };
 
@@ -2171,7 +2179,7 @@ export default function ProductsPage() {
 
   const exportManufacturingPlanPDF = useCallback(async () => {
     if (planTasks.length === 0 || !planDrawingNumber.trim()) {
-      toast({ variant: "destructive", title: "Dados insuficientes", description: "Selecione o produto/etapas e informe o número do desenho." });
+      toast({ variant: "destructive", title: "Dados insuficientes", description: "Selecione o produto/etapas e informe o nÃºmero do desenho." });
       return;
     }
     const companyData = await fetchCompanyDataForPDF();
@@ -2187,18 +2195,18 @@ export default function ProductsPage() {
       return false;
     };
 
-    // ── Cabeçalho da empresa ──
+    // â”€â”€ CabeÃ§alho da empresa â”€â”€
     doc.setFillColor(37, 99, 235);
     doc.rect(0, 0, pageWidth, 42, 'F');
     doc.setTextColor(255, 255, 255);
     doc.setFontSize(22); doc.setFont('helvetica', 'bold');
     doc.text((companyData?.nomeFantasia || 'MECALD').toUpperCase(), margin, 18);
     doc.setFontSize(14); doc.setFont('helvetica', 'normal');
-    doc.text('PLANO DE FABRICAÇÃO', margin, 28);
+    doc.text('PLANO DE FABRICAÃ‡ÃƒO', margin, 28);
     doc.setFontSize(9);
-    doc.text(`Emitido em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, margin, 36);
+    doc.text(`Emitido em: ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm", { locale: ptBR })}`, margin, 36);
 
-    // Logo (mesmo padrão do relatório de precificação)
+    // Logo (mesmo padrÃ£o do relatÃ³rio de precificaÃ§Ã£o)
     if (companyData?.logo?.preview) {
       try {
         let logoSrc = companyData.logo.preview;
@@ -2206,40 +2214,40 @@ export default function ProductsPage() {
         const base64Data = logoSrc.split(',')[1] || logoSrc;
         const imageType = logoSrc.match(/data:image\/(\w+)/)?.[1] || 'png';
         doc.addImage(base64Data, imageType.toUpperCase(), pageWidth - margin - 40, 8, 38, 26, undefined, 'FAST');
-      } catch { /* ignora logo inválido */ }
+      } catch { /* ignora logo invÃ¡lido */ }
     }
 
     y = 52;
     doc.setTextColor(0, 0, 0);
 
-    // ── Caixa de identificação ──
+    // â”€â”€ Caixa de identificaÃ§Ã£o â”€â”€
     doc.setFillColor(239, 246, 255);
     doc.setDrawColor(59, 130, 246);
     doc.roundedRect(margin, y, contentWidth, 34, 3, 3, 'FD');
     doc.setFontSize(9); doc.setFont('helvetica', 'bold');
     doc.setTextColor(30, 64, 175);
-    doc.text('IDENTIFICAÇÃO DO DOCUMENTO', margin + 4, y + 7);
+    doc.text('IDENTIFICAÃ‡ÃƒO DO DOCUMENTO', margin + 4, y + 7);
     doc.setTextColor(0, 0, 0); doc.setFont('helvetica', 'normal');
-    doc.text(`Nº de Controle: ${planControlNumber || '(gerado ao salvar)'}`, margin + 4, y + 15);
-    doc.text(`Nº do Desenho: ${planDrawingNumber}`, pageWidth / 2 + 6, y + 15);
+    doc.text(`NÂº de Controle: ${planControlNumber || '(gerado ao salvar)'}`, margin + 4, y + 15);
+    doc.text(`NÂº do Desenho: ${planDrawingNumber}`, pageWidth / 2 + 6, y + 15);
     doc.text(`Produto: ${(selectedProductForPlan?.code || '-') + ' ' + (selectedProductForPlan?.description || '')}`.substring(0, 60), margin + 4, y + 22);
-    doc.text(`Revisão: ${planRevision || '0'}`, pageWidth / 2 + 6, y + 22);
+    doc.text(`RevisÃ£o: ${planRevision || '0'}`, pageWidth / 2 + 6, y + 22);
     doc.text(`Elaborado por: ${planCreator || '-'}`, margin + 4, y + 29);
     y += 42;
 
-    // ── Aviso de confidencialidade ──
+    // â”€â”€ Aviso de confidencialidade â”€â”€
     checkBreak(40);
     const empresa = (companyData?.nomeFantasia || companyData?.razaoSocial || 'MECALD').toUpperCase();
     doc.setFillColor(254, 242, 242);
     doc.setDrawColor(220, 38, 38);
     const confText =
-      `DOCUMENTO CONFIDENCIAL — USO INTERNO RESTRITO. Este Plano de Fabricação e todo o seu conteúdo ` +
-      `(procedimentos, desenhos, imagens e especificações) constituem segredo de indústria e propriedade ` +
-      `intelectual de ${empresa}. Sua reprodução, divulgação, cópia ou utilização, total ou parcial, fora do ` +
-      `ambiente da empresa, sem autorização expressa e por escrito, é proibida. A violação sujeita o infrator ` +
-      `às sanções da Lei nº 9.279/1996 (Lei da Propriedade Industrial), em especial art. 195, incisos XI e XII ` +
-      `(crime de concorrência desleal), do art. 482, "g", da CLT (justa causa por violação de segredo da empresa) ` +
-      `e demais cominações civis e penais aplicáveis.`;
+      `DOCUMENTO CONFIDENCIAL â€” USO INTERNO RESTRITO. Este Plano de FabricaÃ§Ã£o e todo o seu conteÃºdo ` +
+      `(procedimentos, desenhos, imagens e especificaÃ§Ãµes) constituem segredo de indÃºstria e propriedade ` +
+      `intelectual de ${empresa}. Sua reproduÃ§Ã£o, divulgaÃ§Ã£o, cÃ³pia ou utilizaÃ§Ã£o, total ou parcial, fora do ` +
+      `ambiente da empresa, sem autorizaÃ§Ã£o expressa e por escrito, Ã© proibida. A violaÃ§Ã£o sujeita o infrator ` +
+      `Ã s sanÃ§Ãµes da Lei nÂº 9.279/1996 (Lei da Propriedade Industrial), em especial art. 195, incisos XI e XII ` +
+      `(crime de concorrÃªncia desleal), do art. 482, "g", da CLT (justa causa por violaÃ§Ã£o de segredo da empresa) ` +
+      `e demais cominaÃ§Ãµes civis e penais aplicÃ¡veis.`;
     const confLines = doc.splitTextToSize(confText, contentWidth - 8);
     const confBoxH = confLines.length * 4.5 + 8;
     doc.roundedRect(margin, y, contentWidth, confBoxH, 2, 2, 'FD');
@@ -2249,18 +2257,18 @@ export default function ProductsPage() {
     y += confBoxH + 8;
     doc.setTextColor(0, 0, 0);
 
-    // ── Notas gerais ──
+    // â”€â”€ Notas gerais â”€â”€
     if (planGeneralNotes.trim()) {
       checkBreak(20);
       doc.setFontSize(11); doc.setFont('helvetica', 'bold');
-      doc.text('OBSERVAÇÕES GERAIS', margin, y); y += 6;
+      doc.text('OBSERVAÃ‡Ã•ES GERAIS', margin, y); y += 6;
       doc.setFontSize(9); doc.setFont('helvetica', 'normal');
       const notes = doc.splitTextToSize(planGeneralNotes, contentWidth);
       notes.forEach((ln: string) => { checkBreak(6); doc.text(ln, margin, y); y += 5; });
       y += 4;
     }
 
-    // ── Tarefas por etapa ──
+    // â”€â”€ Tarefas por etapa â”€â”€
     for (let idx = 0; idx < planTasks.length; idx++) {
       const task = planTasks[idx];
       checkBreak(24);
@@ -2274,7 +2282,7 @@ export default function ProductsPage() {
       y += 9;
 
       doc.setFontSize(9); doc.setFont('helvetica', 'normal');
-      const taskInstructions = task.instructions?.trim() ? task.instructions : 'Sem instruções cadastradas.';
+      const taskInstructions = task.instructions?.trim() ? task.instructions : 'Sem instruÃ§Ãµes cadastradas.';
       const instrLines = doc.splitTextToSize(taskInstructions, contentWidth);
       instrLines.forEach((ln: string) => { checkBreak(6); doc.text(ln, margin, y); y += 5; });
       y += 2;
@@ -2288,7 +2296,7 @@ export default function ProductsPage() {
           checkBreak(targetH + (img.caption ? 8 : 4));
           try {
             doc.addImage(img.dataUrl, 'JPEG', margin, y, targetW, targetH, undefined, 'FAST');
-          } catch { /* ignora imagem inválida */ }
+          } catch { /* ignora imagem invÃ¡lida */ }
           y += targetH + 2;
           if (img.caption?.trim()) {
             doc.setFontSize(8); doc.setFont('helvetica', 'italic');
@@ -2303,18 +2311,18 @@ export default function ProductsPage() {
       y += 4;
     }
 
-    // ── Rodapé em todas as páginas ──
+    // â”€â”€ RodapÃ© em todas as pÃ¡ginas â”€â”€
     const totalPages = doc.internal.pages.length - 1;
     for (let i = 1; i <= totalPages; i++) {
       doc.setPage(i);
       doc.setFontSize(7);
       doc.setTextColor(150, 150, 150);
-      doc.text(`DOCUMENTO CONFIDENCIAL — ${empresa} • Controle ${planControlNumber || '-'} • Desenho ${planDrawingNumber}`, pageWidth / 2, pageHeight - 14, { align: 'center' });
-      doc.text(`Página ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 9, { align: 'center' });
+      doc.text(`DOCUMENTO CONFIDENCIAL â€” ${empresa} â€¢ Controle ${planControlNumber || '-'} â€¢ Desenho ${planDrawingNumber}`, pageWidth / 2, pageHeight - 14, { align: 'center' });
+      doc.text(`PÃ¡gina ${i} de ${totalPages}`, pageWidth / 2, pageHeight - 9, { align: 'center' });
     }
 
     doc.save(`plano-fabricacao-${planDrawingNumber}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`);
-    toast({ title: "PDF gerado!", description: "O plano de fabricação foi baixado." });
+    toast({ title: "PDF gerado!", description: "O plano de fabricaÃ§Ã£o foi baixado." });
   }, [planTasks, planDrawingNumber, planControlNumber, planRevision, planCreator, planGeneralNotes, selectedProductForPlan, fetchCompanyDataForPDF, toast]);
 
     const saveStageCosts = useCallback(async () => {
@@ -2361,7 +2369,7 @@ export default function ProductsPage() {
             <div className="flex items-center gap-2">
                  <Button onClick={syncCatalog} variant="outline" disabled={isSyncing}>
                     <RefreshCw className={`mr-2 h-4 w-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                    {isSyncing ? "Sincronizando..." : "Sincronizar Catálogo"}
+                    {isSyncing ? "Sincronizando..." : "Sincronizar CatÃ¡logo"}
                  </Button>
                  <Button onClick={handleAddClick}>
                     <PlusCircle className="mr-2 h-4 w-4" />
@@ -2374,7 +2382,7 @@ export default function ProductsPage() {
           <div className="grid gap-4 md:grid-cols-3 mb-6">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Lead Time Médio</CardTitle>
+                <CardTitle className="text-sm font-medium">Lead Time MÃ©dio</CardTitle>
                 <Clock className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -2392,7 +2400,7 @@ export default function ProductsPage() {
               <CardContent>
                 <div className="text-2xl font-bold">{leadTimeStats.maxLeadTime} dias</div>
                 <p className="text-xs text-muted-foreground">
-                  Produto com maior tempo de produção
+                  Produto com maior tempo de produÃ§Ã£o
                 </p>
               </CardContent>
             </Card>
@@ -2413,16 +2421,16 @@ export default function ProductsPage() {
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
             <TabsList>
-                <TabsTrigger value="catalog">Catálogo de Produtos</TabsTrigger>
-                <TabsTrigger value="stages">Etapas de Produção</TabsTrigger>
+                <TabsTrigger value="catalog">CatÃ¡logo de Produtos</TabsTrigger>
+                <TabsTrigger value="stages">Etapas de ProduÃ§Ã£o</TabsTrigger>
                 <TabsTrigger value="calculator">Calculadora de Prazos</TabsTrigger>
                     <TabsTrigger value="pricing">
                         <Calculator className="mr-2 h-4 w-4" />
-                        Calculadora de Preços
+                        Calculadora de PreÃ§os
                     </TabsTrigger>
                     <TabsTrigger value="manufacturingPlan">
                         <BookOpen className="mr-2 h-4 w-4" />
-                        Plano de Fabricação
+                        Plano de FabricaÃ§Ã£o
                     </TabsTrigger>
             </TabsList>
             <TabsContent value="catalog" className="mt-4">
@@ -2432,14 +2440,14 @@ export default function ProductsPage() {
                             <div>
                                 <CardTitle>Produtos Cadastrados</CardTitle>
                                 <CardDescription>
-                                Gerencie os produtos e serviços que sua empresa oferece. O lead time é calculado automaticamente com base nas etapas de fabricação configuradas.
+                                Gerencie os produtos e serviÃ§os que sua empresa oferece. O lead time Ã© calculado automaticamente com base nas etapas de fabricaÃ§Ã£o configuradas.
                                 </CardDescription>
                             </div>
                             <div className="flex items-center gap-2">
                                 <div className="relative">
                                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                     <Input
-                                        placeholder="Buscar por código ou descrição..."
+                                        placeholder="Buscar por cÃ³digo ou descriÃ§Ã£o..."
                                         value={searchQuery}
                                         onChange={(e) => setSearchQuery(e.target.value)}
                                         className="pl-9 w-64"
@@ -2463,13 +2471,13 @@ export default function ProductsPage() {
                             <Table>
                             <TableHeader>
                                 <TableRow>
-                                <TableHead className="w-[150px]">Código</TableHead>
-                                <TableHead>Descrição</TableHead>
-                                <TableHead className="w-[140px] text-right">Preço Unitário (R$)</TableHead>
+                                <TableHead className="w-[150px]">CÃ³digo</TableHead>
+                                <TableHead>DescriÃ§Ã£o</TableHead>
+                                <TableHead className="w-[140px] text-right">PreÃ§o UnitÃ¡rio (R$)</TableHead>
                                 <TableHead className="w-[120px] text-center">Lead Time</TableHead>
-                                {/* ─── NOVO: coluna de precificação ─── */}
-                                <TableHead className="w-[100px] text-center">Precificação</TableHead>
-                                <TableHead className="w-[140px] text-center">Ações</TableHead>
+                                {/* â”€â”€â”€ NOVO: coluna de precificaÃ§Ã£o â”€â”€â”€ */}
+                                <TableHead className="w-[100px] text-center">PrecificaÃ§Ã£o</TableHead>
+                                <TableHead className="w-[140px] text-center">AÃ§Ãµes</TableHead>
                                 </TableRow>
                             </TableHeader>
                             <TableBody>
@@ -2491,13 +2499,13 @@ export default function ProductsPage() {
                                                 {leadTimeBadge.text}
                                             </Badge>
                                         </TableCell>
-                                        {/* ─── NOVO: badge indicador de precificação salva ─── */}
+                                        {/* â”€â”€â”€ NOVO: badge indicador de precificaÃ§Ã£o salva â”€â”€â”€ */}
                                         <TableCell className="text-center">
                                             {savedPricingCodes.has(product.code) ? (
                                                 <Badge
                                                     variant="outline"
                                                     className="cursor-pointer border-green-500 text-green-600 hover:bg-green-50"
-                                                    title="Precificação salva — clique para abrir"
+                                                    title="PrecificaÃ§Ã£o salva â€” clique para abrir"
                                                     onClick={() => {
                                                         setActiveTab("pricing");
                                                         setPricingProductSearch(product.code);
@@ -2509,7 +2517,7 @@ export default function ProductsPage() {
                                                     Salvo
                                                 </Badge>
                                             ) : (
-                                                <span className="text-xs text-muted-foreground">—</span>
+                                                <span className="text-xs text-muted-foreground">â€”</span>
                                             )}
                                         </TableCell>
                                         <TableCell className="text-center">
@@ -2547,7 +2555,7 @@ export default function ProductsPage() {
             <TabsContent value="stages" className="mt-4">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Etapas de Fabricação</CardTitle>
+                        <CardTitle>Etapas de FabricaÃ§Ã£o</CardTitle>
                         <CardDescription>
                             Cadastre e gerencie as etapas do seu processo produtivo. 
                             <strong> Arraste e solte para reordenar rapidamente.</strong>
@@ -2569,7 +2577,7 @@ export default function ProductsPage() {
                                 <SelectContent>
                                     {costCenters.map(center => (
                                         <SelectItem key={center.id} value={center.id}>
-                                            {center.sectorName} — R$ {center.hourlyRate.toFixed(2)}/h
+                                            {center.sectorName} â€” R$ {center.hourlyRate.toFixed(2)}/h
                                         </SelectItem>
                                     ))}
                                 </SelectContent>
@@ -2581,14 +2589,14 @@ export default function ProductsPage() {
                         </div>
                         {!isLoadingCostCenters && costCenters.length === 0 && (
                             <p className="text-xs text-destructive">
-                                Nenhum centro de custo cadastrado. Cadastre-o em Centro de Custos → Apontamentos → Centros de custo por setor.
+                                Nenhum centro de custo cadastrado. Cadastre-o em Centro de Custos â†’ Apontamentos â†’ Centros de custo por setor.
                             </p>
                         )}
 
                         {manufacturingStages.some(stage => !stage.costCenterId) && (
                             <div className="flex flex-col gap-3 rounded-md border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800 md:flex-row md:items-center md:justify-between">
                                 <span>
-                                    ⚠️ {manufacturingStages.filter(stage => !stage.costCenterId).length} etapa(s) sem centro de custo vinculado. Edite-as pelo lápis ou tente a vinculação por nome.
+                                    âš ï¸ {manufacturingStages.filter(stage => !stage.costCenterId).length} etapa(s) sem centro de custo vinculado. Edite-as pelo lÃ¡pis ou tente a vinculaÃ§Ã£o por nome.
                                 </span>
                                 <Button type="button" variant="outline" size="sm" onClick={migrateStagesToCostCenters} disabled={costCenters.length === 0}>
                                     Vincular automaticamente
@@ -2629,7 +2637,7 @@ export default function ProductsPage() {
                                     </div>
                                 ) : (
                                     <div className="text-center py-8 text-muted-foreground">
-                                        <div className="mb-2 text-2xl">📋</div>
+                                        <div className="mb-2 text-2xl">ðŸ“‹</div>
                                         <p className="font-medium">Nenhuma etapa cadastrada</p>
                                         <p className="text-sm">Adicione a primeira etapa acima</p>
                                     </div>
@@ -2640,12 +2648,12 @@ export default function ProductsPage() {
                         {manufacturingStages.length > 1 && (
                             <div className="bg-muted/30 rounded-lg p-4 text-sm border">
                                 <div className="font-medium mb-2 flex items-center gap-2">
-                                    💡 Dicas de uso
+                                    ðŸ’¡ Dicas de uso
                                 </div>
                                 <ul className="space-y-1 text-muted-foreground text-xs">
-                                    <li>• <strong>Arrastar:</strong> Clique e arraste usando o ícone ⋮⋮ para reordenar</li>
-                                    <li>• <strong>Lead time:</strong> A ordem das etapas afeta o cálculo do tempo total</li>
-                                    <li>• <strong>Salvamento:</strong> Mudanças são salvas automaticamente no Firebase</li>
+                                    <li>â€¢ <strong>Arrastar:</strong> Clique e arraste usando o Ã­cone â‹®â‹® para reordenar</li>
+                                    <li>â€¢ <strong>Lead time:</strong> A ordem das etapas afeta o cÃ¡lculo do tempo total</li>
+                                    <li>â€¢ <strong>Salvamento:</strong> MudanÃ§as sÃ£o salvas automaticamente no Firebase</li>
                                 </ul>
                             </div>
                         )}
@@ -2658,7 +2666,7 @@ export default function ProductsPage() {
                         <CardHeader>
                             <CardTitle>Calculadora de Viabilidade de Prazos</CardTitle>
                             <CardDescription>
-                                Analise se é possível cumprir prazos considerando a carga atual dos setores de produção.
+                                Analise se Ã© possÃ­vel cumprir prazos considerando a carga atual dos setores de produÃ§Ã£o.
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-6">
@@ -2702,7 +2710,7 @@ export default function ProductsPage() {
                             <Separator />
 
                             <div>
-                                <h4 className="text-sm font-medium mb-3">Adicionar Produtos à Análise</h4>
+                                <h4 className="text-sm font-medium mb-3">Adicionar Produtos Ã  AnÃ¡lise</h4>
                                 <div className="space-y-3">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                                         <Select value={selectedProductForCalculator} onValueChange={setSelectedProductForCalculator}>
@@ -2735,7 +2743,7 @@ export default function ProductsPage() {
                             {calculatorItems.length > 0 && (
                                 <div>
                                     <div className="flex items-center justify-between mb-3">
-                                        <h4 className="text-sm font-medium">Itens para Análise</h4>
+                                        <h4 className="text-sm font-medium">Itens para AnÃ¡lise</h4>
                                         <Button variant="outline" size="sm" onClick={clearCalculator}>
                                             Limpar Lista
                                         </Button>
@@ -2799,9 +2807,9 @@ export default function ProductsPage() {
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle>Análise de Viabilidade</CardTitle>
+                                    <CardTitle>AnÃ¡lise de Viabilidade</CardTitle>
                                     <CardDescription>
-                                        Resultado da análise considerando capacidade de produção atual.
+                                        Resultado da anÃ¡lise considerando capacidade de produÃ§Ã£o atual.
                                     </CardDescription>
                                 </div>
                                 {calculatorItems.length > 0 && (
@@ -2817,10 +2825,10 @@ export default function ProductsPage() {
                                 <div className="space-y-6">
                                     <div className="text-center p-6 border rounded-lg">
                                         <div className={`text-3xl font-bold mb-2 ${calculatorResults.isViable ? 'text-green-600' : 'text-red-600'}`}>
-                                            {calculatorResults.isViable ? '✓ VIÁVEL' : '✗ INVIÁVEL'}
+                                            {calculatorResults.isViable ? 'âœ“ VIÃVEL' : 'âœ— INVIÃVEL'}
                                         </div>
                                         <div className="text-sm text-muted-foreground mb-4">
-                                            Confiança: {calculatorResults.confidence}%
+                                            ConfianÃ§a: {calculatorResults.confidence}%
                                         </div>
                                         <div className="space-y-2">
                                             <div className="text-sm">
@@ -2836,7 +2844,7 @@ export default function ProductsPage() {
                                     </div>
 
                                     <div>
-                                        <h4 className="text-sm font-medium mb-3">Análise por Setor</h4>
+                                        <h4 className="text-sm font-medium mb-3">AnÃ¡lise por Setor</h4>
                                         <div className="space-y-3">
                                             {calculatorResults.analysis.map(analysis => (
                                                 <div key={analysis.stageName} className="p-3 border rounded-md">
@@ -2865,11 +2873,11 @@ export default function ProductsPage() {
                                     </div>
 
                                     <div>
-                                        <h4 className="text-sm font-medium mb-3">Recomendações</h4>
+                                        <h4 className="text-sm font-medium mb-3">RecomendaÃ§Ãµes</h4>
                                         <div className="space-y-2 text-sm text-muted-foreground">
                                             {!calculatorResults.isViable && (
                                                 <div className="p-3 bg-red-50 border border-red-200 rounded-md">
-                                                    <div className="font-medium text-red-800 mb-1">Prazo Inviável</div>
+                                                    <div className="font-medium text-red-800 mb-1">Prazo InviÃ¡vel</div>
                                                     <div className="text-red-700">
                                                         Considere reagendar para {format(calculatorResults.suggestedDate, "dd/MM/yyyy")} 
                                                         ou redistribuir a carga de trabalho.
@@ -2878,7 +2886,7 @@ export default function ProductsPage() {
                                             )}
                                             {calculatorResults.confidence < 70 && (
                                                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
-                                                    <div className="font-medium text-yellow-800 mb-1">Baixa Confiança</div>
+                                                    <div className="font-medium text-yellow-800 mb-1">Baixa ConfianÃ§a</div>
                                                     <div className="text-yellow-700">
                                                         Setores com alta carga podem causar atrasos. Monitore de perto.
                                                     </div>
@@ -2909,15 +2917,15 @@ export default function ProductsPage() {
                     <div className="grid gap-6">
                         <Card>
                             <CardHeader>
-                                <CardTitle>Configurações de Custos</CardTitle>
+                                <CardTitle>ConfiguraÃ§Ãµes de Custos</CardTitle>
                                 <CardDescription>
-                                    Defina os custos operacionais e taxas que serão usados nos cálculos
+                                    Defina os custos operacionais e taxas que serÃ£o usados nos cÃ¡lculos
                                 </CardDescription>
                             </CardHeader>
                             <CardContent className="space-y-4">
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     <div>
-                                        <Label>Valor da Hora Máquina (R$)</Label>
+                                        <Label>Valor da Hora MÃ¡quina (R$)</Label>
                                         <Input
                                             type="number"
                                             value={machineHourRate}
@@ -2929,7 +2937,7 @@ export default function ProductsPage() {
                                         </p>
                                     </div>
                                     <div>
-                                        <Label>Margem de Lucro Padrão (%)</Label>
+                                        <Label>Margem de Lucro PadrÃ£o (%)</Label>
                                         <Input
                                             type="number"
                                             value={profitMargin}
@@ -2952,7 +2960,7 @@ export default function ProductsPage() {
                                             placeholder="4.80"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            Calculado por dentro sobre o preço bruto
+                                            Calculado por dentro sobre o preÃ§o bruto
                                         </p>
                                     </div>
                                     <div>
@@ -2967,7 +2975,7 @@ export default function ProductsPage() {
                                             placeholder="2.88"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            Calculada por dentro sobre o preço bruto
+                                            Calculada por dentro sobre o preÃ§o bruto
                                         </p>
                                     </div>
                                     <div>
@@ -2980,7 +2988,7 @@ export default function ProductsPage() {
                                             placeholder="0.00"
                                         />
                                         <p className="text-xs text-muted-foreground mt-1">
-                                            Custo de consumíveis (eletrodos, gases, etc.) por kg do produto
+                                            Custo de consumÃ­veis (eletrodos, gases, etc.) por kg do produto
                                         </p>
                                     </div>
                                 </div>
@@ -2990,7 +2998,7 @@ export default function ProductsPage() {
                                 <div>
                                     <h4 className="text-sm font-medium mb-3">Custo por Kg de Cada Etapa (R$/kg)</h4>
                                     <p className="text-xs text-muted-foreground mb-3">
-                                        💡 Defina quanto custa cada etapa por quilograma do produto. O sistema multiplicará pelo peso total automaticamente.
+                                        ðŸ’¡ Defina quanto custa cada etapa por quilograma do produto. O sistema multiplicarÃ¡ pelo peso total automaticamente.
                                     </p>
                                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                                         {manufacturingStages.map(stage => (
@@ -3025,17 +3033,17 @@ export default function ProductsPage() {
                                     </div>
                                     
                                     <div className="mt-3 p-3 bg-muted rounded-md text-xs space-y-1">
-                                        <div className="font-medium">Exemplo de cálculo:</div>
+                                        <div className="font-medium">Exemplo de cÃ¡lculo:</div>
                                         <div className="text-muted-foreground">
-                                            Se "Listagem de matéria-prima" custa R$ 0,15/kg e o produto pesa 1000 kg:
+                                            Se "Listagem de matÃ©ria-prima" custa R$ 0,15/kg e o produto pesa 1000 kg:
                                         </div>
                                         <div className="font-mono">
-                                            Custo da etapa = 0,15 × 1.000 = <span className="font-bold text-primary">R$ 150,00</span>
+                                            Custo da etapa = 0,15 Ã— 1.000 = <span className="font-bold text-primary">R$ 150,00</span>
                                         </div>
                                     </div>
                                     
                                     <Button onClick={saveStageCosts} className="mt-3" variant="outline">
-                                        Salvar Configurações
+                                        Salvar ConfiguraÃ§Ãµes
                                     </Button>
                                 </div>
                             </CardContent>
@@ -3044,9 +3052,9 @@ export default function ProductsPage() {
                         <div className="grid gap-6 lg:grid-cols-2">
                             <Card>
                                 <CardHeader>
-                                    <CardTitle>Calcular Preço do Produto</CardTitle>
+                                    <CardTitle>Calcular PreÃ§o do Produto</CardTitle>
                                     <CardDescription>
-                                        Selecione um produto e defina a composição de materiais
+                                        Selecione um produto e defina a composiÃ§Ã£o de materiais
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="space-y-4">
@@ -3056,7 +3064,7 @@ export default function ProductsPage() {
                                         <div className="relative">
                                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                             <Input
-                                                placeholder="Digite o código ou nome do produto..."
+                                                placeholder="Digite o cÃ³digo ou nome do produto..."
                                                 value={pricingProductSearch}
                                                 onChange={(e) => setPricingProductSearch(e.target.value)}
                                                 className="pl-10"
@@ -3068,12 +3076,12 @@ export default function ProductsPage() {
                                                     className="absolute right-1 top-1/2 -translate-y-1/2 h-7"
                                                     onClick={() => setPricingProductSearch("")}
                                                 >
-                                                    ✕
+                                                    âœ•
                                                 </Button>
                                             )}
                                         </div>
                                         
-                                        {/* ─── MODIFICADO: onValueChange agora também chama loadSavedPricing ─── */}
+                                        {/* â”€â”€â”€ MODIFICADO: onValueChange agora tambÃ©m chama loadSavedPricing â”€â”€â”€ */}
                                         <Select 
                                             value={selectedProductForPricing?.id || ''} 
                                             onValueChange={(value) => {
@@ -3112,13 +3120,13 @@ export default function ProductsPage() {
                                                                         <Search className="mx-auto h-10 w-10 mb-3 opacity-30" />
                                                                         <p className="font-medium">Nenhum produto encontrado</p>
                                                                         <p className="text-xs mt-1">
-                                                                            Não há produtos com código ou descrição contendo "{pricingProductSearch}"
+                                                                            NÃ£o hÃ¡ produtos com cÃ³digo ou descriÃ§Ã£o contendo "{pricingProductSearch}"
                                                                         </p>
                                                                     </>
                                                                 ) : (
                                                                     <>
                                                                         <Package className="mx-auto h-10 w-10 mb-3 opacity-30" />
-                                                                        <p className="font-medium">Nenhum produto disponível</p>
+                                                                        <p className="font-medium">Nenhum produto disponÃ­vel</p>
                                                                         <p className="text-xs mt-1">
                                                                             Cadastre produtos com peso definido para usar a calculadora
                                                                         </p>
@@ -3139,14 +3147,14 @@ export default function ProductsPage() {
                                                                 <div className="flex-1 min-w-0">
                                                                     <div className="text-sm truncate">{product.description}</div>
                                                                     <div className="text-xs text-muted-foreground flex items-center gap-2 mt-0.5">
-                                                                        <span>⚖️ {product.unitWeight}kg</span>
-                                                                        <span>•</span>
-                                                                        <span>⏱️ {calculateLeadTime(product)} dias</span>
-                                                                        {/* ─── NOVO: indicador visual inline no select ─── */}
+                                                                        <span>âš–ï¸ {product.unitWeight}kg</span>
+                                                                        <span>â€¢</span>
+                                                                        <span>â±ï¸ {calculateLeadTime(product)} dias</span>
+                                                                        {/* â”€â”€â”€ NOVO: indicador visual inline no select â”€â”€â”€ */}
                                                                         {savedPricingCodes.has(product.code) && (
                                                                             <>
-                                                                                <span>•</span>
-                                                                                <span className="text-green-600 font-medium">✓ Salvo</span>
+                                                                                <span>â€¢</span>
+                                                                                <span className="text-green-600 font-medium">âœ“ Salvo</span>
                                                                             </>
                                                                         )}
                                                                     </div>
@@ -3187,10 +3195,10 @@ export default function ProductsPage() {
                                                         <span className="font-medium">Lead time:</span>
                                                         <span>{calculateLeadTime(selectedProductForPricing)} dias</span>
                                                     </div>
-                                                    {/* ─── NOVO: indicador de precificação salva no card ─── */}
+                                                    {/* â”€â”€â”€ NOVO: indicador de precificaÃ§Ã£o salva no card â”€â”€â”€ */}
                                                     {savedPricingCodes.has(selectedProductForPricing.code) && (
                                                         <div className="flex justify-between items-center pt-1 border-t mt-1">
-                                                            <span className="font-medium text-green-700">Precificação salva</span>
+                                                            <span className="font-medium text-green-700">PrecificaÃ§Ã£o salva</span>
                                                             <Badge variant="outline" className="border-green-500 text-green-600 text-xs">
                                                                 <Calculator className="mr-1 h-3 w-3" />
                                                                 Dados carregados
@@ -3211,15 +3219,15 @@ export default function ProductsPage() {
                                                 }}
                                             >
                                                 <Copy className="mr-2 h-4 w-4" />
-                                                Copiar precificação de outro produto
+                                                Copiar precificaÃ§Ã£o de outro produto
                                             </Button>
 
                                             <Separator />
 
                                             <div>
-                                                <h4 className="text-sm font-medium mb-3">Composição de Materiais</h4>
+                                                <h4 className="text-sm font-medium mb-3">ComposiÃ§Ã£o de Materiais</h4>
                                                 <p className="text-xs text-muted-foreground mb-3">
-                                                    Selecione materiais na lista abaixo para adicionar à composição
+                                                    Selecione materiais na lista abaixo para adicionar Ã  composiÃ§Ã£o
                                                 </p>
 
                                                 <div className="space-y-3">
@@ -3234,8 +3242,8 @@ export default function ProductsPage() {
                                                                 if (materialComposition.some(m => m.materialId === materialId)) {
                                                                     toast({
                                                                         variant: "destructive",
-                                                                        title: "Material já adicionado",
-                                                                        description: "Este material já está na lista. Edite o peso existente."
+                                                                        title: "Material jÃ¡ adicionado",
+                                                                        description: "Este material jÃ¡ estÃ¡ na lista. Edite o peso existente."
                                                                     });
                                                                     return;
                                                                 }
@@ -3262,7 +3270,7 @@ export default function ProductsPage() {
                                                             </SelectTrigger>
                                                             <SelectContent className="max-h-[400px]">
                                                                 <div className="px-2 py-1.5 text-xs font-medium text-muted-foreground sticky top-0 bg-background">
-                                                                    💡 Dica: Role para ver todas as categorias
+                                                                    ðŸ’¡ Dica: Role para ver todas as categorias
                                                                 </div>
                                                                 {MATERIAL_CATEGORIES.map(category => {
                                                                     const categoryMaterials = allMaterials.filter(m => m.category === category);
@@ -3286,7 +3294,7 @@ export default function ProductsPage() {
                                                                                             <span className="truncate flex-1">{material.description}</span>
                                                                                             <span className="text-xs text-muted-foreground flex-shrink-0">
                                                                                                 R$ {material.pricePerKg.toFixed(2)}/kg
-                                                                                                {isAdded && " ✓"}
+                                                                                                {isAdded && " âœ“"}
                                                                                             </span>
                                                                                         </div>
                                                                                     </SelectItem>
@@ -3365,8 +3373,8 @@ export default function ProductsPage() {
                                                                 </div>
                                                                 {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)) > 0.1 && (
                                                                     <div className="flex items-center gap-1 text-xs text-yellow-600 pt-1 border-t">
-                                                                        <span>⚠️</span>
-                                                                        <span>Diferença de peso: {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)).toFixed(2)} kg</span>
+                                                                        <span>âš ï¸</span>
+                                                                        <span>DiferenÃ§a de peso: {Math.abs(materialComposition.reduce((sum, m) => sum + m.weightKg, 0) - (selectedProductForPricing.unitWeight || 0)).toFixed(2)} kg</span>
                                                                     </div>
                                                                 )}
                                                             </div>
@@ -3396,20 +3404,22 @@ export default function ProductsPage() {
                                                             onChange={(e) => setMachiningHours(Number(e.target.value))}
                                                         />
                                                         <p className="text-xs text-muted-foreground mt-1">
+                                                            Preenchido automaticamente a partir da etapa "Usinagem" cadastrada no produto. Ajuste manualmente se necessÃ¡rio.
+                                                            <br />
                                                             Valor da hora: R$ {machineHourRate.toFixed(2)} = {machiningHours > 0 ? `R$ ${(machiningHours * machineHourRate).toFixed(2)}` : 'R$ 0,00'}
                                                         </p>
                                                     </div>
                                                 </>
                                             )}
 
-                                            {/* ─── MODIFICADO: botão Calcular agora também salva ─── */}
+                                            {/* â”€â”€â”€ MODIFICADO: botÃ£o Calcular agora tambÃ©m salva â”€â”€â”€ */}
                                             <Button 
                                                 onClick={async () => {
                                                     if (materialComposition.length === 0) {
                                                         toast({
                                                             variant: "destructive",
                                                             title: "Adicione materiais",
-                                                            description: "É necessário adicionar pelo menos um material à composição."
+                                                            description: "Ã‰ necessÃ¡rio adicionar pelo menos um material Ã  composiÃ§Ã£o."
                                                         });
                                                         return;
                                                     }
@@ -3432,7 +3442,7 @@ export default function ProductsPage() {
                                                         
                                                         return {
                                                             stageName: stage.stageName,
-                                                            durationDays: stage.durationDays || 0,
+                                                            durationDays: hoursToDays(stage.hours || 0),
                                                             costPerDay: costPerKg,
                                                             totalCost: totalCost
                                                         };
@@ -3452,13 +3462,13 @@ export default function ProductsPage() {
                                                     if (irpjRate < 0 || csllRate < 0 || incomeTaxDenominator <= 0) {
                                                         toast({
                                                             variant: "destructive",
-                                                            title: "Alíquotas inválidas",
+                                                            title: "AlÃ­quotas invÃ¡lidas",
                                                             description: "IRPJ e CSLL devem ser positivos e a soma precisa ser menor que 100%."
                                                         });
                                                         return;
                                                     }
 
-                                                    // Gross-up: IRPJ e CSLL incidem sobre o próprio preço bruto.
+                                                    // Gross-up: IRPJ e CSLL incidem sobre o prÃ³prio preÃ§o bruto.
                                                     const finalPrice = priceBeforeIncomeTaxes / incomeTaxDenominator;
                                                     const irpjAmount = finalPrice * irpjDecimal;
                                                     const csllAmount = finalPrice * csllDecimal;
@@ -3488,14 +3498,14 @@ export default function ProductsPage() {
 
                                                     setPricingCalculation(calculation);
 
-                                                    // ─── NOVO: salva automaticamente no Firestore ───
+                                                    // â”€â”€â”€ NOVO: salva automaticamente no Firestore â”€â”€â”€
                                                     await savePricingCalculation(calculation, materialComposition, machiningHours);
                                                 }} 
                                                 className="w-full"
                                                 disabled={materialComposition.length === 0}
                                             >
                                                 <Calculator className="mr-2 h-4 w-4" />
-                                                Calcular e Salvar Preço
+                                                Calcular e Salvar PreÃ§o
                                             </Button>
                                         </>
                                     )}
@@ -3506,9 +3516,9 @@ export default function ProductsPage() {
                                 <CardHeader>
                                     <div className="flex items-center justify-between">
                                         <div>
-                                            <CardTitle>Resultado da Precificação</CardTitle>
+                                            <CardTitle>Resultado da PrecificaÃ§Ã£o</CardTitle>
                                             <CardDescription>
-                                                Composição detalhada de custos e preço final
+                                                ComposiÃ§Ã£o detalhada de custos e preÃ§o final
                                             </CardDescription>
                                         </div>
                                         {pricingCalculation && (
@@ -3577,10 +3587,10 @@ export default function ProductsPage() {
                                                     
                                                     doc.setFontSize(16);
                                                     doc.setFont('helvetica', 'normal');
-                                                    doc.text('RELATÓRIO DE PRECIFICAÇÃO', pageWidth / 2, 28, { align: 'center' });
+                                                    doc.text('RELATÃ“RIO DE PRECIFICAÃ‡ÃƒO', pageWidth / 2, 28, { align: 'center' });
                                                     
                                                     doc.setFontSize(9);
-                                                    doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })}`, pageWidth / 2, 38, { align: 'center' });
+                                                    doc.text(`Gerado em: ${format(new Date(), "dd/MM/yyyy 'Ã s' HH:mm", { locale: ptBR })}`, pageWidth / 2, 38, { align: 'center' });
                                                     
                                                     yPosition = 60;
                                                     doc.setTextColor(0, 0, 0);
@@ -3666,7 +3676,7 @@ export default function ProductsPage() {
                                                     }
                                                     if (companyData?.endereco) {
                                                         doc.setFont('helvetica', 'bold');
-                                                        doc.text('Endereço:', margin, infoY + 5);
+                                                        doc.text('EndereÃ§o:', margin, infoY + 5);
                                                         doc.setFont('helvetica', 'normal');
                                                         const enderecoText = companyData.endereco.length > 50 
                                                             ? companyData.endereco.substring(0, 50) + '...' 
@@ -3697,16 +3707,16 @@ export default function ProductsPage() {
                                                     doc.setFontSize(9);
                                                     doc.setFont('helvetica', 'normal');
                                                     doc.setTextColor(0, 0, 0);
-                                                    doc.text(`Código: ${pricingCalculation.productCode}`, margin + 5, yPosition);
+                                                    doc.text(`CÃ³digo: ${pricingCalculation.productCode}`, margin + 5, yPosition);
                                                     doc.text(`Peso: ${pricingCalculation.productWeight} kg`, pageWidth / 2 + 10, yPosition);
                                                     
                                                     yPosition += 5;
-                                                    doc.text(`Descrição: ${pricingCalculation.productDescription}`, margin + 5, yPosition);
+                                                    doc.text(`DescriÃ§Ã£o: ${pricingCalculation.productDescription}`, margin + 5, yPosition);
                                                     
                                                     const leadTimeDays = calculateLeadTime(selectedProductForPricing || {
                                                         productionPlanTemplate: pricingCalculation.stageCosts.map(s => ({
                                                             stageName: s.stageName,
-                                                            durationDays: s.durationDays
+                                                            hours: s.durationDays * USEFUL_HOURS_PER_DAY
                                                         }))
                                                     } as Product);
                                                     doc.text(`Lead Time: ${leadTimeDays} dias`, pageWidth / 2 + 10, yPosition);
@@ -3715,7 +3725,7 @@ export default function ProductsPage() {
                                                     
                                                     const materialTotal = pricingCalculation.materialCosts.reduce((s, m) => s + m.totalCost, 0);
                                                     
-                                                    addSection('COMPOSIÇÃO DE MATERIAIS');
+                                                    addSection('COMPOSIÃ‡ÃƒO DE MATERIAIS');
                                                     
                                                     if (pricingCalculation.materialCosts.length > 0) {
                                                         const tableY = yPosition;
@@ -3764,7 +3774,7 @@ export default function ProductsPage() {
                                                     const activeStages = pricingCalculation.stageCosts.filter(s => s.totalCost > 0);
                                                     
                                                     if (activeStages.length > 0) {
-                                                        addSection('CUSTOS DE PRODUÇÃO POR ETAPA');
+                                                        addSection('CUSTOS DE PRODUÃ‡ÃƒO POR ETAPA');
                                                         
                                                         const stagesTableY = yPosition;
                                                         doc.setFillColor(239, 246, 255);
@@ -3809,16 +3819,16 @@ export default function ProductsPage() {
                                                     
                                                     addSection('OUTROS CUSTOS');
                                                     if (pricingCalculation.machiningCost > 0) {
-                                                        addText(`Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
+                                                        addText(`Usinagem: ${machiningHours}h Ã— R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
                                                     }
                                                     if (pricingCalculation.consumablesCost > 0) {
-                                                        addText(`Insumos e Consumíveis:`, 9, true);
-                                                        addText(`   R$ ${consumablesCostPerKg.toFixed(2)}/kg × ${pricingCalculation.productWeight}kg = R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
+                                                        addText(`Insumos e ConsumÃ­veis:`, 9, true);
+                                                        addText(`   R$ ${consumablesCostPerKg.toFixed(2)}/kg Ã— ${pricingCalculation.productWeight}kg = R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
                                                     }
                                                     
                                                     checkPageBreak(40);
                                                     addSection('RESUMO FINANCEIRO');
-                                                    addText(`Preço antes de IRPJ e CSLL: R$ ${(pricingCalculation.priceBeforeIncomeTaxes ?? (pricingCalculation.totalCost + pricingCalculation.profitValue)).toFixed(2)}`, 9);
+                                                    addText(`PreÃ§o antes de IRPJ e CSLL: R$ ${(pricingCalculation.priceBeforeIncomeTaxes ?? (pricingCalculation.totalCost + pricingCalculation.profitValue)).toFixed(2)}`, 9);
                                                     addText(`IRPJ (${pricingCalculation.irpjRate ?? 0}%): R$ ${(pricingCalculation.irpjAmount ?? 0).toFixed(2)}`, 9);
                                                     addText(`CSLL (${pricingCalculation.csllRate ?? 0}%): R$ ${(pricingCalculation.csllAmount ?? 0).toFixed(2)}`, 9);
                                                     
@@ -3850,18 +3860,18 @@ export default function ProductsPage() {
                                                     doc.setFont('helvetica', 'bold');
                                                     doc.setFontSize(14);
                                                     doc.setTextColor(37, 99, 235);
-                                                    doc.text('PREÇO FINAL:', margin + 5, yPosition);
+                                                    doc.text('PREÃ‡O FINAL:', margin + 5, yPosition);
                                                     doc.text(`R$ ${pricingCalculation.finalPrice.toFixed(2)}`, pageWidth - margin - 5, yPosition, { align: 'right' });
                                                     
                                                     yPosition += 8;
                                                     doc.setFontSize(10);
                                                     doc.setTextColor(100, 100, 100);
-                                                    doc.text(`Preço por kg: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg`, pageWidth - margin - 5, yPosition, { align: 'right' });
+                                                    doc.text(`PreÃ§o por kg: R$ ${pricingCalculation.pricePerKg.toFixed(2)}/kg`, pageWidth - margin - 5, yPosition, { align: 'right' });
                                                     doc.setTextColor(0, 0, 0);
                                                     
                                                     yPosition += 10;
                                                     checkPageBreak(50);
-                                                    addSection('COMPOSIÇÃO DO PREÇO FINAL');
+                                                    addSection('COMPOSIÃ‡ÃƒO DO PREÃ‡O FINAL');
                                                     
                                                     const stageTotal2 = activeStages.length > 0 
                                                         ? activeStages.reduce((s, st) => s + st.totalCost, 0)
@@ -3869,7 +3879,7 @@ export default function ProductsPage() {
                                                     
                                                     const percentages = [
                                                         { label: 'Materiais', value: materialTotal, color: [59, 130, 246] },
-                                                        { label: 'Etapas de Produção', value: stageTotal2, color: [16, 185, 129] },
+                                                        { label: 'Etapas de ProduÃ§Ã£o', value: stageTotal2, color: [16, 185, 129] },
                                                         { label: 'Usinagem', value: pricingCalculation.machiningCost, color: [245, 158, 11] },
                                                         { label: 'Insumos', value: pricingCalculation.consumablesCost, color: [139, 92, 246] },
                                                         { label: 'Lucro', value: pricingCalculation.profitValue, color: [34, 197, 94] },
@@ -3896,10 +3906,10 @@ export default function ProductsPage() {
                                                     doc.setFontSize(9);
                                                     doc.setTextColor(133, 77, 14);
                                                     yPosition += 5;
-                                                    doc.text('⚠️ IMPORTANTE:', margin + 5, yPosition);
+                                                    doc.text('âš ï¸ IMPORTANTE:', margin + 5, yPosition);
                                                     yPosition += 5;
                                                     doc.setFont('helvetica', 'normal');
-                                                    doc.text('Este é o preço SEM impostos. Lembre-se de adicionar os impostos aplicáveis', margin + 5, yPosition);
+                                                    doc.text('Este Ã© o preÃ§o SEM impostos. Lembre-se de adicionar os impostos aplicÃ¡veis', margin + 5, yPosition);
                                                     yPosition += 5;
                                                     doc.text('(ICMS, PIS, COFINS, etc.) ao enviar a proposta ao cliente.', margin + 5, yPosition);
                                                     
@@ -3909,15 +3919,15 @@ export default function ProductsPage() {
                                                         const footerY = pageHeight - 15;
                                                         doc.setFontSize(8);
                                                         doc.setTextColor(150, 150, 150);
-                                                        doc.text('MECALD - Indústria e Comércio', pageWidth / 2, footerY, { align: 'center' });
-                                                        doc.text(`Página ${i} de ${totalPages}`, pageWidth / 2, footerY + 5, { align: 'center' });
+                                                        doc.text('MECALD - IndÃºstria e ComÃ©rcio', pageWidth / 2, footerY, { align: 'center' });
+                                                        doc.text(`PÃ¡gina ${i} de ${totalPages}`, pageWidth / 2, footerY + 5, { align: 'center' });
                                                     }
                                                     
                                                     doc.save(`precificacao-${pricingCalculation.productCode}-${format(new Date(), 'yyyyMMdd-HHmm')}.pdf`);
                                                     
                                                     toast({
                                                         title: "PDF exportado!",
-                                                        description: "O relatório de precificação foi baixado com sucesso."
+                                                        description: "O relatÃ³rio de precificaÃ§Ã£o foi baixado com sucesso."
                                                     });
                                                 }}
                                             >
@@ -3951,14 +3961,14 @@ export default function ProductsPage() {
                                             <Separator />
 
                                             <div>
-                                                <h4 className="text-sm font-medium mb-2">Custos de Produção</h4>
+                                                <h4 className="text-sm font-medium mb-2">Custos de ProduÃ§Ã£o</h4>
                                                 <div className="space-y-1 text-sm">
                                                     {pricingCalculation.stageCosts.map(s => (
                                                         <div key={s.stageName} className="flex justify-between text-muted-foreground">
                                                             <span className="flex-1">
                                                                 {s.stageName}
                                                                 <span className="text-xs ml-1">
-                                                                    (R$ {s.costPerDay.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
+                                                                    (R$ {s.costPerDay.toFixed(2)}/kg Ã— {pricingCalculation.productWeight}kg)
                                                                 </span>
                                                             </span>
                                                             <span className="font-mono">R$ {s.totalCost.toFixed(2)}</span>
@@ -3969,7 +3979,7 @@ export default function ProductsPage() {
                                                             <span className="flex-1">
                                                                 Usinagem
                                                                 <span className="text-xs ml-1">
-                                                                    ({machiningHours}h × R$ {machineHourRate.toFixed(2)}/h)
+                                                                    ({machiningHours}h Ã— R$ {machineHourRate.toFixed(2)}/h)
                                                                 </span>
                                                             </span>
                                                             <span className="font-mono">R$ {pricingCalculation.machiningCost.toFixed(2)}</span>
@@ -3978,16 +3988,16 @@ export default function ProductsPage() {
                                                     {pricingCalculation.consumablesCost > 0 && (
                                                         <div className="flex justify-between text-muted-foreground">
                                                             <span className="flex-1">
-                                                                Insumos e Consumíveis
+                                                                Insumos e ConsumÃ­veis
                                                                 <span className="text-xs ml-1">
-                                                                    (R$ {consumablesCostPerKg.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
+                                                                    (R$ {consumablesCostPerKg.toFixed(2)}/kg Ã— {pricingCalculation.productWeight}kg)
                                                                 </span>
                                                             </span>
                                                             <span className="font-mono">R$ {pricingCalculation.consumablesCost.toFixed(2)}</span>
                                                         </div>
                                                     )}
                                                     <div className="flex justify-between font-medium pt-1 border-t">
-                                                        <span>Subtotal Produção</span>
+                                                        <span>Subtotal ProduÃ§Ã£o</span>
                                                         <span className="font-mono">
                                                             R$ {(
                                                                 pricingCalculation.stageCosts.reduce((s, st) => s + st.totalCost, 0) + 
@@ -4011,7 +4021,7 @@ export default function ProductsPage() {
                                                     <span className="font-mono font-medium">R$ {pricingCalculation.profitValue.toFixed(2)}</span>
                                                 </div>
                                                 <div className="flex justify-between text-sm pt-1 border-t">
-                                                    <span className="font-medium">Preço antes de IRPJ e CSLL</span>
+                                                    <span className="font-medium">PreÃ§o antes de IRPJ e CSLL</span>
                                                     <span className="font-mono font-medium">
                                                         R$ {(pricingCalculation.priceBeforeIncomeTaxes ?? (pricingCalculation.totalCost + pricingCalculation.profitValue)).toFixed(2)}
                                                     </span>
@@ -4031,13 +4041,13 @@ export default function ProductsPage() {
                                             <div className="p-4 bg-primary/5 rounded-lg border-2 border-primary/20">
                                                 <div className="space-y-2">
                                                     <div className="flex justify-between items-center">
-                                                        <span className="text-lg font-bold">Preço Final</span>
+                                                        <span className="text-lg font-bold">PreÃ§o Final</span>
                                                         <span className="text-2xl font-bold text-primary font-mono">
                                                             R$ {pricingCalculation.finalPrice.toFixed(2)}
                                                         </span>
                                                     </div>
                                                     <div className="flex justify-between items-center text-sm text-muted-foreground">
-                                                        <span>Preço por kg</span>
+                                                        <span>PreÃ§o por kg</span>
                                                         <span className="font-mono font-medium">
                                                             R$ {pricingCalculation.pricePerKg.toFixed(2)}/kg
                                                         </span>
@@ -4046,14 +4056,14 @@ export default function ProductsPage() {
                                             </div>
 
                                             <div className="text-xs text-muted-foreground p-3 bg-muted rounded-md">
-                                                💡 <strong>Dica:</strong> O preço final já contém IRPJ e CSLL. ICMS, PIS e COFINS
-                                                continuam sendo tratados na cotação comercial.
+                                                ðŸ’¡ <strong>Dica:</strong> O preÃ§o final jÃ¡ contÃ©m IRPJ e CSLL. ICMS, PIS e COFINS
+                                                continuam sendo tratados na cotaÃ§Ã£o comercial.
                                             </div>
                                         </div>
                                     ) : (
                                         <div className="text-center py-12 text-muted-foreground">
                                             <Calculator className="mx-auto h-12 w-12 mb-4 opacity-50" />
-                                            <p>Selecione um produto e calcule o preço para ver os resultados aqui.</p>
+                                            <p>Selecione um produto e calcule o preÃ§o para ver os resultados aqui.</p>
                                         </div>
                                     )}
                                 </CardContent>
@@ -4067,7 +4077,7 @@ export default function ProductsPage() {
                                     <div>
                                         <CardTitle>Biblioteca de Materiais</CardTitle>
                                         <CardDescription>
-                                            {allMaterials.length} materiais disponíveis
+                                            {allMaterials.length} materiais disponÃ­veis
                                         </CardDescription>
                                     </div>
                                     <Button onClick={handleAddMaterial} size="sm">
@@ -4186,9 +4196,9 @@ export default function ProductsPage() {
                         <CardHeader>
                             <div className="flex items-center justify-between">
                                 <div>
-                                    <CardTitle>Plano de Fabricação</CardTitle>
+                                    <CardTitle>Plano de FabricaÃ§Ã£o</CardTitle>
                                     <CardDescription>
-                                        Manual de "como fazer" cada peça, seguindo as etapas de fabricação do produto. Documento confidencial.
+                                        Manual de "como fazer" cada peÃ§a, seguindo as etapas de fabricaÃ§Ã£o do produto. Documento confidencial.
                                     </CardDescription>
                                 </div>
                                 <div className="flex gap-2">
@@ -4208,20 +4218,20 @@ export default function ProductsPage() {
                             <div className="flex items-start gap-3 p-4 rounded-md border border-red-300 bg-red-50">
                                 <ShieldAlert className="h-5 w-5 text-red-600 flex-shrink-0 mt-0.5" />
                                 <div className="text-xs text-red-700">
-                                    <strong>Documento confidencial — uso interno restrito.</strong> Reprodução ou utilização fora da
-                                    empresa é proibida (Lei nº 9.279/1996, art. 195, incisos XI e XII; art. 482, "g", da CLT).
-                                    O aviso completo é incluído automaticamente no PDF exportado.
+                                    <strong>Documento confidencial â€” uso interno restrito.</strong> ReproduÃ§Ã£o ou utilizaÃ§Ã£o fora da
+                                    empresa Ã© proibida (Lei nÂº 9.279/1996, art. 195, incisos XI e XII; art. 482, "g", da CLT).
+                                    O aviso completo Ã© incluÃ­do automaticamente no PDF exportado.
                                 </div>
                             </div>
 
-                            {/* Identificação */}
+                            {/* IdentificaÃ§Ã£o */}
                             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                                 <div className="lg:col-span-2 space-y-2">
                                     <Label>Produto</Label>
                                     <div className="relative">
                                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                                         <Input
-                                            placeholder="Buscar código ou nome..."
+                                            placeholder="Buscar cÃ³digo ou nome..."
                                             value={planProductSearch}
                                             onChange={(e) => setPlanProductSearch(e.target.value)}
                                             className="pl-9"
@@ -4255,7 +4265,7 @@ export default function ProductsPage() {
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label className="flex items-center gap-1"><Hash className="h-3.5 w-3.5" /> Nº do Desenho</Label>
+                                    <Label className="flex items-center gap-1"><Hash className="h-3.5 w-3.5" /> NÂº do Desenho</Label>
                                     <Input
                                         placeholder="Ex: DES-1234"
                                         value={planDrawingNumber}
@@ -4263,14 +4273,14 @@ export default function ProductsPage() {
                                         onBlur={() => planDrawingNumber.trim() && loadManufacturingPlan(planDrawingNumber)}
                                     />
                                     {savedPlanDrawings.has(planDrawingNumber.trim()) ? (
-                                        <p className="text-xs text-green-600">Já existe plano salvo para este desenho.</p>
+                                        <p className="text-xs text-green-600">JÃ¡ existe plano salvo para este desenho.</p>
                                     ) : (
                                         <p className="text-xs text-muted-foreground">Usado como chave de salvamento.</p>
                                     )}
                                 </div>
 
                                 <div className="space-y-2">
-                                    <Label>Nº de Controle</Label>
+                                    <Label>NÂº de Controle</Label>
                                     <Input value={planControlNumber} readOnly placeholder="Gerado ao salvar" className="bg-muted" />
                                 </div>
                             </div>
@@ -4280,7 +4290,7 @@ export default function ProductsPage() {
                                     <Label className="flex items-center gap-1"><User className="h-3.5 w-3.5" /> Criado por</Label>
                                     <Select value={planCreator} onValueChange={setPlanCreator}>
                                         <SelectTrigger>
-                                            <SelectValue placeholder="Selecione o responsável" />
+                                            <SelectValue placeholder="Selecione o responsÃ¡vel" />
                                         </SelectTrigger>
                                         <SelectContent>
                                             {planCreators.map(name => (
@@ -4290,7 +4300,7 @@ export default function ProductsPage() {
                                     </Select>
                                     <div className="flex gap-2">
                                         <Input
-                                            placeholder="Adicionar novo responsável..."
+                                            placeholder="Adicionar novo responsÃ¡vel..."
                                             value={newPlanCreator}
                                             onChange={(e) => setNewPlanCreator(e.target.value)}
                                             onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addPlanCreator())}
@@ -4302,15 +4312,15 @@ export default function ProductsPage() {
                                     </div>
                                 </div>
                                 <div className="space-y-2">
-                                    <Label>Revisão</Label>
+                                    <Label>RevisÃ£o</Label>
                                     <Input value={planRevision} onChange={(e) => setPlanRevision(e.target.value)} placeholder="0" />
                                 </div>
                             </div>
 
                             <div className="space-y-2">
-                                <Label>Observações Gerais</Label>
+                                <Label>ObservaÃ§Ãµes Gerais</Label>
                                 <Textarea
-                                    placeholder="Informações gerais aplicáveis a toda a fabricação..."
+                                    placeholder="InformaÃ§Ãµes gerais aplicÃ¡veis a toda a fabricaÃ§Ã£o..."
                                     value={planGeneralNotes}
                                     onChange={(e) => setPlanGeneralNotes(e.target.value)}
                                 />
@@ -4342,7 +4352,7 @@ export default function ProductsPage() {
                                                     </div>
                                                 </div>
                                                 <Textarea
-                                                    placeholder="Descreva COMO executar esta etapa: ferramentas, parâmetros, sequência, cuidados de qualidade e segurança..."
+                                                    placeholder="Descreva COMO executar esta etapa: ferramentas, parÃ¢metros, sequÃªncia, cuidados de qualidade e seguranÃ§a..."
                                                     value={task.instructions || ''}
                                                     onChange={(e) => {
                                                         const v = e.target.value;
@@ -4414,8 +4424,8 @@ export default function ProductsPage() {
                             ) : (
                                 <div className="text-center py-12 text-muted-foreground border-2 border-dashed rounded-md">
                                     <BookOpen className="mx-auto h-12 w-12 mb-3 opacity-40" />
-                                    <p className="font-medium">Selecione um produto para começar</p>
-                                    <p className="text-sm">As etapas de fabricação do produto serão carregadas automaticamente.</p>
+                                    <p className="font-medium">Selecione um produto para comeÃ§ar</p>
+                                    <p className="text-sm">As etapas de fabricaÃ§Ã£o do produto serÃ£o carregadas automaticamente.</p>
                                 </div>
                             )}
                         </CardContent>
@@ -4440,23 +4450,23 @@ export default function ProductsPage() {
                 <div className="space-y-4 pt-4">
                   <FormField control={form.control} name="code" render={({ field }) => (
                       <FormItem>
-                          <FormLabel>Código do Produto</FormLabel>
+                          <FormLabel>CÃ³digo do Produto</FormLabel>
                           <FormControl><Input placeholder="Ex: PROD-001" {...field} value={field.value ?? ''} /></FormControl>
-                          <FormDescription>Alterar o código criará um novo registro para o produto.</FormDescription>
+                          <FormDescription>Alterar o cÃ³digo criarÃ¡ um novo registro para o produto.</FormDescription>
                           <FormMessage />
                       </FormItem>
                   )} />
                   <FormField control={form.control} name="description" render={({ field }) => (
                       <FormItem>
-                          <FormLabel>Descrição</FormLabel>
-                          <FormControl><Textarea placeholder="Descrição detalhada do produto ou serviço" {...field} value={field.value ?? ''} /></FormControl>
+                          <FormLabel>DescriÃ§Ã£o</FormLabel>
+                          <FormControl><Textarea placeholder="DescriÃ§Ã£o detalhada do produto ou serviÃ§o" {...field} value={field.value ?? ''} /></FormControl>
                           <FormMessage />
                       </FormItem>
                   )} />
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <FormField control={form.control} name="unitPrice" render={({ field }) => (
                           <FormItem>
-                              <FormLabel>Preço Unitário (R$)</FormLabel>
+                              <FormLabel>PreÃ§o UnitÃ¡rio (R$)</FormLabel>
                               <FormControl><Input type="number" placeholder="0.00" {...field} value={field.value ?? ''} /></FormControl>
                               <FormMessage />
                           </FormItem>
@@ -4480,9 +4490,9 @@ export default function ProductsPage() {
                             <div className="mb-4">
                                 <div className="flex justify-between items-start">
                                     <div>
-                                        <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
+                                        <FormLabel className="text-base">Etapas de FabricaÃ§Ã£o e Prazos</FormLabel>
                                         <FormDescription>
-                                            Selecione as etapas e defina a duração em dias para cada uma. O lead time total será calculado automaticamente.
+                                            Selecione as etapas e defina a duraÃ§Ã£o em horas para cada uma. O lead time total serÃ¡ calculado automaticamente.
                                         </FormDescription>
                                     </div>
                                     <Popover open={isCopyPopoverOpen} onOpenChange={setIsCopyPopoverOpen}>
@@ -4495,7 +4505,7 @@ export default function ProductsPage() {
                                         <PopoverContent className="w-[350px] p-0" align="end">
                                             <div className="p-2">
                                                 <Input
-                                                    placeholder="Buscar por nome ou código..."
+                                                    placeholder="Buscar por nome ou cÃ³digo..."
                                                     value={copyFromSearch}
                                                     onChange={(e) => setCopyFromSearch(e.target.value)}
                                                     className="h-9"
@@ -4517,7 +4527,7 @@ export default function ProductsPage() {
                                                                     <span className="font-medium">{product.description}</span>
                                                                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                                                                         <span>({product.code})</span>
-                                                                        <span>•</span>
+                                                                        <span>â€¢</span>
                                                                         <span>{calculateLeadTime(product)} dias</span>
                                                                     </div>
                                                                 </div>
@@ -4533,17 +4543,24 @@ export default function ProductsPage() {
                                 </div>
                             </div>
                             
-                            {field.value && field.value.length > 0 && (
-                                <div className="mb-4 p-3 bg-muted rounded-md">
+                            {field.value && field.value.length > 0 && (() => {
+                                const totalHours = field.value.reduce((total, stage) => total + (stage.hours || 0), 0);
+                                const leadTimeDays = Math.ceil(totalHours / USEFUL_HOURS_PER_DAY);
+                                return (
+                                <div className="mb-4 p-3 bg-muted rounded-md space-y-1">
                                     <div className="flex items-center gap-2 text-sm">
                                         <Clock className="h-4 w-4" />
-                                        <span className="font-medium">Lead Time Total:</span>
-                                        <Badge variant="secondary">
-                                            {field.value.reduce((total, stage) => total + (stage.durationDays || 0), 0)} dias
-                                        </Badge>
+                                        <span className="font-medium">Total de Horas:</span>
+                                        <Badge variant="secondary">{totalHours}h</Badge>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-sm">
+                                        <Clock className="h-4 w-4" />
+                                        <span className="font-medium">Lead Time Estimado:</span>
+                                        <Badge variant="secondary">{leadTimeDays} dias</Badge>
                                     </div>
                                 </div>
-                            )}
+                                );
+                            })()}
                             
                             <div className="space-y-3">
                                 {manufacturingStages.map((stage) => {
@@ -4558,7 +4575,7 @@ export default function ProductsPage() {
                                                 checked={isChecked}
                                                 onCheckedChange={(checked) => {
                                                     const newValue = checked
-                                                        ? [...(field.value || []), { stageName: stageName, durationDays: 0 }]
+                                                        ? [...(field.value || []), { stageName: stageName, hours: 0 }]
                                                         : (field.value || []).filter(p => p.stageName !== stageName);
                                                     const stageOrder = new Map(manufacturingStages.map((item, index) => [item.name, index]));
                                                     field.onChange(newValue.sort((a, b) =>
@@ -4579,20 +4596,20 @@ export default function ProductsPage() {
                                                         type="number"
                                                         step="any"
                                                         className="h-8 w-20"
-                                                        placeholder="Dias"
-                                                        value={currentStage?.durationDays ?? 0}
+                                                        placeholder="Horas"
+                                                        value={currentStage?.hours ?? 0}
                                                         onChange={(e) => {
                                                             const value = e.target.value;
                                                             const sanitizedValue = value.replace(',', '.');
                                                             const newPlan = (field.value || []).map(p => 
                                                                 p.stageName === stageName 
-                                                                ? { ...p, durationDays: value === '' ? undefined : Number(sanitizedValue) } 
+                                                                ? { ...p, hours: value === '' ? undefined : Number(sanitizedValue) } 
                                                                 : p
                                                             );
                                                             field.onChange(newPlan);
                                                         }}
                                                     />
-                                                    <span className="text-sm text-muted-foreground">dias</span>
+                                                    <span className="text-sm text-muted-foreground">horas</span>
                                                 </div>
                                             )}
                                         </div>
@@ -4618,9 +4635,9 @@ export default function ProductsPage() {
       <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <AlertDialogContent>
             <AlertDialogHeader>
-            <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+            <AlertDialogTitle>VocÃª tem certeza?</AlertDialogTitle>
             <AlertDialogDescription>
-                Esta ação não pode ser desfeita. Isso excluirá permanentemente o produto <span className="font-bold">{productToDelete?.description}</span> do catálogo.
+                Esta aÃ§Ã£o nÃ£o pode ser desfeita. Isso excluirÃ¡ permanentemente o produto <span className="font-bold">{productToDelete?.description}</span> do catÃ¡logo.
             </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -4635,9 +4652,9 @@ export default function ProductsPage() {
       <Dialog open={isEditStageDialogOpen} onOpenChange={setIsEditStageDialogOpen}>
         <DialogContent>
             <DialogHeader>
-                <DialogTitle>Editar Etapa de Fabricação</DialogTitle>
+                <DialogTitle>Editar Etapa de FabricaÃ§Ã£o</DialogTitle>
                 <DialogDescription>
-                    Alterar o nome ou o centro de custo atualiza a etapa e mantém os produtos relacionados consistentes.
+                    Alterar o nome ou o centro de custo atualiza a etapa e mantÃ©m os produtos relacionados consistentes.
                 </DialogDescription>
             </DialogHeader>
             <div className="py-4 space-y-4">
@@ -4657,7 +4674,7 @@ export default function ProductsPage() {
                         <SelectContent>
                             {costCenters.map(center => (
                                 <SelectItem key={center.id} value={center.id}>
-                                    {center.sectorName} — R$ {center.hourlyRate.toFixed(2)}/h
+                                    {center.sectorName} â€” R$ {center.hourlyRate.toFixed(2)}/h
                                 </SelectItem>
                             ))}
                         </SelectContent>
@@ -4666,7 +4683,7 @@ export default function ProductsPage() {
             </div>
             <DialogFooter>
                 <Button variant="outline" onClick={() => setIsEditStageDialogOpen(false)}>Cancelar</Button>
-                <Button onClick={handleConfirmEditStage}>Salvar Alterações</Button>
+                <Button onClick={handleConfirmEditStage}>Salvar AlteraÃ§Ãµes</Button>
             </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -4674,9 +4691,9 @@ export default function ProductsPage() {
       <AlertDialog open={isDeleteStageDialogOpen} onOpenChange={setIsDeleteStageDialogOpen}>
         <AlertDialogContent>
             <AlertDialogHeader>
-                <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                <AlertDialogTitle>VocÃª tem certeza?</AlertDialogTitle>
                 <AlertDialogDescription>
-                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation?.name}</span> da lista e de todos os produtos que a utilizam. Esta ação não pode ser desfeita.
+                    Isso excluirÃ¡ permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation?.name}</span> da lista e de todos os produtos que a utilizam. Esta aÃ§Ã£o nÃ£o pode ser desfeita.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -4693,16 +4710,16 @@ export default function ProductsPage() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Copy className="h-5 w-5 text-primary" />
-              Copiar precificação
+              Copiar precificaÃ§Ã£o
             </DialogTitle>
             <DialogDescription>
-              Copie todos os materiais, custos de produção, usinagem, insumos, margem e impostos para o produto selecionado.
+              Copie todos os materiais, custos de produÃ§Ã£o, usinagem, insumos, margem e impostos para o produto selecionado.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             <div className="rounded-lg border bg-muted/40 p-4">
-              <p className="text-xs text-muted-foreground">Produto que receberá a cópia</p>
+              <p className="text-xs text-muted-foreground">Produto que receberÃ¡ a cÃ³pia</p>
               <p className="font-mono font-bold text-primary">{selectedProductForPricing?.code}</p>
               <p className="text-sm">{selectedProductForPricing?.description}</p>
             </div>
@@ -4714,17 +4731,17 @@ export default function ProductsPage() {
                 <Input
                   value={copyPricingSearch}
                   onChange={event => setCopyPricingSearch(event.target.value)}
-                  placeholder="Digite o código ou a descrição..."
+                  placeholder="Digite o cÃ³digo ou a descriÃ§Ã£o..."
                   className="pl-10"
                 />
               </div>
             </div>
 
             <div className="space-y-2">
-              <Label>Precificação que será copiada</Label>
+              <Label>PrecificaÃ§Ã£o que serÃ¡ copiada</Label>
               <Select value={copyPricingSourceId} onValueChange={setCopyPricingSourceId}>
                 <SelectTrigger>
-                  <SelectValue placeholder="Selecione um produto já precificado" />
+                  <SelectValue placeholder="Selecione um produto jÃ¡ precificado" />
                 </SelectTrigger>
                 <SelectContent className="max-h-[320px]">
                   {products
@@ -4747,7 +4764,7 @@ export default function ProductsPage() {
                 </SelectContent>
               </Select>
               <p className="text-xs text-muted-foreground">
-                Apenas produtos que possuem precificação salva são apresentados.
+                Apenas produtos que possuem precificaÃ§Ã£o salva sÃ£o apresentados.
               </p>
             </div>
 
@@ -4758,8 +4775,8 @@ export default function ProductsPage() {
               return (
                 <div className={`rounded-md border p-3 text-sm ${weightDifference > 0.01 ? 'border-amber-500 bg-amber-50 text-amber-900' : 'border-green-500 bg-green-50 text-green-900'}`}>
                   {weightDifference > 0.01
-                    ? `Atenção: o peso do produto de origem é ${source.unitWeight || 0} kg e o destino possui ${selectedProductForPricing.unitWeight || 0} kg. Revise os valores após copiar.`
-                    : 'Os pesos dos produtos são iguais. A precificação pode ser copiada diretamente.'}
+                    ? `AtenÃ§Ã£o: o peso do produto de origem Ã© ${source.unitWeight || 0} kg e o destino possui ${selectedProductForPricing.unitWeight || 0} kg. Revise os valores apÃ³s copiar.`
+                    : 'Os pesos dos produtos sÃ£o iguais. A precificaÃ§Ã£o pode ser copiada diretamente.'}
                 </div>
               );
             })()}
@@ -4771,7 +4788,7 @@ export default function ProductsPage() {
             </Button>
             <Button type="button" onClick={copySavedPricingToSelectedProduct} disabled={!copyPricingSourceId || isCopyingPricing}>
               <Copy className="mr-2 h-4 w-4" />
-              {isCopyingPricing ? 'Copiando...' : 'Copiar e salvar precificação'}
+              {isCopyingPricing ? 'Copiando...' : 'Copiar e salvar precificaÃ§Ã£o'}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -4787,7 +4804,7 @@ export default function ProductsPage() {
             <DialogDescription>
               {materialToEdit 
                 ? "Altere os dados do material personalizado" 
-                : "Adicione um novo material à biblioteca"}
+                : "Adicione um novo material Ã  biblioteca"}
             </DialogDescription>
           </DialogHeader>
           <Form {...materialForm}>
@@ -4820,7 +4837,7 @@ export default function ProductsPage() {
                 name="description"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Descrição</FormLabel>
+                    <FormLabel>DescriÃ§Ã£o</FormLabel>
                     <FormControl>
                       <Input placeholder="Ex: Chapa 1/2 - ASTM A36" {...field} />
                     </FormControl>
@@ -4835,7 +4852,7 @@ export default function ProductsPage() {
                   name="pricePerKg"
                   render={({ field }) => (
                     <FormItem>
-                      <FormLabel>Preço/kg (R$)</FormLabel>
+                      <FormLabel>PreÃ§o/kg (R$)</FormLabel>
                       <FormControl>
                         <Input type="number" step="0.01" placeholder="0.00" {...field} />
                       </FormControl>
@@ -4851,7 +4868,7 @@ export default function ProductsPage() {
                     <FormItem>
                       <FormLabel>Unidade</FormLabel>
                       <FormControl>
-                        <Input placeholder="kg, m³, un" {...field} />
+                        <Input placeholder="kg, mÂ³, un" {...field} />
                       </FormControl>
                       <FormMessage />
                     </FormItem>
@@ -4864,7 +4881,7 @@ export default function ProductsPage() {
                 name="specification"
                 render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Especificação (Opcional)</FormLabel>
+                    <FormLabel>EspecificaÃ§Ã£o (Opcional)</FormLabel>
                     <FormControl>
                       <Input placeholder="Ex: ASTM A36, SAE 1020" {...field} />
                     </FormControl>
@@ -4878,7 +4895,7 @@ export default function ProductsPage() {
                   Cancelar
                 </Button>
                 <Button type="submit">
-                  {materialToEdit ? "Salvar Alterações" : "Adicionar Material"}
+                  {materialToEdit ? "Salvar AlteraÃ§Ãµes" : "Adicionar Material"}
                 </Button>
               </DialogFooter>
             </form>
