@@ -36,16 +36,17 @@ import { Separator } from "@/components/ui/separator";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { calculateLeadTime, USEFUL_HOURS_PER_DAY, type ProductionStage } from "@/lib/leadtime";
 
 
 const itemSchema = z.object({
   id: z.string().optional(),
   code: z.string().optional(),
-  description: z.string().min(3, "A descrição é obrigatória."),
+  description: z.string().min(3, "A descriÃ§Ã£o Ã© obrigatÃ³ria."),
   quantity: z.coerce.number().min(1, "A quantidade deve ser pelo menos 1."),
-  unitPrice: z.coerce.number().min(0, "O preço não pode ser negativo."),
+  unitPrice: z.coerce.number().min(0, "O preÃ§o nÃ£o pode ser negativo."),
   unitWeight: z.coerce.number().min(0).optional(),
-  // Campo legado: mantém compatibilidade com cotações antigas.
+  // Campo legado: mantÃ©m compatibilidade com cotaÃ§Ãµes antigas.
   taxRate: z.coerce.number().min(0).optional(),
   icmsRate: z.coerce.number().min(0).max(100).optional(),
   pisRate: z.coerce.number().min(0).max(100).optional(),
@@ -60,10 +61,10 @@ const quotationSchema = z.object({
     name: z.string(),
   }),
   buyerName: z.string().optional(),
-  status: z.enum(["Aguardando Aprovação", "Enviado", "Aprovado", "Reprovado", "Informativo", "Expirado", "Pedido Gerado"], { required_error: "Selecione um status." }),
-  validity: z.date({ required_error: "A data de validade é obrigatória." }),
-  paymentTerms: z.string().min(3, "As condições de pagamento são obrigatórias."),
-  deliveryTime: z.string().min(3, "O prazo de entrega é obrigatório."),
+  status: z.enum(["Aguardando AprovaÃ§Ã£o", "Enviado", "Aprovado", "Reprovado", "Informativo", "Expirado", "Pedido Gerado"], { required_error: "Selecione um status." }),
+  validity: z.date({ required_error: "A data de validade Ã© obrigatÃ³ria." }),
+  paymentTerms: z.string().min(3, "As condiÃ§Ãµes de pagamento sÃ£o obrigatÃ³rias."),
+  deliveryTime: z.string().min(3, "O prazo de entrega Ã© obrigatÃ³rio."),
   notes: z.string().optional(),
   discount: z.coerce.number().min(0).max(100).optional(),
   isEmergency: z.boolean().optional().default(false),
@@ -71,12 +72,12 @@ const quotationSchema = z.object({
   freightType: z.enum(["FOB", "CIF"]).optional().default("FOB"),
   freightValue: z.coerce.number().min(0).optional().default(0),
   freightIncludedInPrice: z.boolean().optional().default(true),
-  items: z.array(itemSchema).min(1, "Adicione pelo menos um item ao orçamento."),
+  items: z.array(itemSchema).min(1, "Adicione pelo menos um item ao orÃ§amento."),
   includedServices: z.array(z.string()).optional(),
 });
 
 const generateOrderSchema = z.object({
-  poNumber: z.string().min(1, "O número do pedido de compra é obrigatório."),
+  poNumber: z.string().min(1, "O nÃºmero do pedido de compra Ã© obrigatÃ³rio."),
 });
 
 type Quotation = z.infer<typeof quotationSchema> & { id: string, createdAt: Timestamp, number: number };
@@ -102,24 +103,21 @@ type Product = {
     icmsRate?: number;
     pisRate?: number;
     cofinsRate?: number;
-    productionPlanTemplate?: Array<{
-        stageName: string;
-        durationDays?: number;
-    }>;
+    productionPlanTemplate?: ProductionStage[];
 };
 
 const serviceOptions = [
     { id: 'materialSupply', label: 'Fornecimento de Material' },
     { id: 'machining', label: 'Usinagem' },
-    { id: 'heatTreatment', label: 'Alívio de Tensão' },
-    { id: 'certification', label: 'Documentação para Data Book' },
-    { id: 'manufacture', label: 'Fabricação (Caldeiraria)' },
+    { id: 'heatTreatment', label: 'AlÃ­vio de TensÃ£o' },
+    { id: 'certification', label: 'DocumentaÃ§Ã£o para Data Book' },
+    { id: 'manufacture', label: 'FabricaÃ§Ã£o (Caldeiraria)' },
     { id: 'liquidPenetrantTest', label: 'Ensaio de LP' },
     { id: 'magneticParticleTest', label: 'Ensaio de PM' },
     { id: 'ultrasonicTest', label: 'Ensaio de US' },
     { id: 'surfaceTreatment', label: 'Jateamento e Pintura' },
-    { id: 'beneficiamento', label: 'Beneficiamento (Emborrachamento e Galvanização)' },
-    { id: 'fasteners', label: 'Itens de fixação' },
+    { id: 'beneficiamento', label: 'Beneficiamento (Emborrachamento e GalvanizaÃ§Ã£o)' },
+    { id: 'fasteners', label: 'Itens de fixaÃ§Ã£o' },
 ];
 
 const calculateItemTotals = (item: Item | any, discountPercent: number = 0, emergencyPercent: number = 0) => {
@@ -134,7 +132,7 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0, emer
         item.cofinsRate,
     ].some(value => value !== undefined && value !== null && value !== '');
 
-    // Preserva exatamente o cálculo das cotações antigas.
+    // Preserva exatamente o cÃ¡lculo das cotaÃ§Ãµes antigas.
     if (!hasSeparatedTaxes) {
         const legacyTaxRate = Number(item.taxRate) || 0;
         const taxAmount = priceAfterDiscount * (legacyTaxRate / 100);
@@ -161,12 +159,12 @@ const calculateItemTotals = (item: Item | any, discountPercent: number = 0, emer
     const icmsRate = (Number(item.icmsRate) || 0) / 100;
     const pisRate = (Number(item.pisRate) || 0) / 100;
     const cofinsRate = (Number(item.cofinsRate) || 0) / 100;
-    // O preço do produto já contém IRPJ e CSLL. Nesta etapa entram somente
-    // ICMS, PIS e COFINS, evitando a cobrança duplicada dos tributos internos.
+    // O preÃ§o do produto jÃ¡ contÃ©m IRPJ e CSLL. Nesta etapa entram somente
+    // ICMS, PIS e COFINS, evitando a cobranÃ§a duplicada dos tributos internos.
     const denominator = (1 - icmsRate) * (1 - pisRate - cofinsRate);
 
     if (denominator <= 0) {
-        throw new Error('As alíquotas informadas resultam em um preço inválido.');
+        throw new Error('As alÃ­quotas informadas resultam em um preÃ§o invÃ¡lido.');
     }
 
     const baseTotalWithTax = priceAfterDiscount / denominator;
@@ -237,20 +235,7 @@ const calculateQuotationGrandTotal = (quotation: Pick<Quotation, 'items' | 'disc
     };
 };
 
-// Função para calcular o lead time total de um produto
-const calculateLeadTime = (product: Product): number => {
-    if (!product.productionPlanTemplate || product.productionPlanTemplate.length === 0) {
-        return 0;
-    }
-    
-    const totalDays = product.productionPlanTemplate.reduce((total, stage) => {
-        return total + (stage.durationDays || 0);
-    }, 0);
-    
-    return Math.round(totalDays);
-};
-
-// Função utilitária para normalizar valores de item
+// FunÃ§Ã£o utilitÃ¡ria para normalizar valores de item
 const normalizeItemValues = (item: any): Item => {
     return {
         ...item,
@@ -314,7 +299,7 @@ export default function QuotationsPage() {
     const [isGenerateOrderDialogOpen, setIsGenerateOrderDialogOpen] = useState(false);
     const [quotationToConvert, setQuotationToConvert] = useState<Quotation | null>(null);
 
-    // Função para verificar a senha
+    // FunÃ§Ã£o para verificar a senha
     const handlePasswordSubmit = () => {
         if (passwordInput === CORRECT_PASSWORD) {
             setIsAuthenticated(true);
@@ -323,7 +308,7 @@ export default function QuotationsPage() {
             setPasswordAttempts(0);
             toast({
                 title: "Acesso autorizado",
-                description: "Bem-vindo à seção de orçamentos.",
+                description: "Bem-vindo Ã  seÃ§Ã£o de orÃ§amentos.",
             });
         } else {
             const newAttempts = passwordAttempts + 1;
@@ -349,7 +334,7 @@ export default function QuotationsPage() {
         }
     };
 
-    // Função para lidar com o pressionamento da tecla Enter
+    // FunÃ§Ã£o para lidar com o pressionamento da tecla Enter
     const handlePasswordKeyPress = (e: React.KeyboardEvent) => {
         if (e.key === 'Enter') {
             handlePasswordSubmit();
@@ -359,7 +344,7 @@ export default function QuotationsPage() {
     const form = useForm<z.infer<typeof quotationSchema>>({
         resolver: zodResolver(quotationSchema),
         defaultValues: {
-            status: "Aguardando Aprovação",
+            status: "Aguardando AprovaÃ§Ã£o",
             items: [],
             includedServices: [],
             discount: 0,
@@ -430,7 +415,7 @@ export default function QuotationsPage() {
         }
     };
 
-    // Função para buscar produtos cadastrados
+    // FunÃ§Ã£o para buscar produtos cadastrados
     const fetchProducts = async () => {
         if (!user) return;
         try {
@@ -443,7 +428,15 @@ export default function QuotationsPage() {
                     description: data.description || "",
                     unitPrice: Number(data.unitPrice) || 0,
                     unitWeight: Number(data.unitWeight) || 0,
-                    productionPlanTemplate: data.productionPlanTemplate || [],
+                    productionPlanTemplate: (data.productionPlanTemplate || []).map(
+                      (stage: ProductionStage & { durationDays?: number }) => ({
+                        stageName: stage.stageName,
+                        hours: stage.hours ?? ((stage.durationDays ?? 0) * USEFUL_HOURS_PER_DAY),
+                        setupHours: stage.setupHours ?? 0,
+                        batchSize: stage.batchSize && stage.batchSize > 0 ? stage.batchSize : 1,
+                        parallelResources: stage.parallelResources && stage.parallelResources > 0 ? stage.parallelResources : 1,
+                      })
+                    ),
                 } as Product;
             });
             setProducts(productsList);
@@ -452,7 +445,7 @@ export default function QuotationsPage() {
             toast({
                 variant: "destructive",
                 title: "Erro ao buscar produtos",
-                description: "Não foi possível carregar o catálogo de produtos.",
+                description: "NÃ£o foi possÃ­vel carregar o catÃ¡logo de produtos.",
             });
         }
     };
@@ -464,14 +457,14 @@ export default function QuotationsPage() {
         const mapStatus = (status?: string): string => {
             const originalStatus = status?.trim();
             if (!originalStatus) {
-                return "Aguardando Aprovação";
+                return "Aguardando AprovaÃ§Ã£o";
             }
             const lowerCaseStatus = originalStatus.toLowerCase();
 
             const translations: { [key: string]: string } = {
                 'approved': 'Aprovado', 'aprovado': 'Aprovado',
-                'awaiting approval': 'Aguardando Aprovação', 'aguardando aprovação': 'Aguardando Aprovação',
-                'pending': 'Aguardando Aprovação', 'pendente': 'Aguardando Aprovação',
+                'awaiting approval': 'Aguardando AprovaÃ§Ã£o', 'aguardando aprovaÃ§Ã£o': 'Aguardando AprovaÃ§Ã£o',
+                'pending': 'Aguardando AprovaÃ§Ã£o', 'pendente': 'Aguardando AprovaÃ§Ã£o',
                 'rejected': 'Reprovado', 'reprovado': 'Reprovado', 'recusado': 'Reprovado', 'cancelado': 'Reprovado',
                 'sent': 'Enviado', 'enviado': 'Enviado',
                 'informative': 'Informativo', 'informativo': 'Informativo',
@@ -512,7 +505,7 @@ export default function QuotationsPage() {
                 }
 
                 if (finalItems.length === 0) {
-                    finalItems.push({ description: "Nenhum item/serviço especificado", quantity: 1, unitPrice: 0 });
+                    finalItems.push({ description: "Nenhum item/serviÃ§o especificado", quantity: 1, unitPrice: 0 });
                 }
 
                 const getCreatedAt = () => {
@@ -557,7 +550,7 @@ export default function QuotationsPage() {
             console.error("Error fetching quotations:", error);
             toast({
                 variant: "destructive",
-                title: "Erro ao buscar orçamentos",
+                title: "Erro ao buscar orÃ§amentos",
                 description: "Ocorreu um erro ao carregar os dados. Verifique o console para mais detalhes.",
             });
         } finally {
@@ -579,8 +572,8 @@ export default function QuotationsPage() {
                 const data = docSnapshot.data();
                 const status = data.status;
                 
-                // Apenas verificar orçamentos que ainda não foram aprovados ou reprovados
-                const statusesToCheck = ["Aguardando Aprovação", "Enviado"];
+                // Apenas verificar orÃ§amentos que ainda nÃ£o foram aprovados ou reprovados
+                const statusesToCheck = ["Aguardando AprovaÃ§Ã£o", "Enviado"];
                 
                 if (statusesToCheck.includes(status)) {
                     let validityDate: Date;
@@ -591,10 +584,10 @@ export default function QuotationsPage() {
                     } else if (data.expiresAt) {
                         validityDate = new Date(data.expiresAt);
                     } else {
-                        return; // Pular se não houver data de validade
+                        return; // Pular se nÃ£o houver data de validade
                     }
                     
-                    // Verificar se a data de validade já passou
+                    // Verificar se a data de validade jÃ¡ passou
                     if (validityDate < now) {
                         const quotationRef = doc(db, "companies", "mecald", "quotations", docSnapshot.id);
                         updatePromises.push(
@@ -608,15 +601,15 @@ export default function QuotationsPage() {
                 }
             });
             
-            // Executar todas as atualizações
+            // Executar todas as atualizaÃ§Ãµes
             if (updatePromises.length > 0) {
                 await Promise.all(updatePromises);
-                console.log(`${updatePromises.length} orçamento(s) expirado(s) atualizado(s).`);
-                // Recarregar a lista de orçamentos após as atualizações
+                console.log(`${updatePromises.length} orÃ§amento(s) expirado(s) atualizado(s).`);
+                // Recarregar a lista de orÃ§amentos apÃ³s as atualizaÃ§Ãµes
                 await fetchQuotations();
             }
         } catch (error) {
-            console.error("Erro ao verificar orçamentos expirados:", error);
+            console.error("Erro ao verificar orÃ§amentos expirados:", error);
         }
     };
 
@@ -628,10 +621,10 @@ export default function QuotationsPage() {
         }
     }, [user, authLoading, isAuthenticated]);
     
-    // UseEffect para verificar orçamentos expirados periodicamente
+    // UseEffect para verificar orÃ§amentos expirados periodicamente
     useEffect(() => {
         if (!authLoading && user && isAuthenticated) {
-            // Executar verificação imediatamente ao carregar
+            // Executar verificaÃ§Ã£o imediatamente ao carregar
             checkAndUpdateExpiredQuotations();
             
             // Configurar intervalo para verificar a cada hora (3600000 ms)
@@ -692,7 +685,7 @@ export default function QuotationsPage() {
                 dataToSave.number = selectedQuotation.number;
                 const quotationRef = doc(db, "companies", "mecald", "quotations", selectedQuotation.id);
                 await updateDoc(quotationRef, dataToSave);
-                toast({ title: "Orçamento atualizado!" });
+                toast({ title: "OrÃ§amento atualizado!" });
             } else {
                 const highestNumber = quotations.length > 0
                     ? Math.max(...quotations.map(q => q.number || 0))
@@ -700,7 +693,7 @@ export default function QuotationsPage() {
                 dataToSave.number = highestNumber + 1;
                 dataToSave.createdAt = Timestamp.now();
                 await addDoc(collection(db, "companies", "mecald", "quotations"), dataToSave);
-                toast({ title: "Orçamento criado!" });
+                toast({ title: "OrÃ§amento criado!" });
             }
 
             // Update products catalog
@@ -735,28 +728,42 @@ export default function QuotationsPage() {
     const handleCurrentItemChange = (field: keyof Item, value: any) => {
         let processedValue = value;
         
-        // Converter campos numéricos para number se necessário
+        // Converter campos numÃ©ricos para number se necessÃ¡rio
         if (['quantity', 'unitPrice', 'unitWeight', 'taxRate', 'icmsRate', 'pisRate', 'cofinsRate', 'leadTimeDays'].includes(field)) {
-            // Se o valor é uma string vazia, manter como vazio para o input
+            // Se o valor Ã© uma string vazia, manter como vazio para o input
             if (value === '') {
                 processedValue = '';
             } else {
-                // Converter para número, ou 0 se inválido
+                // Converter para nÃºmero, ou 0 se invÃ¡lido
                 const numValue = Number(value);
                 processedValue = isNaN(numValue) ? 0 : numValue;
             }
         }
         
-        setCurrentItem(prev => ({...prev, [field]: processedValue}));
+        setCurrentItem(prev => {
+            const updated = { ...prev, [field]: processedValue };
+
+            if (field === 'quantity' && updated.code) {
+                const product = products.find(p => p.code === updated.code);
+                if (product) {
+                    const qty = Number(updated.quantity) || 1;
+                    const leadTime = calculateLeadTime(product, qty);
+                    updated.leadTimeDays = leadTime > 0 ? leadTime : undefined;
+                }
+            }
+
+            return updated;
+        });
     };
 
-    // Função para adicionar produto do catálogo ao item atual
+    // FunÃ§Ã£o para adicionar produto do catÃ¡logo ao item atual
     const handleSelectProduct = (product: Product) => {
-        const leadTime = calculateLeadTime(product);
+        const quantity = Number(currentItem.quantity) || 1;
+        const leadTime = calculateLeadTime(product, quantity);
         setCurrentItem({
             code: product.code,
             description: product.description,
-            quantity: Number(currentItem.quantity) || 1,
+            quantity,
             unitPrice: Number(product.unitPrice) || 0,
             unitWeight: Number(product.unitWeight) || 0,
             icmsRate: product.icmsRate ?? 18,
@@ -769,7 +776,7 @@ export default function QuotationsPage() {
         setProductSearchQuery("");
         toast({
             title: "Produto adicionado!",
-            description: `${product.description} foi adicionado ao formulário.`,
+            description: `${product.description} foi adicionado ao formulÃ¡rio.`,
         });
     };
 
@@ -780,7 +787,7 @@ export default function QuotationsPage() {
             const firstError = result.error.errors[0];
             toast({
                 variant: 'destructive',
-                title: `Erro de validação: ${firstError.path[0]}`,
+                title: `Erro de validaÃ§Ã£o: ${firstError.path[0]}`,
                 description: firstError.message
             });
             return;
@@ -797,7 +804,7 @@ export default function QuotationsPage() {
             const firstError = result.error.errors[0];
             toast({
                 variant: 'destructive',
-                title: `Erro de validação: ${firstError.path[0]}`,
+                title: `Erro de validaÃ§Ã£o: ${firstError.path[0]}`,
                 description: firstError.message
             });
             return;
@@ -812,7 +819,7 @@ export default function QuotationsPage() {
         setCurrentItem(normalizeItemValues(item));
         setEditIndex(index);
         
-        // Scroll suave até o card de edição
+        // Scroll suave atÃ© o card de ediÃ§Ã£o
         setTimeout(() => {
             const editCard = document.querySelector('[data-edit-card="true"]');
             if (editCard) {
@@ -821,8 +828,8 @@ export default function QuotationsPage() {
         }, 100);
         
         toast({
-            title: "Modo de edição ativado",
-            description: `Editando item da linha ${index + 1}. Faça as alterações no formulário acima e clique em "Atualizar Item".`,
+            title: "Modo de ediÃ§Ã£o ativado",
+            description: `Editando item da linha ${index + 1}. FaÃ§a as alteraÃ§Ãµes no formulÃ¡rio acima e clique em "Atualizar Item".`,
         });
     };
 
@@ -836,7 +843,7 @@ export default function QuotationsPage() {
         // Create a copy of the item with a modified description to indicate it's a duplicate
         const duplicatedItem = {
             ...itemToDuplicate,
-            description: `${itemToDuplicate.description} (Cópia)`,
+            description: `${itemToDuplicate.description} (CÃ³pia)`,
             quantity: 1 // Reset quantity to 1 for the duplicate
         };
         
@@ -845,17 +852,17 @@ export default function QuotationsPage() {
         
         toast({
             title: "Item duplicado!",
-            description: "O item foi duplicado e adicionado ao final da lista. Você pode editá-lo conforme necessário.",
+            description: "O item foi duplicado e adicionado ao final da lista. VocÃª pode editÃ¡-lo conforme necessÃ¡rio.",
         });
     };
 
     const handleMoveItemUp = (index: number) => {
-        if (index === 0) return; // Não pode mover o primeiro item para cima
+        if (index === 0) return; // NÃ£o pode mover o primeiro item para cima
         
         const currentItem = watchedItems[index];
         const previousItem = watchedItems[index - 1];
         
-        // Trocar as posições
+        // Trocar as posiÃ§Ãµes
         update(index - 1, currentItem);
         update(index, previousItem);
         
@@ -866,12 +873,12 @@ export default function QuotationsPage() {
     };
 
     const handleMoveItemDown = (index: number) => {
-        if (index === watchedItems.length - 1) return; // Não pode mover o último item para baixo
+        if (index === watchedItems.length - 1) return; // NÃ£o pode mover o Ãºltimo item para baixo
         
         const currentItem = watchedItems[index];
         const nextItem = watchedItems[index + 1];
         
-        // Trocar as posições
+        // Trocar as posiÃ§Ãµes
         update(index, nextItem);
         update(index + 1, currentItem);
         
@@ -886,7 +893,7 @@ export default function QuotationsPage() {
         form.reset({
             customer: undefined,
             buyerName: "",
-            status: "Aguardando Aprovação",
+            status: "Aguardando AprovaÃ§Ã£o",
             validity: new Date(new Date().setDate(new Date().getDate() + 15)),
             paymentTerms: "A combinar",
             deliveryTime: "A combinar",
@@ -921,9 +928,9 @@ export default function QuotationsPage() {
             // Create a copy of the quotation with modified details
             const duplicatedQuotation = {
                 ...quotation,
-                status: "Aguardando Aprovação" as const,
+                status: "Aguardando AprovaÃ§Ã£o" as const,
                 validity: new Date(new Date().setDate(new Date().getDate() + 15)), // Set validity to 15 days from now
-                notes: quotation.notes ? `${quotation.notes}\n\n[Baseado no orçamento Nº ${quotation.number}]` : `Baseado no orçamento Nº ${quotation.number}`,
+                notes: quotation.notes ? `${quotation.notes}\n\n[Baseado no orÃ§amento NÂº ${quotation.number}]` : `Baseado no orÃ§amento NÂº ${quotation.number}`,
             };
 
             // Remove fields that shouldn't be copied
@@ -939,15 +946,15 @@ export default function QuotationsPage() {
             setIsFormOpen(true);
 
             toast({
-                title: "Orçamento duplicado!",
-                description: `Os dados do orçamento Nº ${quotation.number} foram copiados. Ajuste conforme necessário antes de salvar.`,
+                title: "OrÃ§amento duplicado!",
+                description: `Os dados do orÃ§amento NÂº ${quotation.number} foram copiados. Ajuste conforme necessÃ¡rio antes de salvar.`,
             });
         } catch (error) {
             console.error("Error duplicating quotation:", error);
             toast({
                 variant: "destructive",
-                title: "Erro ao duplicar orçamento",
-                description: "Ocorreu um erro ao duplicar o orçamento. Tente novamente.",
+                title: "Erro ao duplicar orÃ§amento",
+                description: "Ocorreu um erro ao duplicar o orÃ§amento. Tente novamente.",
             });
         }
     };
@@ -961,7 +968,7 @@ export default function QuotationsPage() {
         if (!quotationToDelete) return;
         try {
             await deleteDoc(doc(db, "companies", "mecald", "quotations", quotationToDelete.id));
-            toast({ title: "Orçamento excluído!" });
+            toast({ title: "OrÃ§amento excluÃ­do!" });
             setQuotationToDelete(null);
             setIsDeleteDialogOpen(false);
             await fetchQuotations();
@@ -971,10 +978,10 @@ export default function QuotationsPage() {
     };
     
     const handleViewQuotation = async (quotation: Quotation) => {
-        // Verificar se o orçamento está expirado
+        // Verificar se o orÃ§amento estÃ¡ expirado
         const now = new Date();
         const validityDate = quotation.validity;
-        const statusesToCheck = ["Aguardando Aprovação", "Enviado"];
+        const statusesToCheck = ["Aguardando AprovaÃ§Ã£o", "Enviado"];
         
         if (statusesToCheck.includes(quotation.status) && validityDate < now) {
             try {
@@ -986,19 +993,19 @@ export default function QuotationsPage() {
                     expiredAt: Timestamp.now(),
                 });
                 
-                // Atualizar o orçamento localmente
+                // Atualizar o orÃ§amento localmente
                 quotation.status = "Expirado";
                 
                 toast({
-                    title: "Orçamento expirado",
-                    description: "Este orçamento passou da validade e foi marcado como expirado.",
+                    title: "OrÃ§amento expirado",
+                    description: "Este orÃ§amento passou da validade e foi marcado como expirado.",
                     variant: "destructive",
                 });
                 
                 // Recarregar a lista
                 await fetchQuotations();
             } catch (error) {
-                console.error("Erro ao atualizar orçamento expirado:", error);
+                console.error("Erro ao atualizar orÃ§amento expirado:", error);
             }
         }
         
@@ -1065,7 +1072,7 @@ export default function QuotationsPage() {
                 quotationNumber: values.poNumber,
                 internalOS: quotationToConvert.number.toString(),
                 customer: quotationToConvert.customer,
-                projectName: `Ref. Orçamento ${quotationToConvert.number}`,
+                projectName: `Ref. OrÃ§amento ${quotationToConvert.number}`,
                 items: itemsForOrder.map(item => ({
                     ...item,
                     itemDeliveryDate: item.itemDeliveryDate ? Timestamp.fromDate(new Date(item.itemDeliveryDate)) : null,
@@ -1074,12 +1081,12 @@ export default function QuotationsPage() {
                 isEmergency: Boolean(quotationToConvert.isEmergency),
                 emergencyRate: quotationToConvert.isEmergency ? (quotationToConvert.emergencyRate || 0) : 0,
                 priorityNote: quotationToConvert.isEmergency
-                    ? 'Fabricação emergencial para atendimento urgente'
+                    ? 'FabricaÃ§Ã£o emergencial para atendimento urgente'
                     : '',
                 freightType: quotationToConvert.freightType || 'FOB',
                 freightValue: Number(quotationToConvert.freightValue) || 0,
                 freightIncludedInPrice: quotationToConvert.freightIncludedInPrice !== false,
-                status: "Aguardando Produção",
+                status: "Aguardando ProduÃ§Ã£o",
                 createdAt: Timestamp.now(),
                 deliveryDate: Timestamp.fromDate(quotationToConvert.validity),
             };
@@ -1091,7 +1098,7 @@ export default function QuotationsPage() {
     
             toast({
                 title: "Pedido gerado com sucesso!",
-                description: `O pedido para o orçamento Nº ${quotationToConvert.number} foi criado.`,
+                description: `O pedido para o orÃ§amento NÂº ${quotationToConvert.number} foi criado.`,
             });
             
             setIsGenerateOrderDialogOpen(false);
@@ -1111,7 +1118,7 @@ export default function QuotationsPage() {
     const handleExport = async (formatType: 'pdf' | 'excel') => {
         if (!selectedQuotation) return;
     
-        toast({ title: "Exportando...", description: `Gerando ${formatType.toUpperCase()} do orçamento Nº ${selectedQuotation.number}.` });
+        toast({ title: "Exportando...", description: `Gerando ${formatType.toUpperCase()} do orÃ§amento NÂº ${selectedQuotation.number}.` });
     
         try {
             const companyRef = doc(db, "companies", "mecald", "settings", "company");
@@ -1157,7 +1164,7 @@ export default function QuotationsPage() {
 
                 y = 60;
 
-                docPdf.setFontSize(14).setFont(undefined, 'bold').text(`Orçamento Nº ${number}`, pageWidth / 2, y, { align: 'center' });
+                docPdf.setFontSize(14).setFont(undefined, 'bold').text(`OrÃ§amento NÂº ${number}`, pageWidth / 2, y, { align: 'center' });
                 y += 15;
 
                 docPdf.setFontSize(11).setFont(undefined, 'normal');
@@ -1176,7 +1183,7 @@ export default function QuotationsPage() {
                     docPdf.roundedRect(15, y - 4, pageWidth - 30, 12, 2, 2, 'FD');
                     docPdf.setTextColor(154, 52, 18).setFont(undefined, 'bold').setFontSize(11);
                     docPdf.text(
-                        `FABRICAÇÃO EMERGENCIAL — Atendimento urgente com adicional de ${emergencyRate}% no valor final de cada produto.`,
+                        `FABRICAÃ‡ÃƒO EMERGENCIAL â€” Atendimento urgente com adicional de ${emergencyRate}% no valor final de cada produto.`,
                         pageWidth / 2,
                         y + 3,
                         { align: 'center' }
@@ -1191,7 +1198,7 @@ export default function QuotationsPage() {
                     return acc + itemWeight;
                 }, 0);
 
-                const head = [['Cód.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'Preço Unit. s/ ICMS/PIS/COFINS', 'ICMS/PIS/COFINS (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.']];
+                const head = [['CÃ³d.', 'Item', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time', 'PreÃ§o Unit. s/ ICMS/PIS/COFINS', 'ICMS/PIS/COFINS (%)', 'PreÃ§o Unit. c/ Imp.', 'Total c/ Imp.']];
                 const body = items.map(item => {
                     const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
                     const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
@@ -1244,7 +1251,7 @@ export default function QuotationsPage() {
                         9: { cellWidth: 35, halign: 'right' },
                     },
                     didParseCell: function (data: any) {
-                        // Destacar a linha de total (última linha)
+                        // Destacar a linha de total (Ãºltima linha)
                         if (data.row.index === body.length - 1) {
                             data.cell.styles.fontStyle = 'bold';
                             data.cell.styles.fillColor = [240, 240, 240];
@@ -1309,7 +1316,7 @@ export default function QuotationsPage() {
     
                 if (includedServices && includedServices.length > 0) {
                     if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
-                    docPdf.setFontSize(11).setFont(undefined, 'bold').text('Serviços Inclusos:', 15, y);
+                    docPdf.setFontSize(11).setFont(undefined, 'bold').text('ServiÃ§os Inclusos:', 15, y);
                     y += 6;
                     docPdf.setFontSize(10).setFont(undefined, 'normal');
                     includedServices.forEach(serviceId => {
@@ -1322,7 +1329,7 @@ export default function QuotationsPage() {
                 
                 y += 5;
                 if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
-                docPdf.setFontSize(11).setFont(undefined, 'bold').text('Condições Comerciais:', 15, y);
+                docPdf.setFontSize(11).setFont(undefined, 'bold').text('CondiÃ§Ãµes Comerciais:', 15, y);
                 y += 6;
                 docPdf.setFontSize(10).setFont(undefined, 'normal');
                 docPdf.text(`Pagamento: ${paymentTerms}`, 18, y);
@@ -1331,18 +1338,18 @@ export default function QuotationsPage() {
                 y += 5;
                 docPdf.text(
                     `Frete: ${selectedQuotation.freightType === 'CIF'
-                        ? 'CIF — responsabilidade da fornecedora/contratada'
-                        : 'FOB — responsabilidade do cliente/contratante'}`,
+                        ? 'CIF â€” responsabilidade da fornecedora/contratada'
+                        : 'FOB â€” responsabilidade do cliente/contratante'}`,
                     18,
                     y
                 );
                 y += 5;
                 docPdf.text(
-                    `Valor do frete: ${Number(selectedQuotation.freightValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} — ${selectedQuotation.freightType === 'FOB'
-                        ? 'não incluído no total'
+                    `Valor do frete: ${Number(selectedQuotation.freightValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} â€” ${selectedQuotation.freightType === 'FOB'
+                        ? 'nÃ£o incluÃ­do no total'
                         : selectedQuotation.freightIncludedInPrice === false
                             ? 'adicionado separadamente ao total'
-                            : 'já embutido no valor dos produtos'}`,
+                            : 'jÃ¡ embutido no valor dos produtos'}`,
                     18,
                     y
                 );
@@ -1350,7 +1357,7 @@ export default function QuotationsPage() {
     
                 if (notes) {
                     if (y > pageHeight - 40) { y = 20; docPdf.addPage(); }
-                    docPdf.setFontSize(11).setFont(undefined, 'bold').text('Observações:', 15, y);
+                    docPdf.setFontSize(11).setFont(undefined, 'bold').text('ObservaÃ§Ãµes:', 15, y);
                     y += 6;
                     const splitNotes = docPdf.splitTextToSize(notes, pageWidth - 30);
                     docPdf.setFontSize(10).setFont(undefined, 'normal').text(splitNotes, 15, y);
@@ -1377,12 +1384,12 @@ export default function QuotationsPage() {
                     [companyData.endereco || ''],
                     [`CNPJ: ${companyData.cnpj || ''}`],
                     [],
-                    [`Orçamento Nº ${number}`],
+                    [`OrÃ§amento NÂº ${number}`],
                     [`Cliente: ${customer.name}`, `Data: ${format(new Date(), "dd/MM/yyyy")}`],
                     ['', `Validade: ${format(validity, "dd/MM/yyyy")}`],
-                    ...(selectedQuotation.isEmergency ? [[`FABRICAÇÃO EMERGENCIAL — Atendimento urgente`, `Adicional: ${emergencyRate}%`]] : []),
+                    ...(selectedQuotation.isEmergency ? [[`FABRICAÃ‡ÃƒO EMERGENCIAL â€” Atendimento urgente`, `Adicional: ${emergencyRate}%`]] : []),
                     [],
-                    ['Item', 'Código', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'Preço Unit. s/ ICMS/PIS/COFINS', 'ICMS/PIS/COFINS (%)', 'Preço Unit. c/ Imp.', 'Total c/ Imp.'],
+                    ['Item', 'CÃ³digo', 'Qtd', 'Peso Unit.', 'Peso Total', 'Lead Time (dias)', 'PreÃ§o Unit. s/ ICMS/PIS/COFINS', 'ICMS/PIS/COFINS (%)', 'PreÃ§o Unit. c/ Imp.', 'Total c/ Imp.'],
                     ...items.map(item => {
                         const itemTotalWeight = (item.quantity || 0) * (item.unitWeight || 0);
                         const unitPriceWithDiscount = item.unitPrice * (1 - discount / 100);
@@ -1414,35 +1421,35 @@ export default function QuotationsPage() {
                     ...(selectedQuotation.isEmergency ? [['Adicional emergencial:', '', '', '', '', '', '', '', `${emergencyRate}%`, grandTotalCalcs.totalEmergency]] : []),
                     ['Frete:', '', '', '', '', '', '', '', selectedQuotation.freightType || 'FOB', Number(selectedQuotation.freightValue) || 0],
                     ['Tratamento do frete:', '', '', '', '', '', '', '', '', selectedQuotation.freightType === 'FOB'
-                        ? 'Cliente/contratante — não somado'
+                        ? 'Cliente/contratante â€” nÃ£o somado'
                         : selectedQuotation.freightIncludedInPrice === false
-                            ? 'Fornecedora/contratada — adicionado ao total'
-                            : 'Fornecedora/contratada — já embutido'],
+                            ? 'Fornecedora/contratada â€” adicionado ao total'
+                            : 'Fornecedora/contratada â€” jÃ¡ embutido'],
                     [],
-                    ['Serviços Inclusos:'],
+                    ['ServiÃ§os Inclusos:'],
                     ...(includedServices || []).map(s => [serviceOptions.find(opt => opt.id === s)?.label || s]),
                     [],
-                    ['Condições Comerciais:'],
+                    ['CondiÃ§Ãµes Comerciais:'],
                     [`Pagamento: ${paymentTerms}`],
                     [`Prazo de Entrega: ${deliveryTime}`],
-                    [`Frete: ${selectedQuotation.freightType === 'CIF' ? 'CIF — fornecedora/contratada' : 'FOB — cliente/contratante'}`],
+                    [`Frete: ${selectedQuotation.freightType === 'CIF' ? 'CIF â€” fornecedora/contratada' : 'FOB â€” cliente/contratante'}`],
                     [`Valor do frete: ${Number(selectedQuotation.freightValue || 0)}`],
                     [],
-                    ['Observações:'],
+                    ['ObservaÃ§Ãµes:'],
                     [notes || ''],
                     [],
-                    [{v: companyData.website || 'Website não informado', l: { Target: companyData.website || '#' }}]
+                    [{v: companyData.website || 'Website nÃ£o informado', l: { Target: companyData.website || '#' }}]
                 ];
                 const ws = XLSX.utils.aoa_to_sheet(ws_data);
                 const wb = XLSX.utils.book_new();
-                XLSX.utils.book_append_sheet(wb, ws, `Orçamento ${number}`);
+                XLSX.utils.book_append_sheet(wb, ws, `OrÃ§amento ${number}`);
                 XLSX.writeFile(wb, `Orcamento_${number}.xlsx`);
             }
-            toast({ title: "Exportação concluída!", description: "Seu arquivo foi baixado." });
+            toast({ title: "ExportaÃ§Ã£o concluÃ­da!", description: "Seu arquivo foi baixado." });
     
         } catch (error) {
             console.error("Export error:", error);
-            toast({ variant: "destructive", title: "Erro na exportação", description: "Não foi possível gerar o arquivo." });
+            toast({ variant: "destructive", title: "Erro na exportaÃ§Ã£o", description: "NÃ£o foi possÃ­vel gerar o arquivo." });
         }
     };
     
@@ -1459,7 +1466,7 @@ export default function QuotationsPage() {
         switch (status) {
             case "Aprovado": return "default";
             case "Pedido Gerado": return "default";
-            case "Aguardando Aprovação": return "secondary";
+            case "Aguardando AprovaÃ§Ã£o": return "secondary";
             case "Enviado": return "secondary";
             case "Reprovado": return "destructive";
             case "Expirado": return "destructive";
@@ -1490,28 +1497,28 @@ export default function QuotationsPage() {
             };
         }
 
-        // Separar orçamentos informativos
+        // Separar orÃ§amentos informativos
         const informativeQuotations = quotations.filter(q => q.status === "Informativo");
         
-        // Orçamentos válidos para análise (excluindo informativos)
+        // OrÃ§amentos vÃ¡lidos para anÃ¡lise (excluindo informativos)
         const relevantQuotations = quotations.filter(q => q.status !== "Informativo");
         
-        // Orçamentos aprovados (Aprovado + Pedido Gerado)
+        // OrÃ§amentos aprovados (Aprovado + Pedido Gerado)
         const approvedQuotations = relevantQuotations.filter(q => 
             q.status === "Aprovado" || q.status === "Pedido Gerado"
         );
         
-        // Orçamentos reprovados (Reprovado + Expirado)
+        // OrÃ§amentos reprovados (Reprovado + Expirado)
         const rejectedQuotations = relevantQuotations.filter(q => 
             q.status === "Reprovado" || q.status === "Expirado"
         );
         
-        // Orçamentos pendentes (Aguardando Aprovação + Enviado)
+        // OrÃ§amentos pendentes (Aguardando AprovaÃ§Ã£o + Enviado)
         const pendingQuotations = relevantQuotations.filter(q => 
-            q.status === "Aguardando Aprovação" || q.status === "Enviado"
+            q.status === "Aguardando AprovaÃ§Ã£o" || q.status === "Enviado"
         );
 
-        // Função auxiliar para calcular peso total de um orçamento
+        // FunÃ§Ã£o auxiliar para calcular peso total de um orÃ§amento
         const calculateTotalWeight = (items: any[]) => {
             return items.reduce((acc, item) => {
                 const itemWeight = (item.quantity || 0) * (item.unitWeight || 0);
@@ -1526,7 +1533,7 @@ export default function QuotationsPage() {
         const pendingCount = pendingQuotations.length;
         const informativeCount = informativeQuotations.length;
         
-        // Taxa de aprovação (apenas orçamentos relevantes)
+        // Taxa de aprovaÃ§Ã£o (apenas orÃ§amentos relevantes)
         const approvalRate = totalCount > 0 ? (approvedCount / totalCount) * 100 : 0;
 
         // Valores
@@ -1544,7 +1551,7 @@ export default function QuotationsPage() {
         const pendingWeight = pendingQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
         const informativeWeight = informativeQuotations.reduce((acc, q) => acc + calculateTotalWeight(q.items), 0);
         
-        // Taxa de aprovação por valor
+        // Taxa de aprovaÃ§Ã£o por valor
         const valueApprovalRate = issuedValue > 0 ? (approvedValue / issuedValue) * 100 : 0;
 
         return { 
@@ -1568,7 +1575,7 @@ export default function QuotationsPage() {
         };
     }, [quotations]);
 
-    // Se não estiver autenticado, mostra modal de senha
+    // Se nÃ£o estiver autenticado, mostra modal de senha
     if (!isAuthenticated) {
         return (
             <Dialog open={isPasswordDialogOpen} onOpenChange={() => {}}>
@@ -1576,7 +1583,7 @@ export default function QuotationsPage() {
                     <DialogHeader>
                         <DialogTitle className="text-center">Acesso Restrito</DialogTitle>
                         <DialogDescription className="text-center">
-                            Esta seção requer uma senha de acesso.
+                            Esta seÃ§Ã£o requer uma senha de acesso.
                         </DialogDescription>
                     </DialogHeader>
                     <div className="space-y-4">
@@ -1625,28 +1632,28 @@ export default function QuotationsPage() {
         <>
             <div className="flex-1 space-y-4 p-4 md:p-8 pt-6">
                 <div className="flex items-center justify-between space-y-2">
-                    <h1 className="text-3xl font-bold tracking-tight font-headline">Orçamentos</h1>
+                    <h1 className="text-3xl font-bold tracking-tight font-headline">OrÃ§amentos</h1>
                     <div className="flex items-center gap-2">
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                            <Input placeholder="Buscar orçamento..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9" />
+                            <Input placeholder="Buscar orÃ§amento..." value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} className="pl-9" />
                         </div>
                         <Button onClick={handleAddClick}>
                             <PlusCircle className="mr-2 h-4 w-4" />
-                            Novo Orçamento
+                            Novo OrÃ§amento
                         </Button>
                     </div>
                 </div>
 
                 <div className="mb-4 grid gap-4 md:grid-cols-4">
                     <StatCard
-                        title="Taxa de Aprovação"
+                        title="Taxa de AprovaÃ§Ã£o"
                         value={`${dashboardStats.approvalRate.toFixed(1)}%`}
                         icon={Percent}
-                        description={`${dashboardStats.approvedCount} aprovados de ${dashboardStats.totalCount} orçamentos válidos`}
+                        description={`${dashboardStats.approvedCount} aprovados de ${dashboardStats.totalCount} orÃ§amentos vÃ¡lidos`}
                     />
                     <StatCard
-                        title="Taxa de Aprovação por Valor"
+                        title="Taxa de AprovaÃ§Ã£o por Valor"
                         value={`${dashboardStats.valueApprovalRate.toFixed(1)}%`}
                         icon={DollarSign}
                         description={`R$ ${dashboardStats.approvedValue.toLocaleString('pt-BR')} de R$ ${dashboardStats.issuedValue.toLocaleString('pt-BR')}`}
@@ -1655,39 +1662,39 @@ export default function QuotationsPage() {
                         title="Valor Emitido (Total)"
                         value={dashboardStats.issuedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         icon={FileText}
-                        description={`${dashboardStats.totalCount} orçamentos válidos | ${dashboardStats.totalWeight.toFixed(2)} kg`}
+                        description={`${dashboardStats.totalCount} orÃ§amentos vÃ¡lidos | ${dashboardStats.totalWeight.toFixed(2)} kg`}
                     />
                     <StatCard
                         title="Valor Aprovado"
                         value={dashboardStats.approvedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                         icon={Check}
-                        description={`${dashboardStats.approvedCount} orçamentos | ${dashboardStats.approvedWeight.toFixed(2)} kg`}
+                        description={`${dashboardStats.approvedCount} orÃ§amentos | ${dashboardStats.approvedWeight.toFixed(2)} kg`}
                     />
                 </div>
 
                 {/* Cards adicionais com mais detalhes */}
                 <div className="mb-4 grid gap-4 md:grid-cols-4">
                     <StatCard
-                        title="Orçamentos Informativos"
+                        title="OrÃ§amentos Informativos"
                         value={`${dashboardStats.informativeCount}`}
                         icon={FileText}
                         description={`Valor: ${dashboardStats.informativeValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | ${dashboardStats.informativeWeight.toFixed(2)} kg`}
                     />
                     <StatCard
-                        title="Orçamentos Pendentes"
+                        title="OrÃ§amentos Pendentes"
                         value={`${dashboardStats.pendingCount}`}
                         icon={Percent}
                         description={`Valor: ${dashboardStats.pendingValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | ${dashboardStats.pendingWeight.toFixed(2)} kg`}
                     />
                     <StatCard
-                        title="Orçamentos Não Aceitos"
+                        title="OrÃ§amentos NÃ£o Aceitos"
                         value={`${dashboardStats.rejectedCount}`}
                         icon={Percent}
                         description={`Valor: ${dashboardStats.rejectedValue.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} | ${dashboardStats.rejectedWeight.toFixed(2)} kg`}
                     />
                     <StatCard
                         title="Total Geral"
-                        value={`${quotations.length} orçamentos`}
+                        value={`${quotations.length} orÃ§amentos`}
                         icon={FileText}
                         description={`Incluindo ${dashboardStats.informativeCount} informativos`}
                     />
@@ -1695,8 +1702,8 @@ export default function QuotationsPage() {
 
                 <Card>
                     <CardHeader>
-                        <CardTitle>Lista de Orçamentos</CardTitle>
-                        <CardDescription>Crie e gerencie os orçamentos para seus clientes.</CardDescription>
+                        <CardTitle>Lista de OrÃ§amentos</CardTitle>
+                        <CardDescription>Crie e gerencie os orÃ§amentos para seus clientes.</CardDescription>
                     </CardHeader>
                     <CardContent>
                         {isLoading ? (
@@ -1709,12 +1716,12 @@ export default function QuotationsPage() {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead className="w-[120px]">Nº Orçamento</TableHead>
+                                        <TableHead className="w-[120px]">NÂº OrÃ§amento</TableHead>
                                         <TableHead>Cliente</TableHead>
-                                        <TableHead className="w-[120px]">Criação</TableHead>
+                                        <TableHead className="w-[120px]">CriaÃ§Ã£o</TableHead>
                                         <TableHead className="w-[150px]">Valor Total</TableHead>
                                         <TableHead className="w-[180px]">Status</TableHead>
-                                        <TableHead className="w-[140px] text-right">Ações</TableHead>
+                                        <TableHead className="w-[140px] text-right">AÃ§Ãµes</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1739,7 +1746,7 @@ export default function QuotationsPage() {
                                                                 e.stopPropagation(); 
                                                                 handleDuplicateQuotation(q); 
                                                             }}
-                                                            title="Duplicar orçamento"
+                                                            title="Duplicar orÃ§amento"
                                                         >
                                                             <Copy className="h-4 w-4" />
                                                         </Button>
@@ -1755,7 +1762,7 @@ export default function QuotationsPage() {
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={6} className="text-center h-24">Nenhum orçamento encontrado.</TableCell>
+                                            <TableCell colSpan={6} className="text-center h-24">Nenhum orÃ§amento encontrado.</TableCell>
                                         </TableRow>
                                     )}
                                 </TableBody>
@@ -1768,8 +1775,8 @@ export default function QuotationsPage() {
             <Dialog open={isFormOpen} onOpenChange={setIsFormOpen}>
                 <DialogContent className="max-w-7xl">
                     <DialogHeader>
-                        <DialogTitle>{selectedQuotation ? "Editar Orçamento" : "Novo Orçamento"}</DialogTitle>
-                        <DialogDescription>Preencha os detalhes do orçamento.</DialogDescription>
+                        <DialogTitle>{selectedQuotation ? "Editar OrÃ§amento" : "Novo OrÃ§amento"}</DialogTitle>
+                        <DialogDescription>Preencha os detalhes do orÃ§amento.</DialogDescription>
                     </DialogHeader>
                     <Form {...form}>
                         <form onSubmit={form.handleSubmit(onSubmit)}>
@@ -1795,7 +1802,7 @@ export default function QuotationsPage() {
                                                 <Select onValueChange={field.onChange} defaultValue={field.value}>
                                                     <FormControl><SelectTrigger><SelectValue placeholder="Selecione um status" /></SelectTrigger></FormControl>
                                                     <SelectContent>
-                                                        <SelectItem value="Aguardando Aprovação">Aguardando Aprovação</SelectItem>
+                                                        <SelectItem value="Aguardando AprovaÃ§Ã£o">Aguardando AprovaÃ§Ã£o</SelectItem>
                                                         <SelectItem value="Enviado">Enviado</SelectItem>
                                                         <SelectItem value="Aprovado">Aprovado</SelectItem>
                                                         <SelectItem value="Reprovado">Reprovado</SelectItem>
@@ -1826,10 +1833,10 @@ export default function QuotationsPage() {
                                             <CardDescription>
                                                 {editIndex !== null ? (
                                                     <span className="text-blue-600 font-medium">
-                                                        Faça as alterações necessárias nos campos abaixo e clique em "Atualizar Item" para salvar, ou "Cancelar" para descartar as mudanças.
+                                                        FaÃ§a as alteraÃ§Ãµes necessÃ¡rias nos campos abaixo e clique em "Atualizar Item" para salvar, ou "Cancelar" para descartar as mudanÃ§as.
                                                     </span>
                                                 ) : (
-                                                    "Preencha os dados e adicione um novo item ao orçamento. Para editar itens existentes, clique no ícone de edição na lista abaixo."
+                                                    "Preencha os dados e adicione um novo item ao orÃ§amento. Para editar itens existentes, clique no Ã­cone de ediÃ§Ã£o na lista abaixo."
                                                 )}
                                             </CardDescription>
                                         </CardHeader>
@@ -1843,7 +1850,7 @@ export default function QuotationsPage() {
                                                     disabled={editIndex !== null}
                                                 >
                                                     <Package className="mr-2 h-4 w-4" />
-                                                    Buscar no Catálogo
+                                                    Buscar no CatÃ¡logo
                                                 </Button>
                                                 {currentItem.code && editIndex === null && (
                                                     <Badge variant="secondary" className="mb-4">
@@ -1852,16 +1859,16 @@ export default function QuotationsPage() {
                                                 )}
                                             </div>
                                             <div>
-                                                <FormLabel>Descrição do Item</FormLabel>
+                                                <FormLabel>DescriÃ§Ã£o do Item</FormLabel>
                                                 <Textarea 
-                                                    placeholder="Descrição detalhada do produto ou serviço" 
+                                                    placeholder="DescriÃ§Ã£o detalhada do produto ou serviÃ§o" 
                                                     value={currentItem.description}
                                                     onChange={e => handleCurrentItemChange('description', e.target.value)}
                                                 />
                                             </div>
                                             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-4">
                                                 <div>
-                                                    <FormLabel>Código</FormLabel>
+                                                    <FormLabel>CÃ³digo</FormLabel>
                                                     <Input 
                                                         placeholder="Opcional" 
                                                         value={currentItem.code || ''} 
@@ -1878,7 +1885,7 @@ export default function QuotationsPage() {
                                                     />
                                                 </div>
                                                 <div>
-                                                    <FormLabel>Preço Unitário s/ ICMS/PIS/COFINS (R$)</FormLabel>
+                                                    <FormLabel>PreÃ§o UnitÃ¡rio s/ ICMS/PIS/COFINS (R$)</FormLabel>
                                                     <Input 
                                                         type="number" 
                                                         step="0.01" 
@@ -1931,7 +1938,7 @@ export default function QuotationsPage() {
                                                             onClick={handleCancelEdit}
                                                         >
                                                             <X className="mr-2 h-4 w-4" />
-                                                            Cancelar Edição
+                                                            Cancelar EdiÃ§Ã£o
                                                         </Button>
                                                         <Button 
                                                             type="button" 
@@ -1961,22 +1968,22 @@ export default function QuotationsPage() {
                                                     Itens Adicionados
                                                 </CardTitle>
                                                 <CardDescription>
-                                                    Use as setas para reordenar os itens, o botão de duplicar para criar cópias de itens similares e agilizar a cotação.
+                                                    Use as setas para reordenar os itens, o botÃ£o de duplicar para criar cÃ³pias de itens similares e agilizar a cotaÃ§Ã£o.
                                                 </CardDescription>
                                             </CardHeader>
                                             <CardContent>
                                                 <Table>
                                                     <TableHeader>
                                                         <TableRow>
-                                                            <TableHead className="w-[140px]">Código</TableHead>
-                                                            <TableHead className="min-w-[400px]">Descrição</TableHead>
+                                                            <TableHead className="w-[140px]">CÃ³digo</TableHead>
+                                                            <TableHead className="min-w-[400px]">DescriÃ§Ã£o</TableHead>
                                                             <TableHead className="w-[100px]">Qtd.</TableHead>
                                                             <TableHead className="w-[120px]">Peso Unit.</TableHead>
-                                                            <TableHead className="w-[180px]">Preço Unit. s/ ICMS/PIS/COFINS</TableHead>
+                                                            <TableHead className="w-[180px]">PreÃ§o Unit. s/ ICMS/PIS/COFINS</TableHead>
                                                             <TableHead className="w-[190px] text-center">ICMS / PIS / COFINS</TableHead>
                                                             <TableHead className="w-[140px]">Lead Time</TableHead>
                                                             <TableHead className="w-[180px]">Total c/ Imp.</TableHead>
-                                                            <TableHead className="w-[220px] text-right">Ações</TableHead>
+                                                            <TableHead className="w-[220px] text-right">AÃ§Ãµes</TableHead>
                                                         </TableRow>
                                                     </TableHeader>
                                                     <TableBody>
@@ -2124,9 +2131,9 @@ export default function QuotationsPage() {
 
                                     <Card className={watchedIsEmergency ? "border-orange-500 bg-orange-50/50" : ""}>
                                         <CardHeader>
-                                            <CardTitle>Prioridade de Fabricação</CardTitle>
+                                            <CardTitle>Prioridade de FabricaÃ§Ã£o</CardTitle>
                                             <CardDescription>
-                                                Ative quando o orçamento exigir fabricação emergencial para atendimento urgente.
+                                                Ative quando o orÃ§amento exigir fabricaÃ§Ã£o emergencial para atendimento urgente.
                                             </CardDescription>
                                         </CardHeader>
                                         <CardContent className="space-y-4">
@@ -2142,7 +2149,7 @@ export default function QuotationsPage() {
                                                             onClick={() => field.onChange(!field.value)}
                                                         >
                                                             <Percent className="mr-2 h-4 w-4" />
-                                                            {field.value ? "Fabricação Emergencial Ativada" : "Fabricação Emergencial"}
+                                                            {field.value ? "FabricaÃ§Ã£o Emergencial Ativada" : "FabricaÃ§Ã£o Emergencial"}
                                                         </Button>
                                                     </FormItem>
                                                 )}
@@ -2155,7 +2162,7 @@ export default function QuotationsPage() {
                                                         name="emergencyRate"
                                                         render={({ field }) => (
                                                             <FormItem>
-                                                                <FormLabel>Adicional de fabricação emergencial (%)</FormLabel>
+                                                                <FormLabel>Adicional de fabricaÃ§Ã£o emergencial (%)</FormLabel>
                                                                 <FormControl>
                                                                     <Input type="number" min="0" max="500" step="0.01" {...field} />
                                                                 </FormControl>
@@ -2164,7 +2171,7 @@ export default function QuotationsPage() {
                                                         )}
                                                     />
                                                     <div className="rounded-md border border-orange-400 bg-orange-100 p-3 text-sm font-medium text-orange-900">
-                                                        Atendimento urgente: será acrescentado {watchedEmergencyRate}% ao valor final de cada produto.
+                                                        Atendimento urgente: serÃ¡ acrescentado {watchedEmergencyRate}% ao valor final de cada produto.
                                                     </div>
                                                 </>
                                             )}
@@ -2172,7 +2179,7 @@ export default function QuotationsPage() {
                                     </Card>
 
                                     <Card>
-                                        <CardHeader><CardTitle>Serviços Inclusos</CardTitle></CardHeader>
+                                        <CardHeader><CardTitle>ServiÃ§os Inclusos</CardTitle></CardHeader>
                                         <CardContent>
                                             <FormField
                                                 control={form.control}
@@ -2223,9 +2230,9 @@ export default function QuotationsPage() {
 
                                     <Card>
                                         <CardHeader>
-                                            <CardTitle>Condição de Frete</CardTitle>
+                                            <CardTitle>CondiÃ§Ã£o de Frete</CardTitle>
                                             <CardDescription>
-                                                Informe quem contratará e pagará o transporte e como o valor será apresentado na proposta.
+                                                Informe quem contratarÃ¡ e pagarÃ¡ o transporte e como o valor serÃ¡ apresentado na proposta.
                                             </CardDescription>
                                         </CardHeader>
                                         <CardContent className="space-y-4">
@@ -2246,8 +2253,8 @@ export default function QuotationsPage() {
                                                                 <SelectTrigger><SelectValue /></SelectTrigger>
                                                             </FormControl>
                                                             <SelectContent>
-                                                                <SelectItem value="FOB">FOB — frete por conta do cliente/contratante</SelectItem>
-                                                                <SelectItem value="CIF">CIF — frete por conta da fornecedora/contratada</SelectItem>
+                                                                <SelectItem value="FOB">FOB â€” frete por conta do cliente/contratante</SelectItem>
+                                                                <SelectItem value="CIF">CIF â€” frete por conta da fornecedora/contratada</SelectItem>
                                                             </SelectContent>
                                                         </Select>
                                                         <FormMessage />
@@ -2261,7 +2268,7 @@ export default function QuotationsPage() {
                                                 render={({ field }) => (
                                                     <FormItem>
                                                         <FormLabel>
-                                                            {watchedFreightType === 'CIF' ? 'Valor do frete contratado (R$)' : 'Valor estimado do frete — informativo (R$)'}
+                                                            {watchedFreightType === 'CIF' ? 'Valor do frete contratado (R$)' : 'Valor estimado do frete â€” informativo (R$)'}
                                                         </FormLabel>
                                                         <FormControl>
                                                             <Input type="number" min="0" step="0.01" placeholder="0,00" {...field} />
@@ -2280,7 +2287,7 @@ export default function QuotationsPage() {
                                                             <FormLabel>Tratamento do valor</FormLabel>
                                                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                                                 <Button type="button" variant={field.value ? 'default' : 'outline'} onClick={() => field.onChange(true)}>
-                                                                    Frete já embutido nos produtos
+                                                                    Frete jÃ¡ embutido nos produtos
                                                                 </Button>
                                                                 <Button type="button" variant={!field.value ? 'default' : 'outline'} onClick={() => field.onChange(false)}>
                                                                     Adicionar frete ao total
@@ -2291,15 +2298,15 @@ export default function QuotationsPage() {
                                                 />
                                             ) : (
                                                 <div className="rounded-md border bg-muted p-3 text-sm text-muted-foreground">
-                                                    FOB: o cliente/contratante providencia e paga o frete. O valor informado não será somado ao orçamento.
+                                                    FOB: o cliente/contratante providencia e paga o frete. O valor informado nÃ£o serÃ¡ somado ao orÃ§amento.
                                                 </div>
                                             )}
 
                                             {watchedFreightType === 'CIF' && (
                                                 <div className="rounded-md border border-blue-300 bg-blue-50 p-3 text-sm text-blue-900">
                                                     CIF: a fornecedora/contratada providencia o frete. {watchedFreightIncludedInPrice
-                                                        ? 'O valor já está embutido nos preços e não será somado novamente.'
-                                                        : `Serão adicionados ${Number(watchedFreightValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} ao total.`}
+                                                        ? 'O valor jÃ¡ estÃ¡ embutido nos preÃ§os e nÃ£o serÃ¡ somado novamente.'
+                                                        : `SerÃ£o adicionados ${Number(watchedFreightValue).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })} ao total.`}
                                                 </div>
                                             )}
                                         </CardContent>
@@ -2307,7 +2314,7 @@ export default function QuotationsPage() {
 
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                                         <FormField control={form.control} name="paymentTerms" render={({ field }) => (
-                                            <FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                            <FormItem><FormLabel>CondiÃ§Ãµes de Pagamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                         )}/>
                                         <FormField control={form.control} name="deliveryTime" render={({ field }) => (
                                             <FormItem><FormLabel>Prazo de Entrega</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
@@ -2348,13 +2355,13 @@ export default function QuotationsPage() {
                                         )} />
                                     </div>
                                      <FormField control={form.control} name="notes" render={({ field }) => (
-                                        <FormItem><FormLabel>Observações Gerais</FormLabel><FormControl><Textarea placeholder="Observações adicionais, detalhes técnicos, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                        <FormItem><FormLabel>ObservaÃ§Ãµes Gerais</FormLabel><FormControl><Textarea placeholder="ObservaÃ§Ãµes adicionais, detalhes tÃ©cnicos, etc." {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                     )}/>
                                 </div>
                             </ScrollArea>
                             <DialogFooter className="pt-6 border-t">
                                 <Button type="submit" disabled={form.formState.isSubmitting}>
-                                    {form.formState.isSubmitting ? "Salvando..." : "Salvar Orçamento"}
+                                    {form.formState.isSubmitting ? "Salvando..." : "Salvar OrÃ§amento"}
                                 </Button>
                             </DialogFooter>
                         </form>
@@ -2366,7 +2373,7 @@ export default function QuotationsPage() {
             <Dialog open={isProductSearchOpen} onOpenChange={setIsProductSearchOpen}>
                 <DialogContent className="max-w-4xl">
                     <DialogHeader>
-                        <DialogTitle>Buscar Produto no Catálogo</DialogTitle>
+                        <DialogTitle>Buscar Produto no CatÃ¡logo</DialogTitle>
                         <DialogDescription>
                             Selecione um produto cadastrado para preencher automaticamente os dados do item.
                         </DialogDescription>
@@ -2375,7 +2382,7 @@ export default function QuotationsPage() {
                         <div className="relative">
                             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                             <Input
-                                placeholder="Buscar por código ou descrição..."
+                                placeholder="Buscar por cÃ³digo ou descriÃ§Ã£o..."
                                 value={productSearchQuery}
                                 onChange={(e) => setProductSearchQuery(e.target.value)}
                                 className="pl-9"
@@ -2398,12 +2405,12 @@ export default function QuotationsPage() {
                                                             <div className="flex items-center gap-3">
                                                                 <Badge variant="outline">{product.code}</Badge>
                                                                 {leadTime > 0 && (
-                                                                    <Badge variant="secondary">{leadTime} dias</Badge>
+                                                                    <Badge variant="secondary">{leadTime} dias (1 peÃ§a)</Badge>
                                                                 )}
                                                             </div>
                                                             <h4 className="font-medium">{product.description}</h4>
                                                             <div className="flex items-center gap-4 text-sm text-muted-foreground">
-                                                                <span>Preço: {product.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
+                                                                <span>PreÃ§o: {product.unitPrice.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</span>
                                                                 {product.unitWeight && product.unitWeight > 0 && (
                                                                     <span>Peso: {product.unitWeight} kg</span>
                                                                 )}
@@ -2442,7 +2449,7 @@ export default function QuotationsPage() {
                     {selectedQuotation && (
                         <>
                         <SheetHeader>
-                            <SheetTitle className="font-headline text-2xl">Orçamento Nº {selectedQuotation.number}</SheetTitle>
+                            <SheetTitle className="font-headline text-2xl">OrÃ§amento NÂº {selectedQuotation.number}</SheetTitle>
                             <SheetDescription>
                                 Cliente: <span className="font-medium text-foreground">{selectedQuotation.customer.name}</span>
                                 {selectedQuotation.buyerName && ` | Comprador: `}
@@ -2452,14 +2459,14 @@ export default function QuotationsPage() {
                         <ScrollArea className="h-[calc(100vh-12rem)]">
                             <div className="space-y-6 py-6 pr-6">
                                 <Card>
-                                    <CardHeader><CardTitle>Detalhes do Orçamento</CardTitle></CardHeader>
+                                    <CardHeader><CardTitle>Detalhes do OrÃ§amento</CardTitle></CardHeader>
                                     <CardContent className="space-y-3 text-sm">
                                         <div className="flex justify-between items-center">
                                             <span className="font-medium text-muted-foreground">Status</span>
                                             <Badge variant={getStatusVariant(selectedQuotation.status)} className={cn((selectedQuotation.status === 'Aprovado' || selectedQuotation.status === 'Pedido Gerado') && 'bg-green-600 text-primary-foreground')}>{selectedQuotation.status}</Badge>
                                         </div>
                                         <div className="flex justify-between items-center">
-                                            <span className="font-medium text-muted-foreground">Data de Criação</span>
+                                            <span className="font-medium text-muted-foreground">Data de CriaÃ§Ã£o</span>
                                             <span>{format(selectedQuotation.createdAt.toDate(), "dd/MM/yyyy")}</span>
                                         </div>
                                         <div className="flex justify-between items-center">
@@ -2479,8 +2486,8 @@ export default function QuotationsPage() {
                                             <span className="font-medium text-muted-foreground">Frete</span>
                                             <span className="text-right font-medium">
                                                 {selectedQuotation.freightType === 'CIF'
-                                                    ? 'CIF — fornecedora/contratada'
-                                                    : 'FOB — cliente/contratante'}
+                                                    ? 'CIF â€” fornecedora/contratada'
+                                                    : 'FOB â€” cliente/contratante'}
                                             </span>
                                         </div>
                                         <div className="flex justify-between items-start gap-4">
@@ -2489,10 +2496,10 @@ export default function QuotationsPage() {
                                                 {Number(selectedQuotation.freightValue || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
                                                 <span className="block text-xs text-muted-foreground">
                                                     {selectedQuotation.freightType === 'FOB'
-                                                        ? 'não incluído no orçamento'
+                                                        ? 'nÃ£o incluÃ­do no orÃ§amento'
                                                         : selectedQuotation.freightIncludedInPrice === false
                                                             ? 'adicionado separadamente ao total'
-                                                            : 'já embutido nos produtos'}
+                                                            : 'jÃ¡ embutido nos produtos'}
                                                 </span>
                                             </span>
                                         </div>
@@ -2505,8 +2512,8 @@ export default function QuotationsPage() {
                                         <Table>
                                             <TableHeader>
                                                 <TableRow>
-                                                    <TableHead>Código</TableHead>
-                                                    <TableHead>Descrição</TableHead>
+                                                    <TableHead>CÃ³digo</TableHead>
+                                                    <TableHead>DescriÃ§Ã£o</TableHead>
                                                     <TableHead className="text-center w-[60px]">Qtd.</TableHead>
                                                     <TableHead className="text-right w-[120px]">Valor Unit. s/ Imp.</TableHead>
                                                     <TableHead className="text-center w-[180px]">ICMS / PIS / COFINS</TableHead>
@@ -2585,10 +2592,10 @@ export default function QuotationsPage() {
                                         <CardContent className="p-4 text-orange-900">
                                             <div className="flex items-center gap-2 font-bold">
                                                 <Percent className="h-5 w-5" />
-                                                FABRICAÇÃO EMERGENCIAL
+                                                FABRICAÃ‡ÃƒO EMERGENCIAL
                                             </div>
                                             <p className="mt-1 text-sm">
-                                                Este orçamento considera atendimento urgente com adicional de {selectedQuotation.emergencyRate || 0}% no valor final de cada produto.
+                                                Este orÃ§amento considera atendimento urgente com adicional de {selectedQuotation.emergencyRate || 0}% no valor final de cada produto.
                                             </p>
                                         </CardContent>
                                     </Card>
@@ -2596,7 +2603,7 @@ export default function QuotationsPage() {
 
                                 {selectedQuotation.includedServices && selectedQuotation.includedServices.length > 0 && (
                                     <Card>
-                                        <CardHeader><CardTitle>Serviços Inclusos</CardTitle></CardHeader>
+                                        <CardHeader><CardTitle>ServiÃ§os Inclusos</CardTitle></CardHeader>
                                         <CardContent>
                                             <ul className="grid grid-cols-2 gap-2 text-sm text-muted-foreground">
                                                 {selectedQuotation.includedServices.map(serviceId => {
@@ -2610,7 +2617,7 @@ export default function QuotationsPage() {
 
                                 {selectedQuotation.notes && (
                                     <Card>
-                                        <CardHeader><CardTitle>Observações Gerais</CardTitle></CardHeader>
+                                        <CardHeader><CardTitle>ObservaÃ§Ãµes Gerais</CardTitle></CardHeader>
                                         <CardContent>
                                             <p className="text-sm text-muted-foreground whitespace-pre-wrap">{selectedQuotation.notes}</p>
                                         </CardContent>
@@ -2654,9 +2661,9 @@ export default function QuotationsPage() {
             <AlertDialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
                 <AlertDialogContent>
                     <AlertDialogHeader>
-                    <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
+                    <AlertDialogTitle>VocÃª tem certeza?</AlertDialogTitle>
                     <AlertDialogDescription>
-                        Esta ação não pode ser desfeita. Isso excluirá permanentemente o orçamento.
+                        Esta aÃ§Ã£o nÃ£o pode ser desfeita. Isso excluirÃ¡ permanentemente o orÃ§amento.
                     </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
@@ -2673,9 +2680,9 @@ export default function QuotationsPage() {
                     <Form {...generateOrderForm}>
                         <form onSubmit={generateOrderForm.handleSubmit(onConfirmGenerateOrder)}>
                             <DialogHeader>
-                                <DialogTitle>Gerar Pedido de Produção</DialogTitle>
+                                <DialogTitle>Gerar Pedido de ProduÃ§Ã£o</DialogTitle>
                                 <DialogDescription>
-                                    O orçamento Nº <span className="font-bold">{quotationToConvert?.number}</span> será convertido em um pedido. O número do orçamento se tornará a OS Interna. Por favor, insira o número do Pedido de Compra (PC) do cliente.
+                                    O orÃ§amento NÂº <span className="font-bold">{quotationToConvert?.number}</span> serÃ¡ convertido em um pedido. O nÃºmero do orÃ§amento se tornarÃ¡ a OS Interna. Por favor, insira o nÃºmero do Pedido de Compra (PC) do cliente.
                                 </DialogDescription>
                             </DialogHeader>
                             <div className="py-4">
@@ -2684,7 +2691,7 @@ export default function QuotationsPage() {
                                     name="poNumber"
                                     render={({ field }) => (
                                         <FormItem>
-                                            <FormLabel>Nº do Pedido de Compra do Cliente</FormLabel>
+                                            <FormLabel>NÂº do Pedido de Compra do Cliente</FormLabel>
                                             <FormControl>
                                                 <Input placeholder="Ex: PC-12345" {...field} value={field.value ?? ''} />
                                             </FormControl>
