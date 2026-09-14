@@ -11,7 +11,7 @@ import { db } from "@/lib/firebase";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx"; 
     import jsPDF from 'jspdf';
 
 import { Button } from "@/components/ui/button";
