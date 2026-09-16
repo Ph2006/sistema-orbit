@@ -294,6 +294,7 @@ export default function QuotationsPage() {
     // Estados para busca de produtos
     const [isProductSearchOpen, setIsProductSearchOpen] = useState(false);
     const [productSearchQuery, setProductSearchQuery] = useState("");
+    const [deliveryTimeUnit, setDeliveryTimeUnit] = useState<'uteis' | 'corridos'>('uteis');
 
     // Generate Order Dialog State
     const [isGenerateOrderDialogOpen, setIsGenerateOrderDialogOpen] = useState(false);
@@ -391,6 +392,14 @@ export default function QuotationsPage() {
         },
         [watchedItems, watchedDiscount, activeEmergencyRate, freightAddedToTotal]
     );
+
+    const maxLeadTimeDays = useMemo(() => {
+        if (!watchedItems || watchedItems.length === 0) return 0;
+        return watchedItems.reduce((max, item) => {
+            const leadTime = Number(item.leadTimeDays) || 0;
+            return leadTime > max ? leadTime : max;
+        }, 0);
+    }, [watchedItems]);
 
     // Busca produtos filtrados para o modal
     const filteredProducts = useMemo(() => {
@@ -765,6 +774,26 @@ export default function QuotationsPage() {
             title: "Produto adicionado!",
             description: `${product.description} foi adicionado ao formulário.`,
         });
+    };
+
+    const handleFillDeliveryTime = (unit: 'uteis' | 'corridos') => {
+        setDeliveryTimeUnit(unit);
+
+        if (maxLeadTimeDays <= 0) {
+            toast({
+                variant: 'destructive',
+                title: 'Nenhum lead time definido',
+                description: 'Adicione itens com lead time preenchido para calcular o prazo automaticamente.',
+            });
+            return;
+        }
+
+        const unitLabel = unit === 'uteis' ? 'úteis' : 'corridos';
+        form.setValue(
+            'deliveryTime',
+            `${maxLeadTimeDays} dias ${unitLabel} após recebimento do pedido de compras.`,
+            { shouldValidate: true }
+        );
     };
 
     const handleAddItem = () => {
@@ -2304,7 +2333,34 @@ export default function QuotationsPage() {
                                             <FormItem><FormLabel>Condições de Pagamento</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
                                         )}/>
                                         <FormField control={form.control} name="deliveryTime" render={({ field }) => (
-                                            <FormItem><FormLabel>Prazo de Entrega</FormLabel><FormControl><Input {...field} value={field.value ?? ''} /></FormControl><FormMessage /></FormItem>
+                                            <FormItem>
+                                                <FormLabel>Prazo de Entrega</FormLabel>
+                                                <div className="flex flex-wrap items-center gap-2 mb-2">
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant={deliveryTimeUnit === 'uteis' ? 'default' : 'outline'}
+                                                        onClick={() => handleFillDeliveryTime('uteis')}
+                                                    >
+                                                        Dias Úteis
+                                                    </Button>
+                                                    <Button
+                                                        type="button"
+                                                        size="sm"
+                                                        variant={deliveryTimeUnit === 'corridos' ? 'default' : 'outline'}
+                                                        onClick={() => handleFillDeliveryTime('corridos')}
+                                                    >
+                                                        Dias Corridos
+                                                    </Button>
+                                                    {maxLeadTimeDays > 0 && (
+                                                        <span className="text-xs text-muted-foreground">
+                                                            Maior lead time do orçamento: {maxLeadTimeDays} dias
+                                                        </span>
+                                                    )}
+                                                </div>
+                                                <FormControl><Input {...field} value={field.value ?? ''} /></FormControl>
+                                                <FormMessage />
+                                            </FormItem>
                                         )}/>
                                         <FormField control={form.control} name="discount" render={({ field }) => (
                                             <FormItem>
