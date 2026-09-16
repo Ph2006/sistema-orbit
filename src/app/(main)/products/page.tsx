@@ -153,6 +153,61 @@ const getLeadTimeBadge = (leadTime: number) => {
     specification?: string;
     }
 
+    type CommercialModality =
+    | "venda_fabricacao_propria"
+    | "industrializacao_encomenda"
+    | "industrializacao_mista"
+    | "servico_tecnico"
+    | "reparo_manutencao"
+    | "revenda_mercadoria";
+
+    const COMMERCIAL_MODALITIES: {
+    id: CommercialModality;
+    label: string;
+    description: string;
+    requiresMaterial: boolean;
+    }[] = [
+    {
+        id: "venda_fabricacao_propria",
+        label: "Venda de Fabricação Própria",
+        description: "Mecald compra o aço, fabrica e vende o equipamento ou peça acabada.",
+        requiresMaterial: true,
+    },
+    {
+        id: "industrializacao_encomenda",
+        label: "Industrialização por Encomenda",
+        description: "Cliente envia o material; Mecald cobra apenas a industrialização.",
+        requiresMaterial: false,
+    },
+    {
+        id: "industrializacao_mista",
+        label: "Industrialização Mista",
+        description: "Cliente fornece parte do material; Mecald complementa com chapas, perfis ou consumíveis.",
+        requiresMaterial: true,
+    },
+    {
+        id: "servico_tecnico",
+        label: "Serviço Técnico",
+        description: "Projeto, inspeção, diligenciamento ou consultoria — sem material aplicado.",
+        requiresMaterial: false,
+    },
+    {
+        id: "reparo_manutencao",
+        label: "Reparo / Manutenção",
+        description: "Recuperação de equipamento usado; material normalmente por conta do cliente.",
+        requiresMaterial: false,
+    },
+    {
+        id: "revenda_mercadoria",
+        label: "Revenda de Mercadoria",
+        description: "Mecald compra um item pronto e revende sem industrializar.",
+        requiresMaterial: true,
+    },
+    ];
+
+    const getModalityConfig = (modality: CommercialModality) =>
+    COMMERCIAL_MODALITIES.find(m => m.id === modality) || COMMERCIAL_MODALITIES[0];
+
     interface MaterialCompositionItem {
     id: string;
     materialId: string;
@@ -174,6 +229,7 @@ const getLeadTimeBadge = (leadTime: number) => {
     productCode: string;
     productDescription: string;
     productWeight: number;
+    commercialModality: CommercialModality;
     materialCosts: MaterialCompositionItem[];
     stageCosts: StageCostItem[];
     machiningCost: number;
@@ -617,6 +673,7 @@ export default function ProductsPage() {
     const [consumablesCostPerKg, setConsumablesCostPerKg] = useState<number>(0);
     const [selectedProductForPricing, setSelectedProductForPricing] = useState<Product | null>(null);
     const [pricingCalculation, setPricingCalculation] = useState<PricingCalculation | null>(null);
+    const [pricingModality, setPricingModality] = useState<CommercialModality>("venda_fabricacao_propria");
     const [materialComposition, setMaterialComposition] = useState<MaterialCompositionItem[]>([]);
     const [profitMargin, setProfitMargin] = useState<number>(30);
     const [irpjRate, setIrpjRate] = useState<number>(4.8);
@@ -921,13 +978,22 @@ export default function ProductsPage() {
       const product = products.find(p => p.code === productCode) || null;
       if (snap.exists()) {
         const data = snap.data();
-        const composition: MaterialCompositionItem[] = data.materialComposition || [];
+        const savedModality = (data.commercialModality as CommercialModality | undefined)
+          ?? "venda_fabricacao_propria";
+        const composition: MaterialCompositionItem[] = getModalityConfig(savedModality).requiresMaterial
+          ? (data.materialComposition || [])
+          : [];
         setMaterialComposition(composition);
-        setPricingCalculation(data as PricingCalculation);
+        setPricingCalculation({
+          ...data,
+          commercialModality: savedModality,
+          materialCosts: composition,
+        } as PricingCalculation);
         setProfitMargin(data.profitMargin ?? 30);
         setIrpjRate(data.irpjRate ?? 4.8);
         setCsllRate(data.csllRate ?? 2.88);
         setMachiningHours(data.machiningHours ?? getMachiningHoursFromPlan(product));
+        setPricingModality(savedModality);
         toast({
           title: "Precificação carregada!",
           description: `Dados anteriores de ${productCode} recuperados.`,
@@ -938,6 +1004,7 @@ export default function ProductsPage() {
         setMachiningHours(getMachiningHoursFromPlan(product));
         setIrpjRate(4.8);
         setCsllRate(2.88);
+        setPricingModality("venda_fabricacao_propria");
       }
     } catch (error) {
       console.error("Error loading saved pricing:", error);
@@ -970,9 +1037,15 @@ export default function ProductsPage() {
         materialComposition?: MaterialCompositionItem[];
         machiningHours?: number;
       };
-      const copiedMaterials = sourceData.materialComposition || sourceData.materialCosts || [];
+      const copiedModality = (sourceData.commercialModality as CommercialModality | undefined)
+        ?? "venda_fabricacao_propria";
+      const copiedMaterials = getModalityConfig(copiedModality).requiresMaterial
+        ? (sourceData.materialComposition || sourceData.materialCosts || [])
+        : [];
       const copiedCalculation: PricingCalculation = {
         ...sourceData,
+        commercialModality: copiedModality,
+        materialCosts: copiedMaterials,
         productId: selectedProductForPricing.id,
         productCode: selectedProductForPricing.code,
         productDescription: selectedProductForPricing.description,
@@ -1005,6 +1078,7 @@ export default function ProductsPage() {
       setIrpjRate(sourceData.irpjRate ?? 4.8);
       setCsllRate(sourceData.csllRate ?? 2.88);
       setMachiningHours(sourceData.machiningHours ?? 0);
+      setPricingModality(copiedModality);
 
       const copiedWeight = copiedCalculation.productWeight || 0;
       setConsumablesCostPerKg(copiedWeight > 0
@@ -3208,6 +3282,39 @@ export default function ProductsPage() {
                                                 </div>
                                             </div>
 
+                                            <div className="space-y-2">
+                                                <Label>Modalidade Comercial</Label>
+                                                <p className="text-xs text-muted-foreground">
+                                                    Defina como esta operação será tratada fiscal e comercialmente. Isso ajusta se a composição de materiais é obrigatória.
+                                                </p>
+                                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                                    {COMMERCIAL_MODALITIES.map((modality) => {
+                                                        const isSelected = pricingModality === modality.id;
+                                                        return (
+                                                            <button
+                                                                key={modality.id}
+                                                                type="button"
+                                                                onClick={() => setPricingModality(modality.id)}
+                                                                className={cn(
+                                                                    "text-left rounded-md border p-3 text-sm transition-colors",
+                                                                    isSelected
+                                                                        ? "border-primary bg-primary/10 ring-1 ring-primary"
+                                                                        : "hover:border-primary/50 hover:bg-muted/50"
+                                                                )}
+                                                            >
+                                                                <div className="flex items-center justify-between gap-2">
+                                                                    <span className="font-medium">{modality.label}</span>
+                                                                    {!modality.requiresMaterial && (
+                                                                        <Badge variant="outline" className="text-[10px] shrink-0">Sem material</Badge>
+                                                                    )}
+                                                                </div>
+                                                                <p className="text-xs text-muted-foreground mt-1">{modality.description}</p>
+                                                            </button>
+                                                        );
+                                                    })}
+                                                </div>
+                                            </div>
+
                                             <Button
                                                 type="button"
                                                 variant="outline"
@@ -3224,6 +3331,7 @@ export default function ProductsPage() {
 
                                             <Separator />
 
+                                            {getModalityConfig(pricingModality).requiresMaterial ? (
                                             <div>
                                                 <h4 className="text-sm font-medium mb-3">Composição de Materiais</h4>
                                                 <p className="text-xs text-muted-foreground mb-3">
@@ -3388,6 +3496,16 @@ export default function ProductsPage() {
                                                     )}
                                                 </div>
                                             </div>
+                                            ) : (
+                                                <div className="p-4 rounded-md border border-blue-300 bg-blue-50 text-sm text-blue-900">
+                                                    <div className="font-medium mb-1">Material não aplicável nesta modalidade</div>
+                                                    <p className="text-xs">
+                                                        {pricingModality === "servico_tecnico"
+                                                            ? "Serviços técnicos não envolvem matéria-prima — o preço será calculado com base em etapas, horas e margem."
+                                                            : "O material é fornecido pelo cliente nesta modalidade — o preço cobre apenas a industrialização/mão de obra."}
+                                                    </p>
+                                                </div>
+                                            )}
 
                                             {selectedProductForPricing.productionPlanTemplate?.some(stage => 
                                                 stage.stageName.toLowerCase().includes('usinagem')
@@ -3415,23 +3533,27 @@ export default function ProductsPage() {
                                             {/* ─── MODIFICADO: botão Calcular agora também salva ─── */}
                                             <Button 
                                                 onClick={async () => {
-                                                    if (materialComposition.length === 0) {
-                                                        toast({
-                                                            variant: "destructive",
-                                                            title: "Adicione materiais",
-                                                            description: "É necessário adicionar pelo menos um material à composição."
-                                                        });
-                                                        return;
-                                                    }
+                                                    const modalityConfig = getModalityConfig(pricingModality);
 
-                                                    const materialsWithoutWeight = materialComposition.filter(m => !m.weightKg || m.weightKg <= 0);
-                                                    if (materialsWithoutWeight.length > 0) {
-                                                        toast({
-                                                            variant: "destructive",
-                                                            title: "Defina o peso dos materiais",
-                                                            description: `${materialsWithoutWeight.length} material(is) sem peso definido.`
-                                                        });
-                                                        return;
+                                                    if (modalityConfig.requiresMaterial) {
+                                                        if (materialComposition.length === 0) {
+                                                            toast({
+                                                                variant: "destructive",
+                                                                title: "Adicione materiais",
+                                                                description: "Esta modalidade exige pelo menos um material na composição."
+                                                            });
+                                                            return;
+                                                        }
+
+                                                        const materialsWithoutWeight = materialComposition.filter(m => !m.weightKg || m.weightKg <= 0);
+                                                        if (materialsWithoutWeight.length > 0) {
+                                                            toast({
+                                                                variant: "destructive",
+                                                                title: "Defina o peso dos materiais",
+                                                                description: `${materialsWithoutWeight.length} material(is) sem peso definido.`
+                                                            });
+                                                            return;
+                                                        }
                                                     }
 
                                                     const productWeight = selectedProductForPricing.unitWeight || 0;
@@ -3448,7 +3570,10 @@ export default function ProductsPage() {
                                                         };
                                                     });
 
-                                                    const materialCostTotal = materialComposition.reduce((sum, m) => sum + m.totalCost, 0);
+                                                    const materialCostTotal = modalityConfig.requiresMaterial
+                                                        ? materialComposition.reduce((sum, m) => sum + m.totalCost, 0)
+                                                        : 0;
+                                                    const materialsForRecord = modalityConfig.requiresMaterial ? materialComposition : [];
                                                     const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
                                                     const machiningCost = machiningHours * machineHourRate;
                                                     const consumablesCost = consumablesCostPerKg * productWeight;
@@ -3472,14 +3597,15 @@ export default function ProductsPage() {
                                                     const finalPrice = priceBeforeIncomeTaxes / incomeTaxDenominator;
                                                     const irpjAmount = finalPrice * irpjDecimal;
                                                     const csllAmount = finalPrice * csllDecimal;
-                                                    const pricePerKg = finalPrice / productWeight;
+                                                    const pricePerKg = productWeight > 0 ? finalPrice / productWeight : 0;
 
                                                     const calculation: PricingCalculation = {
                                                         productId: selectedProductForPricing.id,
                                                         productCode: selectedProductForPricing.code,
                                                         productDescription: selectedProductForPricing.description,
                                                         productWeight: productWeight,
-                                                        materialCosts: materialComposition,
+                                                        commercialModality: pricingModality,
+                                                        materialCosts: materialsForRecord,
                                                         stageCosts: stageCostItems,
                                                         machiningCost,
                                                         consumablesCost: consumablesCost,
@@ -3499,10 +3625,10 @@ export default function ProductsPage() {
                                                     setPricingCalculation(calculation);
 
                                                     // ─── NOVO: salva automaticamente no Firestore ───
-                                                    await savePricingCalculation(calculation, materialComposition, machiningHours);
+                                                    await savePricingCalculation(calculation, materialsForRecord, machiningHours);
                                                 }} 
                                                 className="w-full"
-                                                disabled={materialComposition.length === 0}
+                                                disabled={getModalityConfig(pricingModality).requiresMaterial && materialComposition.length === 0}
                                             >
                                                 <Calculator className="mr-2 h-4 w-4" />
                                                 Calcular e Salvar Preço
@@ -3517,6 +3643,11 @@ export default function ProductsPage() {
                                     <div className="flex items-center justify-between">
                                         <div>
                                             <CardTitle>Resultado da Precificação</CardTitle>
+                                            {pricingCalculation && (
+                                                <Badge variant="outline" className="mt-2 mb-2">
+                                                    {getModalityConfig(pricingCalculation.commercialModality).label}
+                                                </Badge>
+                                            )}
                                             <CardDescription>
                                                 Composição detalhada de custos e preço final
                                             </CardDescription>
