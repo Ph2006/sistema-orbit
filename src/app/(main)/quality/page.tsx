@@ -68,6 +68,70 @@ const removeUndefined = (obj: any): any => {
   return obj;
 };
 
+const calculateToleranceResult = (
+  nominal: number,
+  measured: number,
+  toleranceMin?: string | null,
+  toleranceMax?: string | null
+): "Conforme" | "Não Conforme" => {
+  if (!toleranceMin && !toleranceMax) return "Conforme";
+
+  let lowerBound = nominal;
+  let upperBound = nominal;
+  const bounds: number[] = [];
+  let symmetricApplied = false;
+
+  const parseSigned = (tolerance: string) => {
+    const value = tolerance.trim();
+    if (value.startsWith('+')) return nominal + Math.abs(parseFloat(value.substring(1)));
+    if (value.startsWith('-')) return nominal - Math.abs(parseFloat(value.substring(1)));
+    return null;
+  };
+
+  if (toleranceMin) {
+    const bound = parseSigned(toleranceMin);
+    if (bound !== null) {
+      bounds.push(bound);
+    } else {
+      // Sem sinal: tolerância simétrica (±).
+      const toleranceValue = Math.abs(parseFloat(toleranceMin));
+      lowerBound = nominal - toleranceValue;
+      upperBound = nominal + toleranceValue;
+      symmetricApplied = true;
+    }
+  }
+
+  if (toleranceMax && !symmetricApplied) {
+    const bound = parseSigned(toleranceMax);
+    if (bound !== null) {
+      bounds.push(bound);
+    } else if (bounds.length === 0) {
+      const toleranceValue = Math.abs(parseFloat(toleranceMax));
+      lowerBound = nominal - toleranceValue;
+      upperBound = nominal + toleranceValue;
+      symmetricApplied = true;
+    }
+  }
+
+  if (!symmetricApplied && bounds.length > 0) {
+    if (bounds.length === 2) {
+      lowerBound = Math.min(bounds[0], bounds[1]);
+      upperBound = Math.max(bounds[0], bounds[1]);
+    } else {
+      const bound = bounds[0];
+      if (bound >= nominal) {
+        lowerBound = nominal;
+        upperBound = bound;
+      } else {
+        lowerBound = bound;
+        upperBound = nominal;
+      }
+    }
+  }
+
+  return measured < lowerBound || measured > upperBound ? "Não Conforme" : "Conforme";
+};
+
 // === COMPONENTE VISUAL DE INDICADOR DE TAMANHO ===
 const DataSizeIndicator = ({ data, maxSizeKB = 900 }: { data: any, maxSizeKB?: number }) => {
     const currentSizeKB = (JSON.stringify(data).length / 1024);
@@ -5082,51 +5146,12 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             return;
         }
 
-        // Nova lógica para tolerâncias com sinais
-        let result: "Conforme" | "Não Conforme" = "Conforme";
-        
-        // Verificar tolerâncias se foram preenchidas
-        if (newMeasurement.toleranceMin || newMeasurement.toleranceMax) {
-            let lowerBound = nominal;
-            let upperBound = nominal;
-            
-            // Processar tolerância 1
-            if (newMeasurement.toleranceMin) {
-                const tol1 = newMeasurement.toleranceMin.trim();
-                if (tol1.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol1.substring(1)));
-                } else if (tol1.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol1.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol1));
-                    lowerBound = nominal - tolValue;
-                    upperBound = nominal + tolValue;
-                }
-            }
-            
-            // Processar tolerância 2
-            if (newMeasurement.toleranceMax) {
-                const tol2 = newMeasurement.toleranceMax.trim();
-                if (tol2.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol2.substring(1)));
-                } else if (tol2.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol2.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol2));
-                    if (!newMeasurement.toleranceMin) {
-                        lowerBound = nominal - tolValue;
-                        upperBound = nominal + tolValue;
-                    }
-                }
-            }
-            
-            // Verificar se o valor medido está dentro da tolerância
-            if (measured < lowerBound || measured > upperBound) {
-                result = "Não Conforme";
-            }
-        }
+        const result = calculateToleranceResult(
+            nominal,
+            measured,
+            newMeasurement.toleranceMin,
+            newMeasurement.toleranceMax
+        );
         
         // Adicionar medição SEM campo ID
         fieldArrayProps.append({
@@ -5179,51 +5204,12 @@ function DimensionalReportForm({ form, orders, teamMembers, fieldArrayProps, cal
             return;
         }
 
-        // Nova lógica para tolerâncias com sinais
-        let result: "Conforme" | "Não Conforme" = "Conforme";
-        
-        // Verificar tolerâncias se foram preenchidas
-        if (editingData.toleranceMin || editingData.toleranceMax) {
-            let lowerBound = nominal;
-            let upperBound = nominal;
-            
-            // Processar tolerância 1
-            if (editingData.toleranceMin) {
-                const tol1 = editingData.toleranceMin.trim();
-                if (tol1.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol1.substring(1)));
-                } else if (tol1.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol1.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol1));
-                    lowerBound = nominal - tolValue;
-                    upperBound = nominal + tolValue;
-                }
-            }
-            
-            // Processar tolerância 2
-            if (editingData.toleranceMax) {
-                const tol2 = editingData.toleranceMax.trim();
-                if (tol2.startsWith('+')) {
-                    upperBound = nominal + Math.abs(parseFloat(tol2.substring(1)));
-                } else if (tol2.startsWith('-')) {
-                    lowerBound = nominal - Math.abs(parseFloat(tol2.substring(1)));
-                } else {
-                    // Se não tem sinal, assume como ±
-                    const tolValue = Math.abs(parseFloat(tol2));
-                    if (!editingData.toleranceMin) {
-                        lowerBound = nominal - tolValue;
-                        upperBound = nominal + tolValue;
-                    }
-                }
-            }
-            
-            // Verificar se o valor medido está dentro da tolerância
-            if (measured < lowerBound || measured > upperBound) {
-                result = "Não Conforme";
-            }
-        }
+        const result = calculateToleranceResult(
+            nominal,
+            measured,
+            editingData.toleranceMin,
+            editingData.toleranceMax
+        );
         
         const updatedMeasurement = {
             ...fieldArrayProps.fields[editingIndex],
