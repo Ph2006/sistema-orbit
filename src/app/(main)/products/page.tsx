@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { USEFUL_HOURS_PER_DAY } from "@/lib/orders-shared";
     import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package, BookOpen, ShieldAlert, Upload, User, Hash, Save, ImagePlus, X } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -34,9 +35,6 @@ import { Badge } from "@/components/ui/badge";
 import { Calendar } from "@/components/ui/calendar";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-
-// Horas úteis de trabalho por dia — ajuste conforme a jornada da sua empresa
-const USEFUL_HOURS_PER_DAY = 8;
 
 const hoursToDays = (hours: number): number => hours / USEFUL_HOURS_PER_DAY;
 
@@ -5037,3 +5035,4 @@ export default function ProductsPage() {
   );
 
 }
+
