@@ -1768,6 +1768,49 @@ export default function OrdersPage() {
     }, [filteredOrders]);
 
 
+    // Peso entregue por mês de embarque, sem os filtros de período do pedido.
+    const deliveredWeightByMonth = useMemo(() => {
+        const result = new Map<string, number>();
+        const query = searchQuery.toLowerCase();
+        const isValidDate = (value: unknown): value is Date =>
+            value instanceof Date && !isNaN(value.getTime());
+
+        orders.forEach(order => {
+            const textMatch =
+                (order.quotationNumber?.toString().toLowerCase() || '').includes(query) ||
+                (order.customer?.name?.toLowerCase() || '').includes(query) ||
+                (order.status?.toLowerCase() || '').includes(query) ||
+                (order.internalOS?.toLowerCase() || '').includes(query) ||
+                (order.projectName?.toLowerCase() || '').includes(query);
+            if (!textMatch) return;
+            if (statusFilter !== 'all' && order.status !== statusFilter) return;
+            if (customerFilter !== 'all' && order.customer.id !== customerFilter) return;
+
+            const isCompleted = order.status === 'Concluído';
+            let completionDate: Date | null = null;
+            if (isCompleted) {
+                const shippingDates = order.items.map(item => item.shippingDate).filter(isValidDate);
+                completionDate = isValidDate(order.completedAt)
+                    ? order.completedAt
+                    : shippingDates.length > 0
+                        ? new Date(Math.max(...shippingDates.map(date => date.getTime())))
+                        : (isValidDate(order.createdAt) ? order.createdAt : null);
+            }
+
+            order.items.forEach(item => {
+                const weight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+                if (weight <= 0) return;
+                const deliveredAt = isValidDate(item.shippingDate) ? item.shippingDate : completionDate;
+                if (!deliveredAt) return;
+                const key = format(deliveredAt, 'yyyy-MM');
+                result.set(key, (result.get(key) || 0) + weight);
+            });
+        });
+
+        return result;
+    }, [orders, searchQuery, statusFilter, customerFilter]);
+
+
     // Gera os dias do mês atual para o calendário
     const generateCalendarDays = (date: Date): { days: Date[], firstDay: Date, lastDay: Date } => {
         const year = date.getFullYear();
@@ -1947,34 +1990,24 @@ export default function OrdersPage() {
                                                     {monthData.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                                                 </span>
                                             </div>
-                                            {isCompletedYear ? (
-                                                <>
-                                                    {(monthData.partialWeight || 0) > 0 && (
-                                                        <p className="text-xs mt-1 text-green-700/80">
-                                                            Inclui {(monthData.partialWeight || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg de entregas parciais de pedidos em aberto
-                                                        </p>
-                                                    )}
-                                                    {monthData.weightByMonth && monthData.weightByMonth.size > 0 && (
-                                                        <div className="mt-2 pt-2 border-t border-green-200 space-y-0.5">
-                                                            {Array.from(monthData.weightByMonth.entries())
-                                                                .sort(([a], [b]) => a.localeCompare(b))
-                                                                .map(([monthKey, weight]) => {
-                                                                    const [y, m] = monthKey.split('-');
-                                                                    const label = new Date(Number(y), Number(m) - 1, 1)
-                                                                        .toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
-                                                                    return (
-                                                                        <div key={monthKey} className="flex justify-between text-xs">
-                                                                            <span className="capitalize">{label}</span>
-                                                                            <span className="font-medium">
-                                                                                {weight.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg
-                                                                            </span>
-                                                                        </div>
-                                                                    );
-                                                                })}
-                                                        </div>
-                                                    )}
-                                                </>
-                                            ) : (
+                                            {isCompletedYear ? (() => {
+                                                const columnYear = monthKey.replace('completed-', '');
+                                                if (monthFilter === 'all' || !monthFilter.startsWith(`${columnYear}-`)) return null;
+
+                                                const [y, m] = monthFilter.split('-');
+                                                const monthLabel = new Date(Number(y), Number(m) - 1, 1)
+                                                    .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
+                                                const monthDelivered = deliveredWeightByMonth.get(monthFilter) || 0;
+
+                                                return (
+                                                    <div className="mt-2 pt-2 border-t border-green-200 flex justify-between gap-2 text-xs">
+                                                        <span className="capitalize">Entregue em {monthLabel}</span>
+                                                        <span className="font-semibold whitespace-nowrap">
+                                                            {monthDelivered.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
+                                                        </span>
+                                                    </div>
+                                                );
+                                            })() : (
                                                 <>
                                                     <p className="text-xs mt-1 text-muted-foreground">Peso pendente de embarque</p>
                                                     {(monthData.deliveredWeight || 0) > 0 && (
