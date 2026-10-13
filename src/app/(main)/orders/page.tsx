@@ -1688,105 +1688,85 @@ export default function OrdersPage() {
         return grouped;
     }, [filteredOrders]);
 
-    // Organiza os pedidos por mês para visualização Kanban - CORRIGIDO
+    // O peso entregue é contabilizado item a item pela data de embarque.
     const ordersByMonth = useMemo(() => {
-        const grouped = new Map<string, {
+        type MonthColumnData = {
             orders: Order[];
             totalWeight: number;
+            deliveredWeight: number;
             itemsByOrder: Map<string, OrderItem[]>;
-        }>();
-        
-        // NOVO: Agrupar concluídos por ano
-        const completedByYear = new Map<string, {
+        };
+        type YearColumnData = {
             orders: Order[];
             totalWeight: number;
-        }>();
+            partialWeight: number;
+            weightByMonth: Map<string, number>;
+        };
+
+        const grouped = new Map<string, MonthColumnData>();
+        const completedByYear = new Map<string, YearColumnData>();
+        const isValidDate = (value: unknown): value is Date =>
+            value instanceof Date && !isNaN(value.getTime());
+        const getItemWeight = (item: OrderItem) =>
+            (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
+
+        const getYearColumn = (year: string) => {
+            if (!completedByYear.has(year)) {
+                completedByYear.set(year, { orders: [], totalWeight: 0, partialWeight: 0, weightByMonth: new Map() });
+            }
+            return completedByYear.get(year)!;
+        };
+
+        const getOrderCompletionDate = (order: Order): Date | null => {
+            if (isValidDate(order.completedAt)) return order.completedAt;
+            const shippingDates = order.items.map(item => item.shippingDate).filter(isValidDate);
+            if (shippingDates.length > 0) {
+                return new Date(Math.max(...shippingDates.map(date => date.getTime())));
+            }
+            return isValidDate(order.createdAt) ? order.createdAt : null;
+        };
 
         filteredOrders.forEach(order => {
-            if (order.status === 'Concluído') {
-                let completionYear: string;
-                
-                if (order.completedAt) {
-                    // Prioridade 1: Data de conclusão oficial
-                    completionYear = format(new Date(order.completedAt), 'yyyy');
-                    console.log('📅 Usando completedAt:', order.quotationNumber, completionYear);
-                } else {
-                    // Prioridade 2: Data de embarque mais recente dos itens
-                    const shippingDates = order.items
-                        .map(item => item.shippingDate)
-                        .filter(date => date !== null && date !== undefined)
-                        .map(date => new Date(date));
-                    
-                    if (shippingDates.length > 0) {
-                        // Pegar a data de embarque mais recente
-                        const latestShipping = new Date(Math.max(...shippingDates.map(d => d.getTime())));
-                        completionYear = format(latestShipping, 'yyyy');
-                        console.log('📦 Usando shippingDate:', order.quotationNumber, completionYear);
-                    } else if (order.createdAt) {
-                        // Prioridade 3: Data de criação do pedido
-                        completionYear = format(new Date(order.createdAt), 'yyyy');
-                        console.log('📝 Usando createdAt:', order.quotationNumber, completionYear);
-                    } else {
-                        completionYear = 'Sem Data';
-                        console.log('❌ Sem data:', order.quotationNumber);
-                    }
+            const isCompleted = order.status === 'Concluído';
+            const completionDate = isCompleted ? getOrderCompletionDate(order) : null;
+            let monthColumn: MonthColumnData | null = null;
+            if (isCompleted) {
+                getYearColumn(completionDate ? format(completionDate, 'yyyy') : 'Sem Data').orders.push(order);
+            } else if (isValidDate(order.deliveryDate)) {
+                const monthKey = format(order.deliveryDate, 'yyyy-MM');
+                if (!grouped.has(monthKey)) {
+                    grouped.set(monthKey, { orders: [], totalWeight: 0, deliveredWeight: 0, itemsByOrder: new Map() });
                 }
-                
-                if (!completedByYear.has(completionYear)) {
-                    completedByYear.set(completionYear, {
-                        orders: [],
-                        totalWeight: 0
-                    });
-                }
-                
-                const yearData = completedByYear.get(completionYear)!;
-                yearData.orders.push(order);
-                yearData.totalWeight += order.totalWeight || 0;
-                return;
+                monthColumn = grouped.get(monthKey)!;
+                monthColumn.orders.push(order);
+                monthColumn.itemsByOrder.set(order.id, [...order.items]);
             }
 
-            // CORREÇÃO: Usar apenas a data de entrega do pedido, não dos itens
-            if (!order.deliveryDate) return;
-
-            const monthKey = format(order.deliveryDate, 'yyyy-MM');
-
-            if (!grouped.has(monthKey)) {
-                grouped.set(monthKey, {
-                    orders: [],
-                    totalWeight: 0,
-                    itemsByOrder: new Map()
-                });
-            }
-
-            const monthData = grouped.get(monthKey)!;
-
-            // Adicionar pedido apenas uma vez
-            if (!monthData.orders.find(o => o.id === order.id)) {
-                monthData.orders.push(order);
-            }
-
-            // Adicionar TODOS os itens do pedido para esta coluna
-            if (!monthData.itemsByOrder.has(order.id)) {
-                monthData.itemsByOrder.set(order.id, []);
-            }
-
-            // Adicionar todos os itens do pedido
             order.items.forEach(item => {
-                monthData.itemsByOrder.get(order.id)!.push(item);
-                const quantity = Number(item.quantity) || 0;
-                const unitWeight = Number(item.unitWeight) || 0;
-                monthData.totalWeight += quantity * unitWeight;
+                const weight = getItemWeight(item);
+                if (weight <= 0) return;
+                const deliveredAt = isValidDate(item.shippingDate) ? item.shippingDate : completionDate;
+                if (deliveredAt) {
+                    const yearColumn = getYearColumn(format(deliveredAt, 'yyyy'));
+                    yearColumn.totalWeight += weight;
+                    if (!isCompleted) yearColumn.partialWeight += weight;
+                    const deliveredMonth = format(deliveredAt, 'yyyy-MM');
+                    yearColumn.weightByMonth.set(deliveredMonth, (yearColumn.weightByMonth.get(deliveredMonth) || 0) + weight);
+                    if (monthColumn) monthColumn.deliveredWeight += weight;
+                } else if (monthColumn) {
+                    monthColumn.totalWeight += weight;
+                } else if (isCompleted) {
+                    getYearColumn('Sem Data').totalWeight += weight;
+                }
             });
         });
 
-        const sortedEntries = Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b));
-
         return {
-            monthColumns: sortedEntries,
-            completedByYear: Array.from(completedByYear.entries())
-                .sort(([a], [b]) => b.localeCompare(a)) // Anos mais recentes primeiro
+            monthColumns: Array.from(grouped.entries()).sort(([a], [b]) => a.localeCompare(b)),
+            completedByYear: Array.from(completedByYear.entries()).sort(([a], [b]) => b.localeCompare(a)),
         };
     }, [filteredOrders]);
+
 
     // Gera os dias do mês atual para o calendário
     const generateCalendarDays = (date: Date): { days: Date[], firstDay: Date, lastDay: Date } => {
@@ -1814,21 +1794,21 @@ export default function OrdersPage() {
 
     // Componente Kanban - SEÇÃO CORRIGIDA
     const KanbanView = () => {
-        const allColumns = [
+        type KanbanColumnData = {
+            orders: Order[];
+            totalWeight: number;
+            deliveredWeight?: number;
+            partialWeight?: number;
+            weightByMonth?: Map<string, number>;
+        };
+
+        const allColumns: [string, KanbanColumnData][] = [
             ...ordersByMonth.monthColumns,
-            // NOVO: Adicionar colunas de anos concluídos
-            ...ordersByMonth.completedByYear.map(([year, data]) => [
-                `completed-${year}`,
-                {
-                    orders: data.orders,
-                    totalWeight: data.totalWeight,
-                    itemsByOrder: new Map<string, OrderItem[]>()
-                }
-            ] as [string, { orders: Order[]; totalWeight: number; itemsByOrder?: Map<string, OrderItem[]> }])
+            ...ordersByMonth.completedByYear.map(
+                ([year, data]) => [`completed-${year}`, data] as [string, KanbanColumnData]
+            ),
         ];
 
-        const totalOrdersToShow = allColumns.reduce((acc, [, monthData]) => acc + monthData.orders.length, 0);
-        
         // Efeito para restaurar scroll horizontal E vertical quando modal fecha
         useEffect(() => {
             if (viewMode === 'kanban' && !isSheetOpen) {
@@ -1864,7 +1844,7 @@ export default function OrdersPage() {
             }
         }, [viewMode, isSheetOpen]);
         
-        if (totalOrdersToShow === 0) {
+        if (allColumns.length === 0) {
             return (
                 <div className="text-center py-12">
                     <Package className="mx-auto h-12 w-12 text-gray-400 mb-4" />
@@ -1960,24 +1940,49 @@ export default function OrdersPage() {
                                                 {monthData.orders.length}
                                             </Badge>
                                         </div>
-                                        <div className={`text-sm ${
-                                            isCompletedYear
-                                                ? 'text-green-700' 
-                                                : 'text-blue-700'
-                                        }`}>
+                                        <div className={`text-sm ${isCompletedYear ? 'text-green-700' : 'text-blue-700'}`}>
                                             <div className="flex items-center gap-1">
                                                 <Weight className="h-4 w-4" />
                                                 <span className="font-medium">
-                                                    {monthData.totalWeight.toLocaleString('pt-BR', { 
-                                                        minimumFractionDigits: 2, 
-                                                        maximumFractionDigits: 2 
-                                                    })} kg
+                                                    {monthData.totalWeight.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} kg
                                                 </span>
                                             </div>
-                                            {!isCompletedYear && (
-                                                <p className="text-xs mt-1 text-muted-foreground">
-                                                    Peso dos itens com entrega neste mês
-                                                </p>
+                                            {isCompletedYear ? (
+                                                <>
+                                                    {(monthData.partialWeight || 0) > 0 && (
+                                                        <p className="text-xs mt-1 text-green-700/80">
+                                                            Inclui {(monthData.partialWeight || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg de entregas parciais de pedidos em aberto
+                                                        </p>
+                                                    )}
+                                                    {monthData.weightByMonth && monthData.weightByMonth.size > 0 && (
+                                                        <div className="mt-2 pt-2 border-t border-green-200 space-y-0.5">
+                                                            {Array.from(monthData.weightByMonth.entries())
+                                                                .sort(([a], [b]) => a.localeCompare(b))
+                                                                .map(([monthKey, weight]) => {
+                                                                    const [y, m] = monthKey.split('-');
+                                                                    const label = new Date(Number(y), Number(m) - 1, 1)
+                                                                        .toLocaleDateString('pt-BR', { month: 'short' }).replace('.', '');
+                                                                    return (
+                                                                        <div key={monthKey} className="flex justify-between text-xs">
+                                                                            <span className="capitalize">{label}</span>
+                                                                            <span className="font-medium">
+                                                                                {weight.toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg
+                                                                            </span>
+                                                                        </div>
+                                                                    );
+                                                                })}
+                                                        </div>
+                                                    )}
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <p className="text-xs mt-1 text-muted-foreground">Peso pendente de embarque</p>
+                                                    {(monthData.deliveredWeight || 0) > 0 && (
+                                                        <p className="text-xs text-green-700">
+                                                            ✓ {(monthData.deliveredWeight || 0).toLocaleString('pt-BR', { maximumFractionDigits: 0 })} kg já embarcados
+                                                        </p>
+                                                    )}
+                                                </>
                                             )}
                                         </div>
                                     </div>
@@ -2078,6 +2083,22 @@ export default function OrdersPage() {
                                                                 <p className="font-medium">{monthSpecificItems}</p>
                                                             </div>
                                                         </div>
+
+                                                        {!isCompletedYear && (() => {
+                                                            const shippedWeight = order.items
+                                                                .filter(item => item.shippingDate instanceof Date && !isNaN(item.shippingDate.getTime()))
+                                                                .reduce((sum, item) => sum + (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0), 0);
+                                                            if (shippedWeight <= 0) return null;
+                                                            const itemTotalWeight = calculateTotalWeight(order.items);
+                                                            const pendingWeight = Math.max(0, itemTotalWeight - shippedWeight);
+                                                            return (
+                                                                <div className="text-xs rounded border border-green-500/40 bg-green-500/10 px-2 py-1 text-green-600 dark:text-green-400">
+                                                                    ✓ Embarcado: {shippedWeight.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} kg
+                                                                    {' · '}Pendente: {pendingWeight.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} kg
+                                                                </div>
+                                                            );
+                                                        })()}
+
 
                                                         {/* Data de entrega */}
                                                         {order.deliveryDate && (
