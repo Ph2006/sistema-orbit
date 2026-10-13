@@ -13,6 +13,7 @@ import {
   type ProductionStage,
   type CustomerInfo,
   type CompanyData,
+  USEFUL_HOURS_PER_DAY,
   safeToDate,
   calculateTotalWeight,
   calculateItemProgress,
@@ -263,6 +264,14 @@ const getPreviousBusinessDay = (date: Date): Date => {
     prevDay = addDays(prevDay, -1);
   }
   return prevDay;
+};
+
+// Converte o template do produto em dias, aceitando horas e o formato antigo.
+const templateStageToDays = (stage: any): number => {
+  const hours = Number(stage?.hours);
+  if (Number.isFinite(hours) && hours > 0) return hours / USEFUL_HOURS_PER_DAY;
+  const days = Number(stage?.durationDays);
+  return Number.isFinite(days) && days > 0 ? days : 0;
 };
 
 // Componente para exibir informações de dias úteis
@@ -880,7 +889,10 @@ export default function OrdersPage() {
                     if (finalProductionPlan.length === 0) {
                         if (productData && productData.productionPlanTemplate && productData.productionPlanTemplate.length > 0) {
                             finalProductionPlan = productData.productionPlanTemplate.map((stage: any) => ({
-                                ...stage,
+                                stageName: stage.stageName,
+                                durationDays: templateStageToDays(stage),
+                                workSchedule: stage.workSchedule || 'normal',
+                                useBusinessDays: (stage.workSchedule || 'normal') === 'normal',
                                 status: "Pendente",
                                 startDate: null,
                                 completedDate: null,
@@ -3092,9 +3104,10 @@ export default function OrdersPage() {
 
         try {
             // Apenas carregar template do produto
-            const productDoc = item.code ? 
-                await getDoc(doc(db, "companies", "mecald", "products", item.code)) : 
-                null;
+            const productCode = String(item.code || '').trim();
+            const productDoc = productCode
+                ? await getDoc(doc(db, "companies", "mecald", "products", productCode))
+                : null;
 
             let productTemplateMap = new Map<string, any>();
             
@@ -3102,7 +3115,7 @@ export default function OrdersPage() {
                 const template = productDoc.data().productionPlanTemplate || [];
                 template.forEach((stage: any) => {
                     productTemplateMap.set(stage.stageName, {
-                        durationDays: stage.durationDays || 0,
+                        durationDays: templateStageToDays(stage),
                         workSchedule: stage.workSchedule || 'normal'
                     });
                 });
@@ -3118,7 +3131,9 @@ export default function OrdersPage() {
                     return {
                         stageName: stage.stageName || '',
                         status: stage.status || 'Pendente',
-                        durationDays: stage.durationDays ?? templateData.durationDays ?? 0,
+                        durationDays: Number(stage.durationDays) > 0
+                            ? Number(stage.durationDays)
+                            : (templateData.durationDays ?? 0),
                         workSchedule,
                         useBusinessDays: workSchedule === 'normal',
                         startDate: stage.startDate ? safeToDate(stage.startDate) : null,
@@ -7431,3 +7446,4 @@ return (
         </div>
     );
 }
+
