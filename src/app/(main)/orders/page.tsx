@@ -3621,16 +3621,61 @@ export default function OrdersPage() {
             return;
         }
 
-        try {
-            const sourceProductionPlan = progressClipboard.productionPlan || [];
-            
-            const updatedItems = selectedOrder.items.map(item => {
-                if (item.id === targetItem.id) {
-                    const newPlan = JSON.parse(JSON.stringify(sourceProductionPlan));
-                    return { ...item, productionPlan: newPlan };
-                }
-                return item;
+        if (progressClipboard.id === targetItem.id) {
+            toast({ variant: "destructive", title: "Mesmo item", description: "Selecione um item diferente para colar o progresso." });
+            return;
+        }
+
+        const targetPlan = targetItem.productionPlan || [];
+        if (targetPlan.length === 0) {
+            toast({
+                variant: "destructive",
+                title: "Item sem etapas",
+                description: `"${targetItem.description}" não possui etapas de fabricação. Configure as etapas no produto antes de colar.`,
             });
+            return;
+        }
+
+        // Compara nomes ignorando maiúsculas, acentos e espaços extras.
+        const normalizeStageName = (name?: string) =>
+            String(name || '')
+                .normalize('NFD')
+                .replace(/[\u0300-\u036f]/g, '')
+                .trim()
+                .replace(/\s+/g, ' ')
+                .toLowerCase();
+
+        const sourceStages = new Map(
+            (progressClipboard.productionPlan || []).map(stage => [normalizeStageName(stage.stageName), stage])
+        );
+
+        let matchedCount = 0;
+        const mergedPlan = targetPlan.map(stage => {
+            const source = sourceStages.get(normalizeStageName(stage.stageName));
+            if (!source) return stage;
+
+            matchedCount++;
+            return {
+                ...stage,
+                status: source.status || 'Pendente',
+                startDate: source.startDate ? new Date(source.startDate) : null,
+                completedDate: source.completedDate ? new Date(source.completedDate) : null,
+            };
+        });
+
+        if (matchedCount === 0) {
+            toast({
+                variant: "destructive",
+                title: "Nenhuma etapa em comum",
+                description: `Os itens "${progressClipboard.description}" e "${targetItem.description}" não possuem etapas com o mesmo nome.`,
+            });
+            return;
+        }
+
+        try {
+            const updatedItems = selectedOrder.items.map(item =>
+                item.id === targetItem.id ? { ...item, productionPlan: mergedPlan } : item
+            );
 
             const itemsForFirestore = updatedItems.map(item => {
                 const planForFirestore = (item.productionPlan || []).map(p => ({
@@ -3651,11 +3696,15 @@ export default function OrdersPage() {
             });
 
             const orderRef = doc(db, "companies", "mecald", "orders", selectedOrder.id);
-            // Remove campos undefined antes de enviar para o Firestore
             const cleanedItems = removeUndefinedFields(itemsForFirestore);
-            await updateDoc(orderRef, { items: cleanedItems });
+            await updateDoc(orderRef, { items: cleanedItems, lastUpdate: Timestamp.now() });
 
-            toast({ title: "Progresso colado!", description: `Etapas aplicadas ao item "${targetItem.description}".` });
+            const ignoredCount = targetPlan.length - matchedCount;
+            toast({
+                title: "Progresso colado!",
+                description: `${matchedCount} etapa(s) atualizada(s) em "${targetItem.description}".`
+                    + (ignoredCount > 0 ? ` ${ignoredCount} etapa(s) sem correspondência foram mantidas.` : ''),
+            });
             
             const allOrders = await fetchOrders();
             const updatedOrder = allOrders.find(o => o.id === selectedOrder.id);
