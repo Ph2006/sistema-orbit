@@ -2,6 +2,9 @@
 
 import { Timestamp } from "firebase/firestore";
 
+// Jornada compartilhada por Produtos e Pedidos para converter horas em dias.
+export const USEFUL_HOURS_PER_DAY = 8;
+
 export type ProductionStage = {
   stageName: string;
   status: string;
@@ -178,3 +181,4 @@ export function deserializeOrderFromPublicShare(data: any, fallbackId: string): 
     documents: { drawings: false, inspectionTestPlan: false, paintPlan: false },
   };
 }
+
