@@ -21,6 +21,16 @@ import {
   serializeOrderForPublicShare,
 } from "@/lib/orders-shared";
 import { downloadSchedulePdf } from "@/lib/generateSchedulePdf";
+import {
+  buildCapacityModel,
+  buildSectorResolver,
+  computeBacklog,
+  isHoliday as isBrazilianHoliday,
+  summarizeSectorOccupancy,
+  type CapacityOrder,
+  type CapacitySnapshot,
+} from "@/lib/production-capacity";
+import { loadCapacitySnapshot } from "@/lib/production-capacity-loader";
 import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
@@ -178,40 +188,9 @@ type OrderCostAnalysis = {
     unpricedItems: number;
 };
 
-// Feriados nacionais brasileiros para 2024-2025
-const brazilianHolidays = [
-  // 2024
-  new Date(2024, 0, 1),   // Ano Novo
-  new Date(2024, 1, 12),  // Carnaval (Segunda-feira)
-  new Date(2024, 1, 13),  // Carnaval (Terça-feira)  
-  new Date(2024, 2, 29),  // Sexta-feira Santa
-  new Date(2024, 3, 21),  // Tiradentes
-  new Date(2024, 4, 1),   // Dia do Trabalho
-  new Date(2024, 4, 30),  // Corpus Christi
-  new Date(2024, 8, 7),   // Independência do Brasil
-  new Date(2024, 9, 12),  // Nossa Senhora Aparecida
-  new Date(2024, 10, 2),  // Finados
-  new Date(2024, 10, 15), // Proclamação da República
-  new Date(2024, 11, 25), // Natal
-  // 2025
-  new Date(2025, 0, 1),   // Ano Novo
-  new Date(2025, 2, 3),   // Carnaval (Segunda-feira)
-  new Date(2025, 2, 4),   // Carnaval (Terça-feira)
-  new Date(2025, 3, 18),  // Sexta-feira Santa
-  new Date(2025, 3, 21),  // Tiradentes
-  new Date(2025, 4, 1),   // Dia do Trabalho
-  new Date(2025, 5, 19),  // Corpus Christi
-  new Date(2025, 8, 7),   // Independência do Brasil
-  new Date(2025, 9, 12),  // Nossa Senhora Aparecida
-  new Date(2025, 10, 2),  // Finados
-  new Date(2025, 10, 15), // Proclamação da República
-  new Date(2025, 11, 25), // Natal
-];
-
 // Funções utilitárias para cálculo de dias úteis
-const isHoliday = (date: Date): boolean => {
-  return brazilianHolidays.some(holiday => isSameDay(holiday, date));
-};
+// Feriados nacionais calculados para qualquer ano (a lista fixa antiga parava em 2025).
+const isHoliday = (date: Date): boolean => isBrazilianHoliday(date);
 
 const isBusinessDay = (date: Date): boolean => {
   return !isWeekend(date) && !isHoliday(date);
@@ -744,6 +723,10 @@ export default function OrdersPage() {
     
     // Modos de visualização, incluindo a análise de ocupação por setor
     const [viewMode, setViewMode] = useState<OrdersViewMode>('list');
+    // Capacidade por setor (funcionários da aba Empresa) para a página de ocupação
+    const [capacityBase, setCapacityBase] = useState<CapacitySnapshot | null>(null);
+    const [isLoadingCapacity, setIsLoadingCapacity] = useState(false);
+    const [includeWaitingInCapacity, setIncludeWaitingInCapacity] = useState(true);
     const [isViewModeRestored, setIsViewModeRestored] = useState(false);
     const [calendarDate, setCalendarDate] = useState(new Date());
 
@@ -1542,10 +1525,12 @@ export default function OrdersPage() {
         let waitingWeight = 0;
         let waitingItems = 0;
 
-        filteredOrders.forEach(order => {
+        // Carga atual é da fábrica inteira: usa todos os pedidos, não os filtrados na lista.
+        orders.forEach(order => {
             if (order.status === 'Concluído' || order.status === 'Cancelado') return;
 
             order.items.forEach(item => {
+                if (item.shippingDate) return;
                 const weight = (Number(item.quantity) || 0) * (Number(item.unitWeight) || 0);
                 if (weight <= 0) return;
 
@@ -1612,7 +1597,54 @@ export default function OrdersPage() {
             waitingWeight,
             waitingItems,
         };
-    }, [filteredOrders]);
+    }, [orders]);
+
+    const loadCapacityBase = useCallback(async () => {
+        setIsLoadingCapacity(true);
+        try {
+            // Os pedidos já estão na página; aqui só funcionários, horas extras, etapas e centros de custo.
+            setCapacityBase(await loadCapacitySnapshot([]));
+        } catch (error) {
+            console.error("Error loading sector capacity:", error);
+            toast({
+                variant: "destructive",
+                title: "Erro ao carregar capacidade dos setores",
+                description: "Não foi possível ler os funcionários e as etapas.",
+            });
+        } finally {
+            setIsLoadingCapacity(false);
+        }
+    }, [toast]);
+
+    useEffect(() => {
+        if (viewMode === 'occupation' && user && !capacityBase && !isLoadingCapacity) {
+            loadCapacityBase();
+        }
+    }, [viewMode, user, capacityBase, isLoadingCapacity, loadCapacityBase]);
+
+    // Ocupação real: horas das etapas não concluídas × horas disponíveis do setor.
+    const sectorCapacityStats = useMemo(() => {
+        if (!capacityBase) return null;
+        const today = new Date();
+        const snapshot: CapacitySnapshot = { ...capacityBase, orders: orders as unknown as CapacityOrder[] };
+        const resolver = buildSectorResolver(snapshot);
+        const model = buildCapacityModel(snapshot, resolver, today);
+        const backlog = computeBacklog(snapshot.orders, resolver, today, { includeWaitingOrders: includeWaitingInCapacity });
+        const sectorKeysInUse = Array.from(new Set(
+            snapshot.stageLinks
+                .map(link => resolver.sectorOfStage(link.name)?.key)
+                .filter((key): key is string => Boolean(key))
+        ));
+        const sectors = summarizeSectorOccupancy(model, backlog, resolver, today, 20, sectorKeysInUse);
+        const unmappedStageNames = Array.from(new Set(backlog.unmappedEntries.map(entry => entry.stageName)));
+        return {
+            sectors,
+            unmappedStageNames,
+            unmatchedResources: model.unmatchedResources,
+            resourcesWithoutSector: model.resourcesWithoutSector,
+            totalBacklogHours: backlog.entries.reduce((sum, entry) => sum + (entry.sectorKey ? entry.hours : 0), 0),
+        };
+    }, [capacityBase, orders, includeWaitingInCapacity]);
 
     // Média fixa dos últimos 12 meses. Um item entra no mês em que sua última
     // etapa foi concluída; para dados antigos, usa a conclusão do pedido.
@@ -5741,7 +5773,7 @@ return (
                             </Card>
                             <Card>
                                 <CardHeader className="pb-2">
-                                    <CardDescription>Setores ocupados</CardDescription>
+                                    <CardDescription>Etapas em andamento</CardDescription>
                                     <CardTitle className="text-2xl">{occupationStats.sectors.length}</CardTitle>
                                 </CardHeader>
                                 <CardContent className="text-sm text-muted-foreground">
@@ -5772,19 +5804,173 @@ return (
                             </Card>
                         </div>
 
+                        <Card>
+                            <CardHeader>
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <CardTitle>Capacidade × carga por setor</CardTitle>
+                                        <CardDescription>
+                                            Horas que faltam nas etapas dos pedidos abertos, comparadas com as horas disponíveis de cada setor
+                                            (funcionários pela Localização × {USEFUL_HOURS_PER_DAY} h por dia útil, sem férias/ausências, com horas extras aprovadas).
+                                        </CardDescription>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                            <Checkbox
+                                                checked={includeWaitingInCapacity}
+                                                onCheckedChange={(checked) => setIncludeWaitingInCapacity(checked === true)}
+                                            />
+                                            Incluir "Aguardando Produção"
+                                        </label>
+                                        <Button variant="outline" size="sm" onClick={loadCapacityBase} disabled={isLoadingCapacity}>
+                                            {isLoadingCapacity ? "Atualizando..." : "Atualizar funcionários"}
+                                        </Button>
+                                    </div>
+                                </div>
+                            </CardHeader>
+                            <CardContent className="space-y-4">
+                                {!sectorCapacityStats ? (
+                                    <div className="space-y-2">
+                                        <Skeleton className="h-8 w-full" />
+                                        <Skeleton className="h-8 w-full" />
+                                        <Skeleton className="h-8 w-full" />
+                                    </div>
+                                ) : sectorCapacityStats.sectors.length === 0 ? (
+                                    <div className="py-8 text-center text-muted-foreground">
+                                        Nenhum setor encontrado. Preencha a Localização dos funcionários (aba Empresa) com o nome do centro de custo
+                                        e vincule cada etapa a um centro de custo (aba Produtos).
+                                    </div>
+                                ) : (
+                                    <>
+                                        <div className="hidden grid-cols-[minmax(0,1.4fr)_80px_80px_90px_90px_minmax(0,1.4fr)_80px] gap-3 px-4 text-xs font-medium uppercase text-muted-foreground md:grid">
+                                            <span>Setor</span>
+                                            <span className="text-right">Pessoas</span>
+                                            <span className="text-right">h/dia</span>
+                                            <span className="text-right">Em andamento</span>
+                                            <span className="text-right">Pendente</span>
+                                            <span>Ocupação (20 dias úteis)</span>
+                                            <span className="text-right">Fila</span>
+                                        </div>
+                                        <div className="space-y-2">
+                                            {sectorCapacityStats.sectors.map(sector => {
+                                                const finite = Number.isFinite(sector.occupancy);
+                                                const percentage = finite ? Math.round(sector.occupancy * 100) : 0;
+                                                const tone = !sector.hasCapacity
+                                                    ? "text-muted-foreground"
+                                                    : percentage > 90 ? "text-red-600" : percentage > 70 ? "text-yellow-600" : "text-green-600";
+                                                return (
+                                                    <details key={sector.key} className="group overflow-hidden rounded-lg border bg-card">
+                                                        <summary className="grid cursor-pointer list-none grid-cols-2 items-center gap-3 p-4 transition-colors hover:bg-muted/50 md:grid-cols-[minmax(0,1.4fr)_80px_80px_90px_90px_minmax(0,1.4fr)_80px] [&::-webkit-details-marker]:hidden">
+                                                            <div className="col-span-2 flex min-w-0 items-center gap-2 md:col-span-1">
+                                                                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 group-open:rotate-180" />
+                                                                <span className="truncate font-semibold text-foreground">{sector.name}</span>
+                                                                {!sector.matchesCostCenter && (
+                                                                    <Badge variant="outline" className="shrink-0 text-amber-600">não é centro de custo</Badge>
+                                                                )}
+                                                            </div>
+                                                            <span className="text-sm md:text-right" title="Disponíveis hoje / lotados no setor">
+                                                                <span className="text-muted-foreground md:hidden">Pessoas: </span>{sector.availableToday}/{sector.people}
+                                                            </span>
+                                                            <span className="text-sm md:text-right">
+                                                                <span className="text-muted-foreground md:hidden">h/dia: </span>{sector.hoursPerDayToday}
+                                                            </span>
+                                                            <span className="text-sm md:text-right">
+                                                                <span className="text-muted-foreground md:hidden">Em andamento: </span>{Math.round(sector.inProgressHours)} h
+                                                            </span>
+                                                            <span className="text-sm md:text-right">
+                                                                <span className="text-muted-foreground md:hidden">Pendente: </span>{Math.round(sector.pendingHours)} h
+                                                            </span>
+                                                            <div className="col-span-2 flex items-center gap-2 md:col-span-1">
+                                                                <Progress value={sector.hasCapacity ? Math.min(100, percentage) : 0} className="h-2 flex-1" />
+                                                                <span className={`w-14 text-right text-sm font-semibold ${tone}`}>
+                                                                    {sector.hasCapacity ? `${percentage}%` : (sector.backlogHours > 0 ? "sem pessoas" : "—")}
+                                                                </span>
+                                                            </div>
+                                                            <span className="text-sm md:text-right">
+                                                                <span className="text-muted-foreground md:hidden">Fila: </span>
+                                                                {sector.queueBusinessDays === null ? "—" : `${sector.queueBusinessDays} d.u.`}
+                                                            </span>
+                                                        </summary>
+                                                        <div className="border-t bg-muted/10 p-2 md:p-4">
+                                                            {sector.entries.length === 0 ? (
+                                                                <p className="p-2 text-sm text-muted-foreground">Nenhuma etapa pendente neste setor.</p>
+                                                            ) : (
+                                                                <Table>
+                                                                    <TableHeader>
+                                                                        <TableRow>
+                                                                            <TableHead>Pedido / OS</TableHead>
+                                                                            <TableHead>Item</TableHead>
+                                                                            <TableHead>Etapa</TableHead>
+                                                                            <TableHead>Situação</TableHead>
+                                                                            <TableHead className="text-right">Horas restantes</TableHead>
+                                                                        </TableRow>
+                                                                    </TableHeader>
+                                                                    <TableBody>
+                                                                        {[...sector.entries]
+                                                                            .sort((a, b) => (a.stageStatus === b.stageStatus ? b.hours - a.hours : a.stageStatus === 'em_andamento' ? -1 : 1))
+                                                                            .map((entry, entryIndex) => (
+                                                                                <TableRow key={`${entry.orderId}-${entry.itemDescription}-${entry.stageName}-${entryIndex}`}>
+                                                                                    <TableCell className="font-medium">{entry.orderLabel}</TableCell>
+                                                                                    <TableCell>{entry.itemDescription}</TableCell>
+                                                                                    <TableCell>{entry.stageName}</TableCell>
+                                                                                    <TableCell>
+                                                                                        {entry.stageStatus === 'em_andamento'
+                                                                                            ? <Badge>Em andamento</Badge>
+                                                                                            : <Badge variant="outline">{entry.orderStatus === 'Aguardando Produção' ? 'Pedido aguardando' : 'Pendente'}</Badge>}
+                                                                                    </TableCell>
+                                                                                    <TableCell className="text-right font-medium">
+                                                                                        {entry.hours.toLocaleString('pt-BR', { maximumFractionDigits: 1 })} h
+                                                                                    </TableCell>
+                                                                                </TableRow>
+                                                                            ))}
+                                                                    </TableBody>
+                                                                </Table>
+                                                            )}
+                                                        </div>
+                                                    </details>
+                                                );
+                                            })}
+                                        </div>
+                                        <p className="text-xs text-muted-foreground">
+                                            Ocupação = carga ÷ horas disponíveis nos próximos 20 dias úteis (acima de 100% significa mais de um mês de fila).
+                                            Fila = dias úteis para o setor terminar a carga atual. Etapas em andamento descontam o tempo já decorrido desde o início.
+                                        </p>
+                                        {sectorCapacityStats.unmappedStageNames.length > 0 && (
+                                            <div className="rounded-md border border-amber-500 bg-amber-50 p-3 text-xs text-amber-900">
+                                                ⚠️ Etapas de pedidos sem centro de custo (fora da carga): {sectorCapacityStats.unmappedStageNames.join(", ")}.
+                                                Vincule-as na aba Produtos → Etapas.
+                                            </div>
+                                        )}
+                                        {sectorCapacityStats.unmatchedResources.length > 0 && (
+                                            <div className="rounded-md border border-amber-500 bg-amber-50 p-3 text-xs text-amber-900">
+                                                ⚠️ Localização que não corresponde a nenhum centro de custo:{" "}
+                                                {sectorCapacityStats.unmatchedResources.map(resource => `${resource.name} (${resource.location})`).join(", ")}.
+                                            </div>
+                                        )}
+                                        {sectorCapacityStats.resourcesWithoutSector.length > 0 && (
+                                            <div className="rounded-md border border-amber-500 bg-amber-50 p-3 text-xs text-amber-900">
+                                                ⚠️ Funcionários sem Localização (não contam em nenhum setor):{" "}
+                                                {sectorCapacityStats.resourcesWithoutSector.map(resource => resource.name).join(", ")}.
+                                            </div>
+                                        )}
+                                    </>
+                                )}
+                            </CardContent>
+                        </Card>
+
                         <div className="grid gap-4 xl:grid-cols-3">
                             <Card className="xl:col-span-2">
                                 <CardHeader>
-                                    <CardTitle>Carga atual por setor</CardTitle>
+                                    <CardTitle>Peso em fabricação por etapa</CardTitle>
                                     <CardDescription>
-                                        O peso integral de cada item é atribuído à etapa marcada como Em Andamento.
+                                        O peso integral de cada item é atribuído à etapa marcada como Em Andamento. Considera todos os pedidos, independentemente dos filtros da lista.
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent>
                                     {occupationStats.sectors.length === 0 ? (
                                         <div className="py-12 text-center text-muted-foreground">
                                             <Weight className="mx-auto mb-3 h-10 w-10" />
-                                            Nenhum item possui etapa em andamento nos pedidos exibidos.
+                                            Nenhum item possui etapa em andamento.
                                         </div>
                                     ) : (
                                         <div className="space-y-5">
@@ -7549,4 +7735,3 @@ return (
         </div>
     );
 }
-
