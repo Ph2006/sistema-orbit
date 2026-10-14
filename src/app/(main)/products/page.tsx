@@ -669,6 +669,8 @@ export default function ProductsPage() {
     stages: Array<{ stageName: string; hours?: number }>;
   }>>([]);
   const [selectedProductForCalculator, setSelectedProductForCalculator] = useState<string>("");
+  const [calculatorProductSearch, setCalculatorProductSearch] = useState<string>("");
+  const [isCalculatorSearchOpen, setIsCalculatorSearchOpen] = useState(false);
   const [calculatorQuantity, setCalculatorQuantity] = useState<number>(1);
   const [requestedDeliveryDate, setRequestedDeliveryDate] = useState<Date>(
     new Date(new Date().setDate(new Date().getDate() + 30))
@@ -2001,6 +2003,7 @@ export default function ProductsPage() {
 
     setCalculatorItems(prev => [...prev, newItem]);
     setSelectedProductForCalculator("");
+    setCalculatorProductSearch("");
     setCalculatorQuantity(1);
   };
 
@@ -2111,7 +2114,40 @@ export default function ProductsPage() {
     setCalculatorItems([]);
     setCalculatorResults(null);
     setSelectedProductForCalculator("");
+    setCalculatorProductSearch("");
     setCalculatorQuantity(1);
+  };
+
+  // Busca da calculadora: código ou descrição, sem diferenciar acentos/maiúsculas.
+  // Todas as palavras digitadas precisam aparecer (ex.: "flange 6" acha "FLANGE ANSI 6\"").
+  const calculatorSearchResults = useMemo(() => {
+    const normalize = (value: string) =>
+      value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    const terms = normalize(calculatorProductSearch.trim()).split(/\s+/).filter(Boolean);
+    if (terms.length === 0) return { items: [] as Product[], total: 0 };
+
+    const matches = products.filter(product => {
+      const haystack = normalize(`${product.code} ${product.description}`);
+      return terms.every(term => haystack.includes(term));
+    });
+    const firstTerm = terms[0];
+    matches.sort((a, b) => {
+      // Código que começa com o texto digitado vem primeiro; depois os que têm horas cadastradas.
+      const aStarts = normalize(a.code).startsWith(firstTerm) ? 0 : 1;
+      const bStarts = normalize(b.code).startsWith(firstTerm) ? 0 : 1;
+      if (aStarts !== bStarts) return aStarts - bStarts;
+      const aHas = calculateLeadTime(a) > 0 ? 0 : 1;
+      const bHas = calculateLeadTime(b) > 0 ? 0 : 1;
+      if (aHas !== bHas) return aHas - bHas;
+      return a.code.localeCompare(b.code, "pt-BR", { numeric: true });
+    });
+    return { items: matches.slice(0, 50), total: matches.length };
+  }, [calculatorProductSearch, products]);
+
+  const selectCalculatorProduct = (product: Product) => {
+    setSelectedProductForCalculator(product.id);
+    setCalculatorProductSearch(`${product.code} - ${product.description}`);
+    setIsCalculatorSearchOpen(false);
   };
 
   const exportCatalogToExcel = () => {
@@ -2982,18 +3018,93 @@ export default function ProductsPage() {
                                 <h4 className="text-sm font-medium mb-3">Adicionar Produtos à Análise</h4>
                                 <div className="space-y-3">
                                     <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                                        <Select value={selectedProductForCalculator} onValueChange={setSelectedProductForCalculator}>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder="Selecione um produto" />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {products.filter(p => calculateLeadTime(p) > 0).map(product => (
-                                                    <SelectItem key={product.id} value={product.id}>
-                                                        {product.code} - {product.description}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
+                                        <div className="relative md:col-span-1">
+                                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                            <Input
+                                                placeholder="Buscar por código ou descrição..."
+                                                value={calculatorProductSearch}
+                                                className="pl-9 pr-8"
+                                                autoComplete="off"
+                                                onChange={(e) => {
+                                                    setCalculatorProductSearch(e.target.value);
+                                                    setSelectedProductForCalculator("");
+                                                    setIsCalculatorSearchOpen(true);
+                                                }}
+                                                onFocus={() => setIsCalculatorSearchOpen(true)}
+                                                onBlur={() => setTimeout(() => setIsCalculatorSearchOpen(false), 150)}
+                                                onKeyDown={(e) => {
+                                                    if (e.key === "Escape") {
+                                                        setIsCalculatorSearchOpen(false);
+                                                        return;
+                                                    }
+                                                    if (e.key !== "Enter") return;
+                                                    e.preventDefault();
+                                                    if (selectedProductForCalculator) {
+                                                        addItemToCalculator();
+                                                        return;
+                                                    }
+                                                    const firstValid = calculatorSearchResults.items.find(p => calculateLeadTime(p) > 0);
+                                                    if (firstValid) selectCalculatorProduct(firstValid);
+                                                }}
+                                            />
+                                            {calculatorProductSearch && (
+                                                <button
+                                                    type="button"
+                                                    aria-label="Limpar busca"
+                                                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+                                                    onMouseDown={(e) => e.preventDefault()}
+                                                    onClick={() => {
+                                                        setCalculatorProductSearch("");
+                                                        setSelectedProductForCalculator("");
+                                                        setIsCalculatorSearchOpen(false);
+                                                    }}
+                                                >
+                                                    <X className="h-4 w-4" />
+                                                </button>
+                                            )}
+                                            {isCalculatorSearchOpen && !selectedProductForCalculator && calculatorProductSearch.trim() && (
+                                                <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto rounded-md border bg-popover shadow-lg md:right-auto md:w-[min(560px,80vw)]">
+                                                    {calculatorSearchResults.items.length === 0 ? (
+                                                        <div className="p-3 text-sm text-muted-foreground">
+                                                            Nenhum produto com "{calculatorProductSearch}".
+                                                        </div>
+                                                    ) : (
+                                                        <>
+                                                            {calculatorSearchResults.items.map(product => {
+                                                                const leadTime = calculateLeadTime(product);
+                                                                const hasHours = leadTime > 0;
+                                                                return (
+                                                                    <button
+                                                                        key={product.id}
+                                                                        type="button"
+                                                                        disabled={!hasHours}
+                                                                        onMouseDown={(e) => e.preventDefault()}
+                                                                        onClick={() => hasHours && selectCalculatorProduct(product)}
+                                                                        className={cn(
+                                                                            "flex w-full items-start justify-between gap-3 border-b px-3 py-2 text-left text-sm last:border-b-0",
+                                                                            hasHours ? "hover:bg-muted" : "cursor-not-allowed opacity-50"
+                                                                        )}
+                                                                    >
+                                                                        <span className="min-w-0">
+                                                                            <span className="font-medium">{product.code}</span>
+                                                                            <span className="block truncate text-xs text-muted-foreground">{product.description}</span>
+                                                                        </span>
+                                                                        <span className="shrink-0 text-xs text-muted-foreground">
+                                                                            {hasHours ? `${leadTime} dias` : "sem horas nas etapas"}
+                                                                        </span>
+                                                                    </button>
+                                                                );
+                                                            })}
+                                                            {calculatorSearchResults.total > calculatorSearchResults.items.length && (
+                                                                <div className="p-2 text-center text-xs text-muted-foreground">
+                                                                    Mostrando {calculatorSearchResults.items.length} de {calculatorSearchResults.total}. Digite mais para refinar.
+                                                                </div>
+                                                            )}
+                                                        </>
+                                                    )}
+                                                </div>
+                                            )}
+                                        </div>
                                         <Input
                                             type="number"
                                             placeholder="Quantidade"
