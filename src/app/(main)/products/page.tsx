@@ -38,6 +38,16 @@ import { cn } from "@/lib/utils";
 
 const hoursToDays = (hours: number): number => hours / USEFUL_HOURS_PER_DAY;
 
+const normalizeStageCosts = (costs: Record<string, number>): Record<string, number> =>
+  Object.fromEntries(
+    Object.entries(costs || {})
+      .map(([name, value]) => [name, Number(value)] as [string, number])
+      .filter(([, value]) => Number.isFinite(value) && value > 0)
+      .map(([name, value]) => [name, Math.round(value * 10000) / 10000] as [string, number])
+      .filter(([, value]) => value > 0)
+      .sort(([a], [b]) => a.localeCompare(b))
+  );
+
 const planStageSchema = z.object({
   stageName: z.string(),
   hours: z.coerce.number().min(0).optional(),
@@ -242,6 +252,9 @@ const getLeadTimeBadge = (leadTime: number) => {
     csllAmount: number;
     finalPrice: number;
     pricePerKg: number;
+    machiningHours?: number;
+    machineHourRate?: number;
+    consumablesCostPerKg?: number;
     createdAt: Date;
     }
 
@@ -669,6 +682,20 @@ export default function ProductsPage() {
     const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
     const [machineHourRate, setMachineHourRate] = useState<number>(150);
     const [consumablesCostPerKg, setConsumablesCostPerKg] = useState<number>(0);
+    const [savedCostConfig, setSavedCostConfig] = useState<{
+        costs: Record<string, number>;
+        machineHourRate: number;
+        consumablesCostPerKg: number;
+    }>({ costs: {}, machineHourRate: 150, consumablesCostPerKg: 0 });
+    const [isSavingCostConfig, setIsSavingCostConfig] = useState(false);
+    const [isLoadingCostConfig, setIsLoadingCostConfig] = useState(true);
+    const [isCostConfigLoaded, setIsCostConfigLoaded] = useState(false);
+
+    const hasUnsavedCostChanges = useMemo(() =>
+        JSON.stringify(normalizeStageCosts(stageCosts)) !== JSON.stringify(normalizeStageCosts(savedCostConfig.costs)) ||
+        Number(machineHourRate) !== savedCostConfig.machineHourRate ||
+        Number(consumablesCostPerKg) !== savedCostConfig.consumablesCostPerKg,
+    [stageCosts, machineHourRate, consumablesCostPerKg, savedCostConfig]);
     const [selectedProductForPricing, setSelectedProductForPricing] = useState<Product | null>(null);
     const [pricingCalculation, setPricingCalculation] = useState<PricingCalculation | null>(null);
     const [pricingModality, setPricingModality] = useState<CommercialModality>("venda_fabricacao_propria");
@@ -1048,6 +1075,15 @@ export default function ProductsPage() {
         productCode: selectedProductForPricing.code,
         productDescription: selectedProductForPricing.description,
         productWeight: selectedProductForPricing.unitWeight || sourceData.productWeight || 0,
+        machiningHours: sourceData.machiningHours ?? 0,
+        machineHourRate: sourceData.machineHourRate
+          ?? ((sourceData.machiningHours || 0) > 0
+            ? (Number(sourceData.machiningCost) || 0) / Number(sourceData.machiningHours)
+            : 0),
+        consumablesCostPerKg: sourceData.consumablesCostPerKg
+          ?? ((sourceData.productWeight || 0) > 0
+            ? (Number(sourceData.consumablesCost) || 0) / Number(sourceData.productWeight)
+            : 0),
         createdAt: new Date(),
       };
 
@@ -1077,22 +1113,6 @@ export default function ProductsPage() {
       setCsllRate(sourceData.csllRate ?? 2.88);
       setMachiningHours(sourceData.machiningHours ?? 0);
       setPricingModality(copiedModality);
-
-      const copiedWeight = copiedCalculation.productWeight || 0;
-      setConsumablesCostPerKg(copiedWeight > 0
-        ? (Number(sourceData.consumablesCost) || 0) / copiedWeight
-        : 0
-      );
-      setStageCosts((sourceData.stageCosts || []).reduce((result, stage) => ({
-        ...result,
-        [stage.stageName]: copiedWeight > 0
-          ? (Number(stage.totalCost) || 0) / copiedWeight
-          : Number(stage.costPerDay) || 0,
-      }), {} as Record<string, number>));
-
-      if ((sourceData.machiningHours || 0) > 0) {
-        setMachineHourRate((Number(sourceData.machiningCost) || 0) / Number(sourceData.machiningHours));
-      }
 
       setProducts(current => current.map(product =>
         product.id === selectedProductForPricing.id
@@ -2398,40 +2418,84 @@ export default function ProductsPage() {
   }, [planTasks, planDrawingNumber, planControlNumber, planRevision, planCreator, planGeneralNotes, selectedProductForPlan, fetchCompanyDataForPDF, toast]);
 
     const saveStageCosts = useCallback(async () => {
+        if (isSavingCostConfig || isLoadingCostConfig) return;
+        setIsSavingCostConfig(true);
         try {
-        const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
-        await setDoc(costsRef, { 
-            costs: stageCosts, 
-            machineHourRate,
-            consumablesCostPerKg
-        }, { merge: true });
-        toast({ title: "Custos salvos com sucesso!" });
+            const costs = normalizeStageCosts(stageCosts);
+            const rate = Number(machineHourRate);
+            const consumables = Number(consumablesCostPerKg);
+            if (!Number.isFinite(rate) || rate < 0 || !Number.isFinite(consumables) || consumables < 0) {
+                toast({ variant: "destructive", title: "Custos inválidos", description: "Informe valores finitos e não negativos para hora-máquina e insumos/kg." });
+                return;
+            }
+            const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
+            await setDoc(costsRef, {
+                costs,
+                machineHourRate: rate,
+                consumablesCostPerKg: consumables,
+                updatedAt: Timestamp.now(),
+            });
+            setStageCosts(costs);
+            setSavedCostConfig({ costs, machineHourRate: rate, consumablesCostPerKg: consumables });
+            setIsCostConfigLoaded(true);
+            toast({ title: "Custos salvos!", description: "Esses valores permanecerão fixos até você alterá-los e salvar novamente." });
         } catch (error) {
-        console.error("Error saving stage costs:", error);
-        toast({ variant: "destructive", title: "Erro ao salvar custos" });
+            console.error("Error saving stage costs:", error);
+            toast({ variant: "destructive", title: "Erro ao salvar custos" });
+        } finally {
+            setIsSavingCostConfig(false);
         }
-    }, [stageCosts, machineHourRate, consumablesCostPerKg, toast]);
+    }, [stageCosts, machineHourRate, consumablesCostPerKg, isSavingCostConfig, isLoadingCostConfig, toast]);
 
     const loadStageCosts = useCallback(async () => {
+        setIsLoadingCostConfig(true);
+        setIsCostConfigLoaded(false);
         try {
-        const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
-        const docSnap = await getDoc(costsRef);
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            setStageCosts(data.costs || {});
-            setMachineHourRate(data.machineHourRate || 150);
-            setConsumablesCostPerKg(data.consumablesCostPerKg || 0);
-        }
+            const costsRef = doc(db, "companies", "mecald", "settings", "stageCosts");
+            const docSnap = await getDoc(costsRef);
+            if (docSnap.exists()) {
+                const data = docSnap.data();
+                const costs = normalizeStageCosts(data.costs || {});
+                const rawRate = Number(data.machineHourRate ?? 150);
+                const rawConsumables = Number(data.consumablesCostPerKg ?? 0);
+                const rate = Number.isFinite(rawRate) && rawRate >= 0 ? rawRate : 150;
+                const consumables = Number.isFinite(rawConsumables) && rawConsumables >= 0 ? rawConsumables : 0;
+                setStageCosts(costs);
+                setMachineHourRate(rate);
+                setConsumablesCostPerKg(consumables);
+                setSavedCostConfig({ costs, machineHourRate: rate, consumablesCostPerKg: consumables });
+                setIsCostConfigLoaded(true);
+            }
         } catch (error) {
-        console.error("Error loading stage costs:", error);
+            console.error("Error loading stage costs:", error);
+            toast({ variant: "destructive", title: "Erro ao carregar custos", description: "A configuração não pôde ser carregada. Recarregue a página antes de calcular." });
+        } finally {
+            setIsLoadingCostConfig(false);
         }
-    }, []);
+    }, [toast]);
+
+    const discardCostChanges = () => {
+        setStageCosts(savedCostConfig.costs);
+        setMachineHourRate(savedCostConfig.machineHourRate);
+        setConsumablesCostPerKg(savedCostConfig.consumablesCostPerKg);
+    };
+
 
     useEffect(() => {
         if (!authLoading && user) {
         loadStageCosts();
         }
     }, [user, authLoading, loadStageCosts]);
+
+  const calcMachiningHours = pricingCalculation?.machiningHours ?? machiningHours;
+  const calcMachineHourRate = pricingCalculation?.machineHourRate
+    ?? (calcMachiningHours > 0 && pricingCalculation
+      ? pricingCalculation.machiningCost / calcMachiningHours
+      : savedCostConfig.machineHourRate);
+  const calcConsumablesPerKg = pricingCalculation?.consumablesCostPerKg
+    ?? (pricingCalculation && pricingCalculation.productWeight > 0
+      ? pricingCalculation.consumablesCost / pricingCalculation.productWeight
+      : savedCostConfig.consumablesCostPerKg);
 
   return (
     <>
@@ -3001,6 +3065,7 @@ export default function ProductsPage() {
                                         <Input
                                             type="number"
                                             value={machineHourRate}
+                                            disabled={isSavingCostConfig || isLoadingCostConfig}
                                             onChange={(e) => setMachineHourRate(Number(e.target.value))}
                                             placeholder="150.00"
                                         />
@@ -3056,6 +3121,7 @@ export default function ProductsPage() {
                                             type="number"
                                             step="0.01"
                                             value={consumablesCostPerKg}
+                                            disabled={isSavingCostConfig || isLoadingCostConfig}
                                             onChange={(e) => setConsumablesCostPerKg(Number(e.target.value))}
                                             placeholder="0.00"
                                         />
@@ -3090,7 +3156,8 @@ export default function ProductsPage() {
                                                         step="0.01"
                                                         placeholder="0.00"
                                                         className="pl-8"
-                                                        value={stageCosts[stage.name] || ''}
+                                                        value={stageCosts[stage.name] ?? ''}
+                                            disabled={isSavingCostConfig || isLoadingCostConfig}
                                                         onChange={(e) => setStageCosts(prev => ({
                                                             ...prev,
                                                             [stage.name]: Number(e.target.value)
@@ -3114,9 +3181,26 @@ export default function ProductsPage() {
                                         </div>
                                     </div>
                                     
-                                    <Button onClick={saveStageCosts} className="mt-3" variant="outline">
-                                        Salvar Configurações
-                                    </Button>
+                                    {isLoadingCostConfig && (
+                                        <p className="mt-3 text-xs text-muted-foreground">Carregando configuração de custos...</p>
+                                    )}
+                                    {!isLoadingCostConfig && !isCostConfigLoaded && (
+                                        <p className="mt-3 text-xs text-amber-700">Salve a configuração de custos antes de calcular preços.</p>
+                                    )}
+                                    {hasUnsavedCostChanges && (
+                                        <div className="mt-3 rounded-md border border-amber-500 bg-amber-50 p-3 text-xs text-amber-900">
+                                            ⚠️ Há alterações não salvas. Salve ou descarte para liberar o cálculo com os valores salvos.
+                                        </div>
+                                    )}
+                                    <div className="mt-3 flex gap-2">
+                                        <Button onClick={saveStageCosts} disabled={(!hasUnsavedCostChanges && isCostConfigLoaded) || isSavingCostConfig || isLoadingCostConfig}>
+                                            <Save className="mr-2 h-4 w-4" />
+                                            {isSavingCostConfig ? "Salvando..." : "Salvar Configurações"}
+                                        </Button>
+                                        <Button variant="outline" onClick={discardCostChanges} disabled={!hasUnsavedCostChanges || isSavingCostConfig || isLoadingCostConfig}>
+                                            Descartar alterações
+                                        </Button>
+                                    </div>
                                 </div>
                             </CardContent>
                         </Card>
@@ -3522,7 +3606,7 @@ export default function ProductsPage() {
                                                         <p className="text-xs text-muted-foreground mt-1">
                                                             Preenchido automaticamente a partir da etapa "Usinagem" cadastrada no produto. Ajuste manualmente se necessário.
                                                             <br />
-                                                            Valor da hora: R$ {machineHourRate.toFixed(2)} = {machiningHours > 0 ? `R$ ${(machiningHours * machineHourRate).toFixed(2)}` : 'R$ 0,00'}
+                                                            Valor da hora salvo: R$ {savedCostConfig.machineHourRate.toFixed(2)} = {machiningHours > 0 ? `R$ ${(machiningHours * savedCostConfig.machineHourRate).toFixed(2)}` : 'R$ 0,00'}
                                                         </p>
                                                     </div>
                                                 </>
@@ -3532,6 +3616,20 @@ export default function ProductsPage() {
                                             <Button 
                                                 onClick={async () => {
                                                     const modalityConfig = getModalityConfig(pricingModality);
+
+                                                    if (isLoadingCostConfig || isSavingCostConfig || !isCostConfigLoaded) {
+                                                        toast({ variant: "destructive", title: "Configuração de custos indisponível", description: "Aguarde o carregamento ou salvamento e salve a configuração de custos antes de calcular." });
+                                                        return;
+                                                    }
+                                                    if (hasUnsavedCostChanges) {
+                                                        toast({
+                                                            variant: "destructive",
+                                                            title: "Configurações de custos não salvas",
+                                                            description: "Salve ou descarte as alterações em 'Custo por Kg de Cada Etapa' antes de calcular.",
+                                                        });
+                                                        return;
+                                                    }
+                                                    const { costs: savedCosts, machineHourRate: savedRate, consumablesCostPerKg: savedConsumables } = savedCostConfig;
 
                                                     if (modalityConfig.requiresMaterial) {
                                                         if (materialComposition.length === 0) {
@@ -3557,7 +3655,7 @@ export default function ProductsPage() {
                                                     const productWeight = selectedProductForPricing.unitWeight || 0;
 
                                                     const stageCostItems: StageCostItem[] = (selectedProductForPricing.productionPlanTemplate || []).map(stage => {
-                                                        const costPerKg = stageCosts[stage.stageName] || 0;
+                                                        const costPerKg = savedCosts[stage.stageName] || 0;
                                                         const totalCost = costPerKg * productWeight;
                                                         
                                                         return {
@@ -3573,8 +3671,8 @@ export default function ProductsPage() {
                                                         : 0;
                                                     const materialsForRecord = modalityConfig.requiresMaterial ? materialComposition : [];
                                                     const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
-                                                    const machiningCost = machiningHours * machineHourRate;
-                                                    const consumablesCost = consumablesCostPerKg * productWeight;
+                                                    const machiningCost = machiningHours * savedRate;
+                                                    const consumablesCost = savedConsumables * productWeight;
                                                     const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesCost;
                                                     const profitValue = totalCost * (profitMargin / 100);
                                                     const priceBeforeIncomeTaxes = totalCost + profitValue;
@@ -3617,6 +3715,9 @@ export default function ProductsPage() {
                                                         csllAmount,
                                                         finalPrice,
                                                         pricePerKg,
+                                                        machiningHours,
+                                                        machineHourRate: savedRate,
+                                                        consumablesCostPerKg: savedConsumables,
                                                         createdAt: new Date()
                                                     };
 
@@ -3626,7 +3727,7 @@ export default function ProductsPage() {
                                                     await savePricingCalculation(calculation, materialsForRecord, machiningHours);
                                                 }} 
                                                 className="w-full"
-                                                disabled={getModalityConfig(pricingModality).requiresMaterial && materialComposition.length === 0}
+                                                disabled={isLoadingCostConfig || isSavingCostConfig || !isCostConfigLoaded || (getModalityConfig(pricingModality).requiresMaterial && materialComposition.length === 0)}
                                             >
                                                 <Calculator className="mr-2 h-4 w-4" />
                                                 Calcular e Salvar Preço
@@ -3948,11 +4049,11 @@ export default function ProductsPage() {
                                                     
                                                     addSection('OUTROS CUSTOS');
                                                     if (pricingCalculation.machiningCost > 0) {
-                                                        addText(`Usinagem: ${machiningHours}h × R$ ${machineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
+                                                        addText(`Usinagem: ${calcMachiningHours}h × R$ ${calcMachineHourRate.toFixed(2)}/h = R$ ${pricingCalculation.machiningCost.toFixed(2)}`, 9);
                                                     }
                                                     if (pricingCalculation.consumablesCost > 0) {
                                                         addText(`Insumos e Consumíveis:`, 9, true);
-                                                        addText(`   R$ ${consumablesCostPerKg.toFixed(2)}/kg × ${pricingCalculation.productWeight}kg = R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
+                                                        addText(`   R$ ${calcConsumablesPerKg.toFixed(2)}/kg × ${pricingCalculation.productWeight}kg = R$ ${pricingCalculation.consumablesCost.toFixed(2)}`, 9);
                                                     }
                                                     
                                                     checkPageBreak(40);
@@ -4108,7 +4209,7 @@ export default function ProductsPage() {
                                                             <span className="flex-1">
                                                                 Usinagem
                                                                 <span className="text-xs ml-1">
-                                                                    ({machiningHours}h × R$ {machineHourRate.toFixed(2)}/h)
+                                                                    ({calcMachiningHours}h × R$ {calcMachineHourRate.toFixed(2)}/h)
                                                                 </span>
                                                             </span>
                                                             <span className="font-mono">R$ {pricingCalculation.machiningCost.toFixed(2)}</span>
@@ -4119,7 +4220,7 @@ export default function ProductsPage() {
                                                             <span className="flex-1">
                                                                 Insumos e Consumíveis
                                                                 <span className="text-xs ml-1">
-                                                                    (R$ {consumablesCostPerKg.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
+                                                                    (R$ {calcConsumablesPerKg.toFixed(2)}/kg × {pricingCalculation.productWeight}kg)
                                                                 </span>
                                                             </span>
                                                             <span className="font-mono">R$ {pricingCalculation.consumablesCost.toFixed(2)}</span>
@@ -5035,4 +5136,3 @@ export default function ProductsPage() {
   );
 
 }
-
