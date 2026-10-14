@@ -4,8 +4,9 @@ import { useState, useEffect } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove } from "firebase/firestore";
+import { doc, getDoc, setDoc, updateDoc, arrayUnion, arrayRemove, collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { normalizeSectorKey } from "@/lib/production-capacity";
 import { useAuth } from "../layout";
 import Image from "next/image";
 import { PlusCircle, Pencil, Trash2, Settings, Activity, AlertCircle, CheckCircle, UserX, Calendar, Download, FileText, Clock, Users } from "lucide-react";
@@ -106,6 +107,8 @@ export default function CompanyPage() {
   // Estados dos recursos
   const [isResourcesLoading, setIsResourcesLoading] = useState(true);
   const [resources, setResources] = useState<Resource[]>([]);
+  // Centros de custo: a Localização do funcionário define o setor usado na capacidade produtiva.
+  const [sectorNames, setSectorNames] = useState<string[]>([]);
   const [isResourceFormOpen, setIsResourceFormOpen] = useState(false);
   const [isResourceDeleteAlertOpen, setIsResourceDeleteAlertOpen] = useState(false);
   const [selectedResource, setSelectedResource] = useState<Resource | null>(null);
@@ -242,10 +245,19 @@ export default function CompanyPage() {
     setIsResourcesLoading(true);
     try {
         const resourcesRef = doc(db, "companies", "mecald", "settings", "resources");
-        const docSnap = await getDoc(resourcesRef);
+        const [docSnap, centersSnap] = await Promise.all([
+            getDoc(resourcesRef),
+            getDocs(collection(db, "companies", "mecald", "productionCostCenters")),
+        ]);
         if (docSnap.exists()) {
             setResources(docSnap.data().resources || []);
         }
+        setSectorNames(
+            centersSnap.docs
+                .map(centerDoc => String(centerDoc.data().sectorName || centerDoc.id).trim())
+                .filter(Boolean)
+                .sort((a, b) => a.localeCompare(b, "pt-BR"))
+        );
     } catch (error) {
         console.error("Error fetching resources data:", error);
         toast({
@@ -1907,7 +1919,7 @@ export default function CompanyPage() {
                           <TableHead>Categoria</TableHead>
                           <TableHead>Capacidade</TableHead>
                           <TableHead>Status</TableHead>
-                          <TableHead>Localização</TableHead>
+                          <TableHead>Setor (Localização)</TableHead>
                           <TableHead>Período</TableHead>
                           <TableHead className="text-right">Ações</TableHead>
                         </TableRow>
@@ -1923,7 +1935,14 @@ export default function CompanyPage() {
                               <TableCell className="capitalize">{resource.category || "-"}</TableCell>
                               <TableCell>{resource.capacity}</TableCell>
                               <TableCell>{getStatusBadge(resource.status)}</TableCell>
-                              <TableCell>{resource.location || "-"}</TableCell>
+                              <TableCell>
+                                {resource.location || "-"}
+                                {resource.location && sectorNames.length > 0 && !sectorNames.some(name => normalizeSectorKey(name) === normalizeSectorKey(resource.location)) && (
+                                  <Badge variant="outline" className="ml-2 text-amber-600" title="Não corresponde a nenhum centro de custo: não conta na capacidade dos setores.">
+                                    setor não reconhecido
+                                  </Badge>
+                                )}
+                              </TableCell>
                               <TableCell>
                                 {(resource.status === 'ausente' || resource.status === 'ferias') && resource.absenceStartDate && resource.absenceEndDate ? (
                                   <div className="text-xs">
@@ -2340,10 +2359,16 @@ export default function CompanyPage() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField control={resourceForm.control} name="location" render={({ field }) => (
                   <FormItem>
-                    <FormLabel>Localização</FormLabel>
+                    <FormLabel>Setor (Localização)</FormLabel>
                     <FormControl>
-                      <Input placeholder="Ex: Galpão A, Setor 2" {...field} />
+                      <Input placeholder="Ex: Montagem" list="resource-sector-options" {...field} />
                     </FormControl>
+                    <datalist id="resource-sector-options">
+                      {sectorNames.map(name => <option key={name} value={name} />)}
+                    </datalist>
+                    <p className="text-xs text-muted-foreground">
+                      Use o nome do centro de custo. É por ele que a pessoa conta na capacidade do setor (prazos e ocupação).
+                    </p>
                     <FormMessage />
                   </FormItem>
                 )} />
