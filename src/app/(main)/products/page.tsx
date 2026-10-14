@@ -8,6 +8,17 @@ import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { USEFUL_HOURS_PER_DAY } from "@/lib/orders-shared";
+import {
+  buildCapacityModel,
+  buildSectorResolver,
+  computeBacklog,
+  countBusinessDays,
+  simulateSchedule,
+  startOfLocalDay,
+  summarizeSectorOccupancy,
+  type CapacitySnapshot,
+} from "@/lib/production-capacity";
+import { loadCapacitySnapshot } from "@/lib/production-capacity-loader";
     import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package, BookOpen, ShieldAlert, Upload, User, Hash, Save, ImagePlus, X } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -586,7 +597,7 @@ const exportCalculatorReportPDF = (
     addText(`Status: ${calculatorResults.isViable ? 'VIÁVEL' : 'INVIÁVEL'}`, margin, 12, true);
     addText(`Confiança: ${calculatorResults.confidence}%`);
     addText(`Data sugerida: ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}`);
-    addText(`Lead time ajustado: ${calculatorResults.totalAdjustedLeadTime} dias`);
+    addText(`Prazo com a fila atual: ${calculatorResults.totalAdjustedLeadTime} dias úteis`);
     addLine();
     
     addText('ANÁLISE POR SETOR', margin, 14, true);
@@ -671,12 +682,26 @@ export default function ProductsPage() {
       adjustedDuration: number;
       workload: number;
       bottleneck: boolean;
+      itemLabel?: string;
+      sectorName?: string;
+      hours?: number;
+      startDate?: Date;
+      endDate?: Date;
+      waitDays?: number;
+      uncapacitated?: boolean;
+      unmapped?: boolean;
     }>;
     totalAdjustedLeadTime: number;
     confidence: number;
+    marginBusinessDays?: number;
+    baseLeadTimeBusinessDays?: number;
+    warnings?: string[];
   } | null>(null);
-  
-  const [sectorWorkload, setSectorWorkload] = useState<Record<string, number>>({});
+
+  // Carga real dos setores: funcionários (aba Empresa) × pedidos abertos (aba Pedidos)
+  const [capacitySnapshot, setCapacitySnapshot] = useState<CapacitySnapshot | null>(null);
+  const [isLoadingCapacity, setIsLoadingCapacity] = useState(false);
+  const [includeWaitingOrders, setIncludeWaitingOrders] = useState(true);
 
     // Estados da calculadora de preços
     const [stageCosts, setStageCosts] = useState<Record<string, number>>({});
@@ -760,21 +785,6 @@ export default function ProductsPage() {
     });
   }, [customMaterials]);
 
-  // Função para simular carga de trabalho dos setores
-  const simulateSectorWorkload = useCallback(() => {
-    const workload: Record<string, number> = {};
-    manufacturingStages.forEach(stage => {
-      workload[stage.name] = Math.random() * 0.95;
-    });
-    setSectorWorkload(workload);
-  }, [manufacturingStages]);
-
-  useEffect(() => {
-    if (manufacturingStages.length > 0) {
-      simulateSectorWorkload();
-    }
-  }, [manufacturingStages, simulateSectorWorkload]);
-
   const [isCopyPopoverOpen, setIsCopyPopoverOpen] = useState(false);
   const [copyFromSearch, setCopyFromSearch] = useState("");
 
@@ -791,6 +801,39 @@ export default function ProductsPage() {
 
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
+
+  const loadCapacity = useCallback(async () => {
+    setIsLoadingCapacity(true);
+    try {
+      setCapacitySnapshot(await loadCapacitySnapshot());
+    } catch (error) {
+      console.error("Error loading sector capacity:", error);
+      toast({
+        variant: "destructive",
+        title: "Erro ao carregar a carga dos setores",
+        description: "Não foi possível ler funcionários e pedidos. Tente novamente.",
+      });
+    } finally {
+      setIsLoadingCapacity(false);
+    }
+  }, [toast]);
+
+  // Modelo de capacidade × fila, recalculado quando os dados ou a opção mudam.
+  const capacityView = useMemo(() => {
+    if (!capacitySnapshot) return null;
+    const today = new Date();
+    const resolver = buildSectorResolver(capacitySnapshot);
+    const model = buildCapacityModel(capacitySnapshot, resolver, today);
+    const backlog = computeBacklog(capacitySnapshot.orders, resolver, today, { includeWaitingOrders });
+    const sectorKeysInUse = Array.from(new Set(
+      capacitySnapshot.stageLinks
+        .map(link => resolver.sectorOfStage(link.name)?.key)
+        .filter((key): key is string => Boolean(key))
+    ));
+    const occupancy = summarizeSectorOccupancy(model, backlog, resolver, today, 20, sectorKeysInUse);
+    const stagesWithoutSector = capacitySnapshot.stageLinks.filter(link => !resolver.sectorOfStage(link.name));
+    return { resolver, model, backlog, occupancy, stagesWithoutSector };
+  }, [capacitySnapshot, includeWaitingOrders]);
 
   const form = useForm<z.infer<typeof productSchema>>({
     resolver: zodResolver(productSchema),
@@ -1456,6 +1499,13 @@ export default function ProductsPage() {
       fetchCostCenters();
     }
   }, [user, authLoading, fetchProducts, fetchStages, fetchCustomMaterials, fetchSavedPricingCodes, fetchPlanCreators, fetchSavedPlanDrawings, fetchCostCenters]);
+
+  // A carga dos setores é lida ao abrir a calculadora (e no botão "Atualizar carga").
+  useEffect(() => {
+    if (!authLoading && user && activeTab === "calculator" && !capacitySnapshot && !isLoadingCapacity) {
+      loadCapacity();
+    }
+  }, [authLoading, user, activeTab, capacitySnapshot, isLoadingCapacity, loadCapacity]);
   
   const syncCatalog = useCallback(async () => {
     setIsSyncing(true);
@@ -1967,74 +2017,82 @@ export default function ProductsPage() {
       });
       return;
     }
-
-    const baseLeadTime = Math.max(...calculatorItems.map(item => {
-      return item.stages.reduce((sum, stage) => sum + hoursToDays(stage.hours || 0), 0);
-    }));
-    const longestProductItem = calculatorItems.find(item => {
-      const itemLeadTime = item.stages.reduce((sum, stage) => sum + hoursToDays(stage.hours || 0), 0);
-      return itemLeadTime === baseLeadTime;
-    });
-
-    if (!longestProductItem) {
+    if (!capacityView) {
       toast({
         variant: "destructive",
-        title: "Erro de cálculo",
-        description: "Não foi possível identificar o produto crítico."
+        title: "Carga dos setores não carregada",
+        description: "Aguarde a leitura de funcionários e pedidos ou clique em \"Atualizar carga\".",
       });
       return;
     }
 
-    const analysis = longestProductItem.stages.map((stage) => {
-      const currentWorkload = sectorWorkload[stage.stageName] || 0;
-      let adjustmentFactor = 1;
-      let isBottleneck = false;
-      if (currentWorkload >= 0.9) {
-        adjustmentFactor = 2.5 + (currentWorkload - 0.9) * 10;
-        isBottleneck = true;
-      } else if (currentWorkload >= 0.8) {
-        adjustmentFactor = 1.8 + (currentWorkload - 0.8) * 7;
-        isBottleneck = true;
-      } else if (currentWorkload >= 0.7) {
-        adjustmentFactor = 1.3 + (currentWorkload - 0.7) * 5;
-        isBottleneck = currentWorkload >= 0.75;
-      } else if (currentWorkload >= 0.5) {
-        adjustmentFactor = 1.0 + (currentWorkload - 0.5) * 1.5;
-      } else {
-        adjustmentFactor = 0.8 + currentWorkload * 0.4;
-      }
-      const originalDuration = hoursToDays(stage.hours || 0);
-      const adjustedDuration = Math.ceil(originalDuration * adjustmentFactor);
+    const today = startOfLocalDay(new Date());
+    const { resolver, model, backlog, occupancy } = capacityView;
+    const occupancyBySector = new Map(occupancy.map(sector => [sector.key, sector.occupancy]));
+
+    // As horas do cadastro valem para o lote inteiro: a quantidade não multiplica as horas.
+    const jobs = calculatorItems.map(item => ({
+      id: item.id,
+      label: item.productCode,
+      stages: item.stages.map(stage => ({ stageName: stage.stageName, hours: Number(stage.hours) || 0 })),
+    }));
+    const schedule = simulateSchedule(jobs, model, backlog, resolver, occupancyBySector, today);
+    const showItemLabel = calculatorItems.length > 1;
+
+    const analysis = schedule.stages.map(stage => {
+      const workload = Number.isFinite(stage.sectorOccupancy) ? stage.sectorOccupancy : 0;
       return {
-        stageName: stage.stageName,
-        originalDuration,
-        adjustedDuration,
-        workload: currentWorkload,
-        bottleneck: isBottleneck
+        stageName: showItemLabel ? `${stage.jobLabel} · ${stage.stageName}` : stage.stageName,
+        originalDuration: Math.round(stage.baseBusinessDays * 10) / 10,
+        adjustedDuration: stage.elapsedBusinessDays,
+        workload,
+        bottleneck: stage.waitBusinessDays > 0 || workload >= 0.85,
+        itemLabel: stage.jobLabel,
+        sectorName: stage.sectorName,
+        hours: stage.hours,
+        startDate: stage.startDate,
+        endDate: stage.endDate,
+        waitDays: stage.waitBusinessDays,
+        uncapacitated: stage.uncapacitated,
+        unmapped: stage.unmapped,
       };
     });
 
-    let totalAdjustedLeadTime = analysis.reduce((sum, stage) => sum + stage.adjustedDuration, 0);
+    const suggestedDate = schedule.completionDate;
+    const totalAdjustedLeadTime = schedule.leadTimeBusinessDays;
+    const requested = startOfLocalDay(requestedDeliveryDate);
+    const isViable = !schedule.truncated && suggestedDate <= requested;
+    const marginBusinessDays = isViable
+      ? countBusinessDays(suggestedDate, requested)
+      : -countBusinessDays(requested, suggestedDate);
+    const baseLeadTimeBusinessDays = Math.max(0, ...calculatorItems.map(item =>
+      Math.ceil(item.stages.reduce((sum, stage) => sum + (Number(stage.hours) || 0), 0) / USEFUL_HOURS_PER_DAY)
+    ));
 
-    const suggestedDate = new Date();
-    suggestedDate.setDate(suggestedDate.getDate() + totalAdjustedLeadTime);
-
-    const daysUntilRequested = Math.ceil((requestedDeliveryDate.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-    const isViable = daysUntilRequested >= totalAdjustedLeadTime;
-
-    let confidence = 90;
-    const avgWorkload = analysis.reduce((sum, a) => sum + a.workload, 0) / analysis.length;
-    confidence -= avgWorkload * 60;
-    const bottleneckCount = analysis.filter(a => a.bottleneck).length;
-    confidence -= bottleneckCount * 25;
-    const timeMargin = (daysUntilRequested - totalAdjustedLeadTime) / totalAdjustedLeadTime;
-    if (timeMargin < 0) {
-      confidence -= 30;
-    } else if (timeMargin < 0.2) {
-      confidence -= 20;
-    } else if (timeMargin > 0.5) {
-      confidence += 10;
+    const warnings: string[] = [];
+    const unmappedStages = Array.from(new Set(analysis.filter(a => a.unmapped).map(a => a.stageName)));
+    const uncapacitatedSectors = Array.from(new Set(analysis.filter(a => a.uncapacitated).map(a => a.sectorName || "")));
+    if (unmappedStages.length > 0) {
+      warnings.push(`Etapas sem centro de custo, calculadas sem fila: ${unmappedStages.join(", ")}.`);
     }
+    if (uncapacitatedSectors.length > 0) {
+      warnings.push(`Setores sem funcionários com essa Localização, calculados sem fila (normal para fornecimento externo): ${uncapacitatedSectors.join(", ")}.`);
+    }
+    if (backlog.unmappedEntries.length > 0) {
+      warnings.push(`${backlog.unmappedEntries.length} etapa(s) de pedidos abertos não têm centro de custo e ficaram fora da carga.`);
+    }
+    if (schedule.truncated) {
+      warnings.push("A simulação passou de 3 anos sem concluir. Verifique se os setores envolvidos têm funcionários cadastrados.");
+    }
+
+    // Confiança: margem até a data pedida e qualidade dos dados usados.
+    let confidence = 95;
+    if (marginBusinessDays < 0) confidence = 15;
+    else if (marginBusinessDays < 3) confidence -= 30;
+    else if (marginBusinessDays < 10) confidence -= 15;
+    confidence -= analysis.filter(a => a.bottleneck).length * 3;
+    confidence -= unmappedStages.length * 5;
+    confidence -= analysis.filter(a => a.uncapacitated && a.sectorName !== "Fornecimento externo").length * 5;
     confidence = Math.min(95, Math.max(5, Math.round(confidence)));
 
     setCalculatorResults({
@@ -2042,7 +2100,10 @@ export default function ProductsPage() {
       suggestedDate,
       analysis,
       totalAdjustedLeadTime,
-      confidence
+      confidence,
+      marginBusinessDays,
+      baseLeadTimeBusinessDays,
+      warnings,
     });
   };
 
@@ -2148,7 +2209,7 @@ export default function ProductsPage() {
             <div class="section-title">DADOS DA SOLICITAÇÃO</div>
             <p><strong>Data de entrega solicitada:</strong> ${format(requestedDeliveryDate, "dd/MM/yyyy", { locale: ptBR })}</p>
             <p><strong>Quantidade de itens analisados:</strong> ${calculatorItems.length}</p>
-            <p><strong>Lead time total estimado:</strong> ${calculatorResults?.totalAdjustedLeadTime || 0} dias</p>
+            <p><strong>Prazo com a fila atual:</strong> ${calculatorResults?.totalAdjustedLeadTime || 0} dias úteis</p>
           </div>
 
           <div class="section">
@@ -2174,7 +2235,7 @@ export default function ProductsPage() {
                 <h2>${calculatorResults.isViable ? '✓ PRAZO VIÁVEL' : '✗ PRAZO INVIÁVEL'}</h2>
                 <p><strong>Nível de confiança:</strong> ${calculatorResults.confidence}%</p>
                 <p><strong>Data sugerida para entrega:</strong> ${format(calculatorResults.suggestedDate, "dd/MM/yyyy", { locale: ptBR })}</p>
-                <p><strong>Lead time ajustado:</strong> ${calculatorResults.totalAdjustedLeadTime} dias</p>
+                <p><strong>Prazo com a fila atual:</strong> ${calculatorResults.totalAdjustedLeadTime} dias úteis</p>
               </div>
             </div>
 
@@ -2802,45 +2863,117 @@ export default function ProductsPage() {
                         <CardHeader>
                             <CardTitle>Calculadora de Viabilidade de Prazos</CardTitle>
                             <CardDescription>
-                                Analise se é possível cumprir prazos considerando a carga atual dos setores de produção.
+                                Prazo calculado com os funcionários de cada setor (aba Empresa) e a fila dos pedidos abertos (aba Pedidos).
                             </CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-6">
                             <div>
-                                <h4 className="text-sm font-medium mb-3">Carga Atual dos Setores</h4>
-                                <div className="grid gap-2">
-                                    {manufacturingStages.map(stage => {
-                                        const workload = sectorWorkload[stage.name] || 0;
-                                        const percentage = Math.round(workload * 100);
-                                        let colorClass = "bg-green-500";
-                                        if (percentage > 80) colorClass = "bg-red-500";
-                                        else if (percentage > 60) colorClass = "bg-yellow-500";
-                                        
-                                        return (
-                                            <div key={stage.name} className="flex items-center gap-3">
-                                                <span className="text-sm font-medium w-24 truncate" title={stage.costCenterName || stage.name}>{stage.name}</span>
-                                                <div className="flex-1 bg-muted rounded-full h-2">
-                                                    <div 
-                                                        className={`h-2 rounded-full transition-all ${colorClass}`}
-                                                        style={{ width: `${percentage}%` }}
-                                                    />
-                                                </div>
-                                                <span className="text-xs text-muted-foreground w-12 text-right">
-                                                    {percentage}%
-                                                </span>
-                                            </div>
-                                        );
-                                    })}
+                                <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                                    <h4 className="text-sm font-medium">Carga Atual dos Setores</h4>
+                                    {capacitySnapshot && (
+                                        <span className="text-xs text-muted-foreground">
+                                            Atualizado às {format(capacitySnapshot.loadedAt, "HH:mm")}
+                                        </span>
+                                    )}
                                 </div>
-                                <Button 
-                                    variant="outline" 
-                                    size="sm" 
-                                    onClick={simulateSectorWorkload}
-                                    className="mt-3"
-                                >
-                                    <RefreshCw className="mr-2 h-3 w-3" />
-                                    Atualizar Carga
-                                </Button>
+                                {isLoadingCapacity && !capacityView ? (
+                                    <div className="space-y-2">
+                                        <Skeleton className="h-6 w-full" />
+                                        <Skeleton className="h-6 w-full" />
+                                        <Skeleton className="h-6 w-full" />
+                                    </div>
+                                ) : !capacityView || capacityView.occupancy.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">
+                                        Nenhum setor encontrado. Preencha a Localização dos funcionários (aba Empresa) com o nome do centro de custo.
+                                    </p>
+                                ) : (
+                                    <div className="space-y-2">
+                                        <div className="grid grid-cols-[minmax(0,1fr)_56px_64px_72px] gap-2 text-[11px] font-medium uppercase text-muted-foreground">
+                                            <span>Setor · ocupação 20 dias úteis</span>
+                                            <span className="text-right">Pessoas</span>
+                                            <span className="text-right">Carga (h)</span>
+                                            <span className="text-right">Fila</span>
+                                        </div>
+                                        {capacityView.occupancy.map(sector => {
+                                            const finite = Number.isFinite(sector.occupancy);
+                                            const percentage = finite ? Math.round(sector.occupancy * 100) : 0;
+                                            let colorClass = "bg-green-500";
+                                            if (!sector.hasCapacity) colorClass = "bg-muted-foreground";
+                                            else if (percentage > 90) colorClass = "bg-red-500";
+                                            else if (percentage > 70) colorClass = "bg-yellow-500";
+                                            return (
+                                                <div key={sector.key} className="grid grid-cols-[minmax(0,1fr)_56px_64px_72px] items-center gap-2 text-sm">
+                                                    <div className="min-w-0">
+                                                        <div className="flex items-center justify-between gap-2">
+                                                            <span className="truncate font-medium" title={sector.name}>
+                                                                {sector.name}
+                                                                {!sector.matchesCostCenter && <span className="ml-1 text-xs text-amber-600">(não é centro de custo)</span>}
+                                                            </span>
+                                                            <span className="shrink-0 text-xs text-muted-foreground">
+                                                                {sector.hasCapacity ? `${percentage}%` : "sem pessoas"}
+                                                            </span>
+                                                        </div>
+                                                        <div className="mt-1 h-2 rounded-full bg-muted">
+                                                            <div
+                                                                className={`h-2 rounded-full transition-all ${colorClass}`}
+                                                                style={{ width: `${sector.hasCapacity ? Math.min(100, percentage) : 100}%` }}
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <span className="text-right text-xs" title={`${sector.availableToday} disponível(is) hoje · ${sector.hoursPerDayToday} h/dia`}>
+                                                        {sector.availableToday}/{sector.people}
+                                                    </span>
+                                                    <span className="text-right text-xs">{Math.round(sector.backlogHours)}</span>
+                                                    <span className="text-right text-xs">
+                                                        {sector.queueBusinessDays === null ? "—" : `${sector.queueBusinessDays} d.u.`}
+                                                    </span>
+                                                </div>
+                                            );
+                                        })}
+                                        <p className="pt-1 text-xs text-muted-foreground">
+                                            Pessoas = disponíveis hoje / lotadas no setor. Carga = horas das etapas não concluídas dos pedidos abertos.
+                                            Fila = dias úteis até o setor esvaziar a carga atual. Capacidade = pessoas × {USEFUL_HOURS_PER_DAY} h por dia útil, descontando férias e ausências e somando horas extras aprovadas.
+                                        </p>
+                                        {capacityView.stagesWithoutSector.length > 0 && (
+                                            <div className="rounded-md border border-amber-500 bg-amber-50 p-2 text-xs text-amber-900">
+                                                ⚠️ Etapas sem centro de custo (não entram na carga): {capacityView.stagesWithoutSector.map(stage => stage.name).join(", ")}.
+                                            </div>
+                                        )}
+                                        {capacityView.model.unmatchedResources.length > 0 && (
+                                            <div className="rounded-md border border-amber-500 bg-amber-50 p-2 text-xs text-amber-900">
+                                                ⚠️ Localização que não corresponde a nenhum centro de custo:{" "}
+                                                {capacityView.model.unmatchedResources.map(resource => `${resource.name} (${resource.location})`).join(", ")}.
+                                            </div>
+                                        )}
+                                        {capacityView.model.resourcesWithoutSector.length > 0 && (
+                                            <div className="rounded-md border border-amber-500 bg-amber-50 p-2 text-xs text-amber-900">
+                                                ⚠️ Funcionários sem Localização (não contam em nenhum setor):{" "}
+                                                {capacityView.model.resourcesWithoutSector.map(resource => resource.name).join(", ")}.
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                                <div className="mt-3 flex flex-wrap items-center gap-4">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={loadCapacity}
+                                        disabled={isLoadingCapacity}
+                                    >
+                                        <RefreshCw className={`mr-2 h-3 w-3 ${isLoadingCapacity ? "animate-spin" : ""}`} />
+                                        {isLoadingCapacity ? "Atualizando..." : "Atualizar carga"}
+                                    </Button>
+                                    <label className="flex items-center gap-2 text-xs text-muted-foreground">
+                                        <Checkbox
+                                            checked={includeWaitingOrders}
+                                            onCheckedChange={(checked) => {
+                                                setIncludeWaitingOrders(checked === true);
+                                                setCalculatorResults(null);
+                                            }}
+                                        />
+                                        Incluir pedidos "Aguardando Produção" na fila
+                                    </label>
+                                </div>
                             </div>
 
                             <Separator />
@@ -2974,32 +3107,63 @@ export default function ProductsPage() {
                                                 <span className="font-medium">Data sugerida:</span> {format(calculatorResults.suggestedDate, "dd/MM/yyyy")}
                                             </div>
                                             <div className="text-sm">
-                                                <span className="font-medium">Lead time ajustado:</span> {calculatorResults.totalAdjustedLeadTime} dias
+                                                <span className="font-medium">Prazo com a fila atual:</span> {calculatorResults.totalAdjustedLeadTime} dias úteis
+                                                {calculatorResults.baseLeadTimeBusinessDays !== undefined && (
+                                                    <span className="text-muted-foreground"> (sem fila: {calculatorResults.baseLeadTimeBusinessDays})</span>
+                                                )}
                                             </div>
+                                            {calculatorResults.marginBusinessDays !== undefined && (
+                                                <div className={`text-sm ${calculatorResults.marginBusinessDays < 0 ? 'text-red-600' : 'text-green-600'}`}>
+                                                    <span className="font-medium">Folga:</span> {calculatorResults.marginBusinessDays > 0 ? '+' : ''}{calculatorResults.marginBusinessDays} dias úteis
+                                                </div>
+                                            )}
                                         </div>
                                     </div>
 
+                                    {calculatorResults.warnings && calculatorResults.warnings.length > 0 && (
+                                        <div className="space-y-2 rounded-md border border-amber-500 bg-amber-50 p-3 text-xs text-amber-900">
+                                            {calculatorResults.warnings.map(warning => (
+                                                <div key={warning}>⚠️ {warning}</div>
+                                            ))}
+                                        </div>
+                                    )}
+
                                     <div>
-                                        <h4 className="text-sm font-medium mb-3">Análise por Setor</h4>
+                                        <h4 className="text-sm font-medium mb-3">Cronograma por Etapa</h4>
                                         <div className="space-y-3">
-                                            {calculatorResults.analysis.map(analysis => (
-                                                <div key={analysis.stageName} className="p-3 border rounded-md">
-                                                    <div className="flex items-center justify-between mb-2">
-                                                        <span className="font-medium text-sm">{analysis.stageName}</span>
-                                                        {analysis.bottleneck && (
-                                                            <Badge variant="destructive">Gargalo</Badge>
-                                                        )}
+                                            {calculatorResults.analysis.map((analysis, index) => (
+                                                <div key={`${analysis.stageName}-${index}`} className="p-3 border rounded-md">
+                                                    <div className="flex items-center justify-between gap-2 mb-2">
+                                                        <div className="min-w-0">
+                                                            <span className="font-medium text-sm">{analysis.stageName}</span>
+                                                            {analysis.sectorName && (
+                                                                <span className="ml-2 text-xs text-muted-foreground">({analysis.sectorName})</span>
+                                                            )}
+                                                        </div>
+                                                        <div className="flex shrink-0 gap-1">
+                                                            {analysis.unmapped && <Badge variant="outline">Sem centro de custo</Badge>}
+                                                            {analysis.uncapacitated && <Badge variant="outline">Sem fila</Badge>}
+                                                            {analysis.bottleneck && <Badge variant="destructive">Gargalo</Badge>}
+                                                        </div>
                                                     </div>
                                                     <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
                                                         <div>
-                                                            <div>Tempo original: {analysis.originalDuration} dias</div>
-                                                            <div>Tempo ajustado: {analysis.adjustedDuration} dias</div>
+                                                            {analysis.startDate && analysis.endDate && (
+                                                                <div>
+                                                                    {format(analysis.startDate, "dd/MM")} → {format(analysis.endDate, "dd/MM/yyyy")}
+                                                                </div>
+                                                            )}
+                                                            <div>
+                                                                Execução: {analysis.originalDuration} d.u.
+                                                                {analysis.hours !== undefined && ` (${Math.round(analysis.hours * 10) / 10} h)`}
+                                                            </div>
                                                         </div>
                                                         <div>
-                                                            <div>Carga atual: {Math.round(analysis.workload * 100)}%</div>
                                                             <div>
-                                                                Impacto: {analysis.adjustedDuration > analysis.originalDuration ? '+' : ''}
-                                                                {analysis.adjustedDuration - analysis.originalDuration} dias
+                                                                Ocupação do setor: {analysis.uncapacitated || analysis.unmapped ? "—" : `${Math.round(analysis.workload * 100)}%`}
+                                                            </div>
+                                                            <div className={analysis.waitDays ? "font-medium text-red-600" : undefined}>
+                                                                Espera na fila: {analysis.waitDays ?? 0} d.u.
                                                             </div>
                                                         </div>
                                                     </div>
@@ -3024,7 +3188,7 @@ export default function ProductsPage() {
                                                 <div className="p-3 bg-yellow-50 border border-yellow-200 rounded-md">
                                                     <div className="font-medium text-yellow-800 mb-1">Baixa Confiança</div>
                                                     <div className="text-yellow-700">
-                                                        Setores com alta carga podem causar atrasos. Monitore de perto.
+                                                        Pouca folga até a data pedida ou dados incompletos (veja os avisos acima). Monitore de perto.
                                                     </div>
                                                 </div>
                                             )}
@@ -3032,7 +3196,8 @@ export default function ProductsPage() {
                                                 <div className="p-3 bg-orange-50 border border-orange-200 rounded-md">
                                                     <div className="font-medium text-orange-800 mb-1">Gargalos Identificados</div>
                                                     <div className="text-orange-700">
-                                                        Considere realocar recursos ou terceirizar algumas etapas.
+                                                        Etapas esperando setor ocupado: {Array.from(new Set(calculatorResults.analysis.filter(a => a.bottleneck).map(a => a.sectorName || a.stageName))).join(", ")}.
+                                                        {" "}Hora extra, realocação de pessoas ou terceirização nesses setores encurtam o prazo.
                                                     </div>
                                                 </div>
                                             )}
