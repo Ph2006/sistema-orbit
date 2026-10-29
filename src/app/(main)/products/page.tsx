@@ -19,6 +19,7 @@ import {
   type CapacitySnapshot,
 } from "@/lib/production-capacity";
 import { loadCapacitySnapshot } from "@/lib/production-capacity-loader";
+import { syncProductPlanToOrders } from "@/lib/production-plan-sync";
     import { PlusCircle, Search, Pencil, Trash2, RefreshCw, Copy, Clock, CalendarIcon, Download, FileText, GripVertical, Calculator, Package, BookOpen, ShieldAlert, Upload, User, Hash, Save, ImagePlus, X } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -803,6 +804,34 @@ export default function ProductsPage() {
 
   const { toast } = useToast();
   const { user, loading: authLoading } = useAuth();
+
+  // ─── NOVO: propaga o template de etapas de um ou mais produtos para os
+  // mesmos itens nos pedidos abertos (aba Pedidos). Retorna o texto de resumo.
+  const propagatePlansToOrders = useCallback(async (
+    plans: { code: string; plan: Array<{ stageName: string; hours?: number }> }[],
+    renames: Record<string, string> = {}
+  ): Promise<string> => {
+    let ordersUpdated = 0;
+    let itemsUpdated = 0;
+    try {
+      for (const { code, plan } of plans) {
+        const result = await syncProductPlanToOrders(code, plan || [], renames);
+        ordersUpdated += result.ordersUpdated;
+        itemsUpdated += result.itemsUpdated;
+      }
+    } catch (error) {
+      console.error("Erro ao sincronizar etapas com os pedidos:", error);
+      toast({
+        variant: "destructive",
+        title: "Etapas salvas, mas os pedidos não foram atualizados",
+        description: "Salve novamente para tentar sincronizar os pedidos abertos.",
+      });
+      return "";
+    }
+    return itemsUpdated > 0
+      ? ` ${itemsUpdated} item(ns) em ${ordersUpdated} pedido(s) aberto(s) foram atualizados.`
+      : "";
+  }, [toast]);
 
   const loadCapacity = useCallback(async () => {
     setIsLoadingCapacity(true);
@@ -1618,12 +1647,28 @@ export default function ProductsPage() {
       if (selectedProduct && selectedProduct.id !== values.code) {
         await deleteDoc(doc(db, "companies", "mecald", "products", selectedProduct.id));
       }
+
+      // Firestore não aceita undefined: horas vazias são gravadas como 0.
+      const cleanPlanTemplate = (values.productionPlanTemplate || []).map(stage => ({
+        stageName: stage.stageName,
+        hours: Number(stage.hours) || 0,
+      }));
+      const valuesToSave = {
+        ...values,
+        unitWeight: Number(values.unitWeight) || 0,
+        productionPlanTemplate: cleanPlanTemplate,
+      };
       
-      await setDoc(productRef, values, { merge: true });
+      await setDoc(productRef, valuesToSave, { merge: true });
+
+      // ─── NOVO: atualiza o mesmo item nos pedidos abertos ───
+      const syncMessage = await propagatePlansToOrders([
+        { code: values.code, plan: cleanPlanTemplate },
+      ]);
 
       toast({
         title: selectedProduct ? "Produto atualizado!" : "Produto adicionado!",
-        description: `O produto "${values.description}" foi salvo com sucesso.`,
+        description: `O produto "${values.description}" foi salvo com sucesso.${syncMessage}`,
       });
 
       form.reset();
@@ -1873,17 +1918,24 @@ export default function ProductsPage() {
             p.productionPlanTemplate?.some(stage => stage.stageName === oldName)
         ) : [];
 
+        const plansToSync: { code: string; plan: Array<{ stageName: string; hours?: number }> }[] = [];
         for (const product of productsToUpdate) {
             const productRef = doc(db, "companies", "mecald", "products", product.id);
             const updatedPlan = product.productionPlanTemplate!.map(stage =>
                 stage.stageName === oldName ? { ...stage, stageName: newName } : stage
             );
             batch.update(productRef, { productionPlanTemplate: updatedPlan });
+            plansToSync.push({ code: product.code, plan: updatedPlan });
         }
 
         await batch.commit();
 
-        toast({ title: "Etapa atualizada com sucesso!" });
+        // ─── NOVO: renomeia a etapa também nos itens dos pedidos abertos ───
+        const syncMessage = plansToSync.length > 0
+            ? await propagatePlansToOrders(plansToSync, { [oldName]: newName })
+            : "";
+
+        toast({ title: "Etapa atualizada com sucesso!", description: syncMessage.trim() || undefined });
         setIsEditStageDialogOpen(false);
         setStageToEdit(null);
         setNewStageNameForEdit("");
@@ -1914,16 +1966,24 @@ export default function ProductsPage() {
             p.productionPlanTemplate?.some(stage => stage.stageName === stageToDeleteConfirmation.name)
         );
 
+        const plansToSync: { code: string; plan: Array<{ stageName: string; hours?: number }> }[] = [];
         for (const product of productsToUpdate) {
             const productRef = doc(db, "companies", "mecald", "products", product.id);
             const updatedPlan = product.productionPlanTemplate!.filter(
                 stage => stage.stageName !== stageToDeleteConfirmation.name
             );
             batch.update(productRef, { productionPlanTemplate: updatedPlan });
+            plansToSync.push({ code: product.code, plan: updatedPlan });
         }
 
         await batch.commit();
-        toast({ title: "Etapa removida com sucesso!" });
+
+        // ─── NOVO: remove a etapa (se ainda pendente) dos itens dos pedidos abertos ───
+        const syncMessage = plansToSync.length > 0
+            ? await propagatePlansToOrders(plansToSync)
+            : "";
+
+        toast({ title: "Etapa removida com sucesso!", description: syncMessage.trim() || undefined });
         setIsDeleteStageDialogOpen(false);
         setStageToDeleteConfirmation(null);
         await fetchStages();
@@ -2887,6 +2947,7 @@ export default function ProductsPage() {
                                     <li>• <strong>Arrastar:</strong> Clique e arraste usando o ícone ⋮⋮ para reordenar</li>
                                     <li>• <strong>Lead time:</strong> A ordem das etapas afeta o cálculo do tempo total</li>
                                     <li>• <strong>Salvamento:</strong> Mudanças são salvas automaticamente no Firebase</li>
+                                    <li>• <strong>Pedidos:</strong> Renomear ou excluir uma etapa atualiza também os itens dos pedidos abertos</li>
                                 </ul>
                             </div>
                         )}
@@ -4999,6 +5060,7 @@ export default function ProductsPage() {
                                         <FormLabel className="text-base">Etapas de Fabricação e Prazos</FormLabel>
                                         <FormDescription>
                                             Selecione as etapas e defina a duração em horas para cada uma. O lead time total será calculado automaticamente.
+                                            Ao salvar, os itens deste produto em pedidos abertos são atualizados (o progresso já registrado é mantido).
                                         </FormDescription>
                                     </div>
                                     <Popover open={isCopyPopoverOpen} onOpenChange={setIsCopyPopoverOpen}>
@@ -5160,7 +5222,7 @@ export default function ProductsPage() {
             <DialogHeader>
                 <DialogTitle>Editar Etapa de Fabricação</DialogTitle>
                 <DialogDescription>
-                    Alterar o nome ou o centro de custo atualiza a etapa e mantém os produtos relacionados consistentes.
+                    Alterar o nome ou o centro de custo atualiza a etapa e mantém os produtos e os pedidos abertos relacionados consistentes.
                 </DialogDescription>
             </DialogHeader>
             <div className="py-4 space-y-4">
@@ -5199,7 +5261,7 @@ export default function ProductsPage() {
             <AlertDialogHeader>
                 <AlertDialogTitle>Você tem certeza?</AlertDialogTitle>
                 <AlertDialogDescription>
-                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation?.name}</span> da lista e de todos os produtos que a utilizam. Esta ação não pode ser desfeita.
+                    Isso excluirá permanentemente a etapa <span className="font-bold">{stageToDeleteConfirmation?.name}</span> da lista e de todos os produtos que a utilizam. Nos pedidos abertos, ela sai dos itens em que ainda estiver pendente. Esta ação não pode ser desfeita.
                 </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
