@@ -31,6 +31,7 @@ import {
   type CapacitySnapshot,
 } from "@/lib/production-capacity";
 import { loadCapacitySnapshot } from "@/lib/production-capacity-loader";
+import { mergePlanWithTemplate } from "@/lib/production-plan-sync";
 import { useAuth } from "../layout";
 import { format, isSameDay, addDays, isWeekend } from "date-fns";
 import jsPDF from "jspdf";
@@ -2818,28 +2819,6 @@ export default function OrdersPage() {
       console.groupEnd();
     };
 
-    // EXEMPLO DE USO DO DEBUG EM OUTRAS FUNÇÕES:
-    // 
-    // Para usar no handleSaveProgress, adicione esta linha logo antes de salvar:
-    // debugTaskAccumulation(editedPlan);
-    //
-    // Para usar em qualquer lugar do código:
-    // console.log('🔍 ANÁLISE DO CRONOGRAMA:');
-    // debugTaskAccumulation(planArray);
-    //
-    // Exemplos de saída do debug:
-    // 🔍 DEBUG - Sistema de Acúmulo de Tarefas
-    // 📋 Processando 4 tarefas...
-    // 1️⃣ TAREFA 1: Preparação
-    //    Início: seg., 24/07/2024
-    //    Duração: 1 dias
-    //    Fim: seg., 24/07/2024
-    // 2️⃣ TAREFA 2: Corte
-    //    Duração: 0.5 dias
-    //    Acumulador antes: 0
-    //    Acumulador depois: 0.5
-    //    ✅ Acumulador ≤ 1 → Termina no mesmo dia
-
     const dashboardStats = useMemo(() => {
         const totalOrders = orders.length;
         const totalWeight = orders.reduce((acc, order) => acc + (order.totalWeight || 0), 0);
@@ -3182,6 +3161,9 @@ export default function OrdersPage() {
         }
     };
 
+    // ─── MODIFICADO: o plano do item é mesclado com as etapas atuais do produto.
+    // Etapas novas aparecem como "Pendente", removidas saem (se ainda pendentes)
+    // e o progresso já registrado (status e datas) é mantido.
     const handleOpenProgressModal = async (item: OrderItem) => {
         setItemToTrack(item);
         setIsProgressModalOpen(true);
@@ -3189,60 +3171,48 @@ export default function OrdersPage() {
         setIsFetchingPlan(true);
 
         try {
-            // Apenas carregar template do produto
             const productCode = String(item.code || '').trim();
             const productDoc = productCode
                 ? await getDoc(doc(db, "companies", "mecald", "products", productCode))
                 : null;
+            const template: any[] = productDoc && productDoc.exists()
+                ? (productDoc.data().productionPlanTemplate || [])
+                : [];
 
-            let productTemplateMap = new Map<string, any>();
-            
-            if (productDoc && productDoc.exists()) {
-                const template = productDoc.data().productionPlanTemplate || [];
-                template.forEach((stage: any) => {
-                    productTemplateMap.set(stage.stageName, {
-                        durationDays: templateStageToDays(stage),
-                        workSchedule: stage.workSchedule || 'normal'
-                    });
-                });
-            }
+            const basePlan: ProductionStage[] = (item.productionPlan || []).map(stage => {
+                const workSchedule = stage.workSchedule || 'normal';
+                return {
+                    ...stage,
+                    stageName: stage.stageName || '',
+                    status: stage.status || 'Pendente',
+                    durationDays: Number(stage.durationDays) || 0,
+                    workSchedule,
+                    useBusinessDays: workSchedule === 'normal',
+                    startDate: stage.startDate ? safeToDate(stage.startDate) : null,
+                    completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
+                };
+            });
 
-            let finalPlan: ProductionStage[];
+            // Itens já finalizados ou embarcados não recebem etapas novas.
+            const isFinished = Boolean(item.shippingDate)
+                || (basePlan.length > 0 && basePlan.every(stage => stage.status === 'Concluído'));
 
-            if (item.productionPlan && item.productionPlan.length > 0) {
-                finalPlan = item.productionPlan.map(stage => {
-                    const templateData = productTemplateMap.get(stage.stageName) || {};
-                    const workSchedule = stage.workSchedule ?? templateData.workSchedule ?? 'normal';
-                    
-                    return {
-                        stageName: stage.stageName || '',
-                        status: stage.status || 'Pendente',
-                        durationDays: Number(stage.durationDays) > 0
-                            ? Number(stage.durationDays)
-                            : (templateData.durationDays ?? 0),
-                        workSchedule,
-                        useBusinessDays: workSchedule === 'normal',
-                        startDate: stage.startDate ? safeToDate(stage.startDate) : null,
-                        completedDate: stage.completedDate ? safeToDate(stage.completedDate) : null,
-                    };
-                });
-            } else {
-                finalPlan = Array.from(productTemplateMap.entries()).map(([stageName, templateData]) => ({
-                    stageName,
-                    durationDays: templateData.durationDays,
-                    workSchedule: templateData.workSchedule,
-                    useBusinessDays: templateData.workSchedule === 'normal',
-                    status: "Pendente",
-                    startDate: null,
-                    completedDate: null,
-                }));
-            }
+            const finalPlan: ProductionStage[] = template.length > 0 && !isFinished
+                ? (mergePlanWithTemplate(basePlan, template).plan as ProductionStage[])
+                : basePlan;
 
-            // Corrige previsões antigas que deixavam todas as durações
-            // fracionárias na mesma data. Etapas concluídas permanecem intactas.
+            // Reorganiza as datas a partir da primeira etapa em aberto. Etapas
+            // concluídas permanecem intactas.
             const firstOpenStageIndex = finalPlan.findIndex(stage => stage.status !== 'Concluído');
-            if (firstOpenStageIndex >= 0 && finalPlan[firstOpenStageIndex].startDate) {
-                recalculateSequentialTasks(finalPlan, firstOpenStageIndex);
+            if (firstOpenStageIndex >= 0) {
+                const previousStage = finalPlan[firstOpenStageIndex - 1];
+                if (finalPlan[firstOpenStageIndex].startDate) {
+                    recalculateSequentialTasks(finalPlan, firstOpenStageIndex);
+                } else if (previousStage?.startDate && previousStage?.completedDate) {
+                    // Etapa nova inserida depois de uma etapa já datada:
+                    // começa logo após o fim da anterior.
+                    recalculateSequentialTasks(finalPlan, firstOpenStageIndex - 1, true);
+                }
             }
 
             setEditedPlan(finalPlan);
@@ -7311,7 +7281,7 @@ return (
         <DialogHeader className="flex-shrink-0">
           <DialogTitle>Progresso do Item: {itemToTrack?.description}</DialogTitle>
           <DialogDescription>
-            Atualize o status e as datas para cada etapa de fabricação. O cronograma será calculado automaticamente considerando apenas dias úteis.
+            Atualize o status e as datas para cada etapa de fabricação. As etapas seguem o cadastro atual do produto; o cronograma é calculado automaticamente considerando apenas dias úteis.
           </DialogDescription>
           
           {/* DEBUG - REMOVER DEPOIS */}
@@ -7332,11 +7302,11 @@ return (
               Progresso: {editedPlan.filter(s => s.status === 'Concluído').length} de {editedPlan.length} etapas
             </span>
             <span className="text-sm text-muted-foreground">
-              {Math.round((editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100)}%
+              {editedPlan.length > 0 ? Math.round((editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100) : 0}%
             </span>
           </div>
           <Progress 
-            value={(editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100} 
+            value={editedPlan.length > 0 ? (editedPlan.filter(s => s.status === 'Concluído').length / editedPlan.length) * 100 : 0} 
             className="h-2" 
           />
         </div>
@@ -7395,8 +7365,8 @@ return (
                   </TableHeader>
                   <TableBody>
                     {editedPlan.map((stage, index) => (
-                      <>
-                        <TableRow key={`${stage.stageName}-${index}`} className="group">
+                      <React.Fragment key={`${stage.stageName}-${index}`}>
+                        <TableRow className="group">
                           <TableCell className="font-medium">{index + 1}</TableCell>
                           <TableCell>
                             <div className="flex items-center gap-2">
@@ -7517,7 +7487,7 @@ return (
                             </div>
                           </TableCell>
                         </TableRow>
-                      </>
+                      </React.Fragment>
                     ))}
                   </TableBody>
                 </Table>
