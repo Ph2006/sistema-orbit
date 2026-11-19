@@ -7,7 +7,8 @@ import { auth } from "@/lib/firebase";
 import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton, SidebarMenuItem, SidebarProvider, SidebarFooter, SidebarInset } from "@/components/ui/sidebar";
 import { OrbitLogo } from "@/components/logo";
 import Link from "next/link";
-import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart, TrendingUp, ListChecks } from "lucide-react";
+import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart, TrendingUp, ListChecks, UserCog, ShieldOff } from "lucide-react";
+import { canAccess, firstAllowedHref, loadUserProfile, moduleForPath, type ModuleId, type UserProfile } from "@/lib/access-control";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -18,32 +19,36 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 
 const AuthContext = createContext<{
   user: User | null;
+  profile: UserProfile | null;
   loading: boolean;
   error: string | null;
 }>({
   user: null,
+  profile: null,
   loading: true,
   error: null,
 });
 
 export const useAuth = () => useContext(AuthContext);
 
-const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/customers", label: "Clientes", icon: Users },
-  { href: "/company", label: "Empresa", icon: Building },
-  { href: "/products", label: "Produtos", icon: ShoppingCart },
-  { href: "/quotations", label: "Orçamentos", icon: FileText },
-  { href: "/orders", label: "Pedidos", icon: Package },
-  { href: "/task", label: "Tarefas", icon: ListChecks },
-  { href: "/materials", label: "Materiais", icon: Wrench },
-  { href: "/costs", label: "Custos", icon: DollarSign },
-  { href: "/quality", label: "Qualidade", icon: ClipboardCheck },
-  { href: "/finance", label: "Financeiro", icon: TrendingUp },
+const navItems: { href: string; label: string; icon: any; module: ModuleId }[] = [
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, module: "dashboard" },
+  { href: "/customers", label: "Clientes", icon: Users, module: "customers" },
+  { href: "/company", label: "Empresa", icon: Building, module: "company" },
+  { href: "/products", label: "Produtos", icon: ShoppingCart, module: "products" },
+  { href: "/quotations", label: "Orçamentos", icon: FileText, module: "quotations" },
+  { href: "/orders", label: "Pedidos", icon: Package, module: "orders" },
+  { href: "/task", label: "Tarefas", icon: ListChecks, module: "task" },
+  { href: "/materials", label: "Materiais", icon: Wrench, module: "materials" },
+  { href: "/costs", label: "Custos", icon: DollarSign, module: "costs" },
+  { href: "/quality", label: "Qualidade", icon: ClipboardCheck, module: "quality" },
+  { href: "/finance", label: "Financeiro", icon: TrendingUp, module: "finance" },
+  { href: "/usuarios", label: "Usuários", icon: UserCog, module: "users" },
 ];
 
 function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
@@ -60,10 +65,12 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
           setUser(null);
           router.push('/');
         } else {
+          setProfile(await loadUserProfile(currentUser.email));
           setUser(currentUser);
         }
       } else {
         setUser(null);
+        setProfile(null);
         router.push('/');
       }
       
@@ -74,7 +81,7 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [router]);
 
   return (
-    <AuthContext.Provider value={{ user, loading, error }}>
+    <AuthContext.Provider value={{ user, profile, loading, error }}>
       {children}
     </AuthContext.Provider>
   )
@@ -112,7 +119,18 @@ function LogoutButton() {
 }
 
 function AuthWrapper({ children, pathname }: { children: React.ReactNode; pathname: string; }) {
-  const { error, loading, user } = useAuth();
+  const { error, loading, user, profile } = useAuth();
+  const router = useRouter();
+  const currentModule = moduleForPath(pathname);
+  const allowedHere = !currentModule || canAccess(profile, currentModule);
+  const fallbackHref = firstAllowedHref(profile);
+
+  // Tela não permitida para este usuário: leva para a primeira tela permitida.
+  useEffect(() => {
+    if (!loading && user && profile && !allowedHere && fallbackHref) {
+      router.replace(fallbackHref);
+    }
+  }, [loading, user, profile, allowedHere, fallbackHref, router]);
 
   if (loading) {
     return (
@@ -152,6 +170,32 @@ function AuthWrapper({ children, pathname }: { children: React.ReactNode; pathna
     return null; // Redirecionamento já foi feito no AuthProvider
   }
 
+  if (!profile || !profile.active || !fallbackHref) {
+    return (
+      <main className="flex items-center justify-center min-h-screen bg-background p-4">
+        <Card className="w-full max-w-lg mx-auto shadow-2xl">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-4">
+              <ShieldOff className="h-16 w-16 text-destructive" />
+            </div>
+            <CardTitle className="text-2xl font-headline">Acesso não liberado</CardTitle>
+          </CardHeader>
+          <CardContent className="text-center space-y-4">
+            <p className="text-muted-foreground">
+              A conta <strong>{user.email}</strong> ainda não tem telas liberadas no Sistema OrbIT.
+              Peça ao administrador para configurar seu acesso.
+            </p>
+            <LogoutButton />
+          </CardContent>
+        </Card>
+      </main>
+    );
+  }
+
+  if (!allowedHere) {
+    return null; // Redirecionando para uma tela permitida
+  }
+
   return (
     <SidebarProvider>
       <Sidebar>
@@ -170,7 +214,7 @@ function AuthWrapper({ children, pathname }: { children: React.ReactNode; pathna
         </SidebarHeader>
         <SidebarContent>
           <SidebarMenu>
-            {navItems.map((item) => (
+            {navItems.filter(item => canAccess(profile, item.module)).map((item) => (
               <SidebarMenuItem key={item.href}>
                 <SidebarMenuButton
                   asChild

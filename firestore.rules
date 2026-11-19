@@ -6,32 +6,78 @@ rules_version = '2';
 //   firebase deploy --only firestore:rules
 // (ou copie o conteúdo para Console do Firebase > Firestore > Regras > Publicar)
 //
-// Princípio: só usuários logados com e-mail e senha acessam os dados da empresa.
-// O login anônimo não tem acesso a nada (a tela de Apontamento passou a exigir login).
+// Princípios:
+//  - Só usuários logados com e-mail e senha acessam dados (nada de login anônimo).
+//  - O usuário precisa ter um perfil ATIVO em companies/mecald/userProfiles/{email}
+//    (criado na tela "Usuários" do sistema), exceto as contas master fixas abaixo.
+//  - Só masters alteram perfis de acesso.
+//
+// ATENÇÃO: antes de publicar esta versão, um master precisa abrir a tela
+// "Usuários" e clicar em "Salvar todas as alterações", para gravar os perfis.
+// Sem os perfis gravados, os demais usuários ficam sem acesso aos dados.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Usuário logado com e-mail e senha. Exclui sessões anônimas.
     function isStaff() {
       return request.auth != null
-        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+        && request.auth.token.firebase.sign_in_provider != 'anonymous'
+        && request.auth.token.email is string;
+    }
+
+    function email() {
+      return request.auth.token.email.lower();
+    }
+
+    // Mesma lista de BOOTSTRAP_MASTER_EMAILS em src/lib/access-control.ts
+    function isBootstrapMaster() {
+      return email() in ['paulohenrique@mecald.com.br', 'samuel.felipe@mecald.com.br'];
+    }
+
+    function profilePath() {
+      return /databases/$(database)/documents/companies/mecald/userProfiles/$(email());
+    }
+
+    function hasActiveProfile() {
+      return exists(profilePath()) && get(profilePath()).data.active == true;
+    }
+
+    function isMember() {
+      return isStaff() && (isBootstrapMaster() || hasActiveProfile());
+    }
+
+    function isMaster() {
+      return isStaff() && (isBootstrapMaster()
+        || (hasActiveProfile() && get(profilePath()).data.master == true));
     }
 
     // Cronograma compartilhado com cliente por link (token).
     // "get" abre um cronograma específico; listar a coleção inteira é proibido.
     match /public_schedules/{scheduleId} {
       allow get: if true;
-      allow write: if isStaff();
+      allow write: if isMember();
     }
     match /public/schedules/{scheduleId} {
       allow get: if true;
-      allow write: if isStaff();
+      allow write: if isMember();
     }
 
-    // Todos os demais dados: somente funcionários logados.
-    match /{document=**} {
-      allow read, write: if isStaff();
+    // Perfis de acesso: cada um lê o próprio; só master lê todos e altera.
+    match /companies/{companyId}/userProfiles/{profileEmail} {
+      allow read: if isStaff() && (profileEmail == email() || isMaster());
+      allow write: if isMaster();
+    }
+
+    // Demais dados: somente usuários com perfil ativo.
+    // (Cuidado: regras se somam. Nenhuma regra abaixo pode cobrir userProfiles.)
+    match /companies/{companyId} {
+      allow read, write: if isMember();
+    }
+    match /companies/{companyId}/{collection}/{docId=**} {
+      allow read, write: if isMember() && collection != 'userProfiles';
+    }
+    match /{collection}/{docId=**} {
+      allow read, write: if isMember() && collection != 'companies';
     }
   }
 }

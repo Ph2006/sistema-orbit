@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { canAccess, loadUserProfile } from "@/lib/access-control";
 
 type StageOption = { stageName: string; hourlyRate: number };
 type ItemOption = { id: string; code: string; description: string; productionPlan: any[] };
@@ -416,6 +417,7 @@ function AbrirApontamentoContent() {
  */
 export default function AbrirApontamentoPage() {
   const [user, setUser] = useState<User | null>(null);
+  const [allowed, setAllowed] = useState(false);
   const [checking, setChecking] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -430,6 +432,7 @@ export default function AbrirApontamentoPage() {
         await signOut(auth);
         return;
       }
+      setAllowed(current ? canAccess(await loadUserProfile(current.email), "apontamento") : false);
       setUser(current);
       setChecking(false);
     });
@@ -473,6 +476,22 @@ export default function AbrirApontamentoPage() {
               {loginError && <p className="text-sm text-destructive">{loginError}</p>}
               <Button type="submit" className="w-full" size="lg" disabled={signingIn}>{signingIn ? "Entrando..." : "Entrar"}</Button>
             </form>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (!allowed) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle>Acesso não liberado</CardTitle>
+            <CardDescription>A conta {user.email} não tem acesso ao apontamento.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Button className="w-full" variant="outline" onClick={() => signOut(getAuth(db.app))}>Entrar com outra conta</Button>
           </CardContent>
         </Card>
       </div>
