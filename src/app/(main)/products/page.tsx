@@ -150,6 +150,12 @@ const getMachiningHoursFromPlan = (product: Product | null | undefined): number 
   return stage?.hours || 0;
 };
 
+// Só existe custo de usinagem quando o produto possui a etapa "Usinagem".
+const productHasMachiningStage = (product: Product | null | undefined): boolean =>
+  !!product?.productionPlanTemplate?.some(s =>
+    s.stageName.toLowerCase().includes('usinagem')
+  );
+
 // Função para obter badge de lead time com cor baseada na duração
 const getLeadTimeBadge = (leadTime: number) => {
   if (leadTime === 0) {
@@ -1091,7 +1097,9 @@ export default function ProductsPage() {
         setProfitMargin(data.profitMargin ?? 30);
         setIrpjRate(data.irpjRate ?? 4.8);
         setCsllRate(data.csllRate ?? 2.88);
-        setMachiningHours(data.machiningHours ?? getMachiningHoursFromPlan(product));
+        setMachiningHours(productHasMachiningStage(product)
+          ? (data.machiningHours ?? getMachiningHoursFromPlan(product))
+          : 0);
         setPricingModality(savedModality);
         toast({
           title: "Precificação carregada!",
@@ -1141,6 +1149,9 @@ export default function ProductsPage() {
       const copiedMaterials = getModalityConfig(copiedModality).requiresMaterial
         ? (sourceData.materialComposition || sourceData.materialCosts || [])
         : [];
+      const targetMachiningHours = productHasMachiningStage(selectedProductForPricing)
+        ? (sourceData.machiningHours ?? 0)
+        : 0;
       const copiedCalculation: PricingCalculation = {
         ...sourceData,
         commercialModality: copiedModality,
@@ -1149,7 +1160,7 @@ export default function ProductsPage() {
         productCode: selectedProductForPricing.code,
         productDescription: selectedProductForPricing.description,
         productWeight: selectedProductForPricing.unitWeight || sourceData.productWeight || 0,
-        machiningHours: sourceData.machiningHours ?? 0,
+        machiningHours: targetMachiningHours,
         machineHourRate: sourceData.machineHourRate
           ?? ((sourceData.machiningHours || 0) > 0
             ? (Number(sourceData.machiningCost) || 0) / Number(sourceData.machiningHours)
@@ -1165,7 +1176,7 @@ export default function ProductsPage() {
       await setDoc(targetRef, {
         ...copiedCalculation,
         materialComposition: copiedMaterials,
-        machiningHours: sourceData.machiningHours || 0,
+        machiningHours: targetMachiningHours,
         copiedFromProductId: sourceProduct.id,
         copiedFromProductCode: sourceProduct.code,
         createdAt: Timestamp.now(),
@@ -1185,7 +1196,7 @@ export default function ProductsPage() {
       setProfitMargin(sourceData.profitMargin ?? 30);
       setIrpjRate(sourceData.irpjRate ?? 4.8);
       setCsllRate(sourceData.csllRate ?? 2.88);
-      setMachiningHours(sourceData.machiningHours ?? 0);
+      setMachiningHours(targetMachiningHours);
       setPricingModality(copiedModality);
 
       setProducts(current => current.map(product =>
@@ -4008,7 +4019,10 @@ export default function ProductsPage() {
                                                         : 0;
                                                     const materialsForRecord = modalityConfig.requiresMaterial ? materialComposition : [];
                                                     const stageCostTotal = stageCostItems.reduce((sum, s) => sum + s.totalCost, 0);
-                                                    const machiningCost = machiningHours * savedRate;
+                                                    const effectiveMachiningHours = productHasMachiningStage(selectedProductForPricing)
+                                                        ? (Number(machiningHours) || 0)
+                                                        : 0;
+                                                    const machiningCost = effectiveMachiningHours * savedRate;
                                                     const consumablesCost = savedConsumables * productWeight;
                                                     const totalCost = materialCostTotal + stageCostTotal + machiningCost + consumablesCost;
                                                     const profitValue = totalCost * (profitMargin / 100);
@@ -4052,7 +4066,7 @@ export default function ProductsPage() {
                                                         csllAmount,
                                                         finalPrice,
                                                         pricePerKg,
-                                                        machiningHours,
+                                                        machiningHours: effectiveMachiningHours,
                                                         machineHourRate: savedRate,
                                                         consumablesCostPerKg: savedConsumables,
                                                         createdAt: new Date()
@@ -4061,7 +4075,8 @@ export default function ProductsPage() {
                                                     setPricingCalculation(calculation);
 
                                                     // ─── NOVO: salva automaticamente no Firestore ───
-                                                    await savePricingCalculation(calculation, materialsForRecord, machiningHours);
+                                                    setMachiningHours(effectiveMachiningHours);
+                                                    await savePricingCalculation(calculation, materialsForRecord, effectiveMachiningHours);
                                                 }} 
                                                 className="w-full"
                                                 disabled={isLoadingCostConfig || isSavingCostConfig || !isCostConfigLoaded || (getModalityConfig(pricingModality).requiresMaterial && materialComposition.length === 0)}
