@@ -7,6 +7,11 @@ const nextConfig: NextConfig = {
   trailingSlash: true,
   skipTrailingSlashRedirect: true,
   distDir: 'out',
+  // Em produção, remove os console.log/info/debug (expunham dados no navegador).
+  // console.error e console.warn são mantidos para diagnóstico.
+  compiler: {
+    removeConsole: process.env.NODE_ENV === 'production' ? { exclude: ['error', 'warn'] } : false,
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

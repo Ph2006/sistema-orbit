@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, getDoc, setDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { invalidateCollectionCache } from "@/lib/firestore-cache";
 import { PlusCircle, Search, Pencil, Trash2, CalendarIcon, X, PackagePlus, Percent, DollarSign, FileText, Check, FileDown, Copy, Package, ChevronUp, ChevronDown } from "lucide-react";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
@@ -254,6 +255,9 @@ const normalizeItemValues = (item: any): Item => {
 };
 
 export default function QuotationsPage() {
+    // Esta tela grava pedidos: ao sair dela, descarta o cache de pedidos das outras telas.
+    useEffect(() => () => invalidateCollectionCache("orders"), []);
+
     const [quotations, setQuotations] = useState<Quotation[]>([]);
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);

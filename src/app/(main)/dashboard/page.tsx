@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { collection, getDocs, getDoc, doc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getCompanyCollectionCached } from "@/lib/firestore-cache";
 import { useAuth } from "../layout";
 import { format, isValid } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -532,7 +533,7 @@ export default function DashboardPage() {
         setIsLoading(true);
         try {
           const [ordersSnapshot, qualitySnapshot, companySnapshot] = await Promise.all([
-            getDocs(collection(db, "companies", "mecald", "orders")),
+            getCompanyCollectionCached("orders"),
             getDocs(collection(db, "companies", "mecald", "qualityReports")),
             getDoc(doc(db, "companies", "mecald", "settings", "company"))
           ]);

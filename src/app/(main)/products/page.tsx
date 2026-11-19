@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, setDoc, doc, deleteDoc, writeBatch, Timestamp, updateDoc, arrayUnion, getDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getCompanyCollectionCached } from "@/lib/firestore-cache";
 import { USEFUL_HOURS_PER_DAY } from "@/lib/orders-shared";
 import {
   buildCapacityModel,
@@ -1556,7 +1557,7 @@ export default function ProductsPage() {
     try {
         const [quotationsSnapshot, ordersSnapshot] = await Promise.all([
             getDocs(collection(db, "companies", "mecald", "quotations")),
-            getDocs(collection(db, "companies", "mecald", "orders"))
+            getCompanyCollectionCached("orders")
         ]);
         
         const productsToSync = new Map<string, any>();

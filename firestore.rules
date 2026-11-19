@@ -1,0 +1,37 @@
+rules_version = '2';
+
+// Regras de segurança do Cloud Firestore do Sistema OrbIT.
+//
+// Este arquivo é a fonte oficial das regras. Para publicar depois de alterar:
+//   firebase deploy --only firestore:rules
+// (ou copie o conteúdo para Console do Firebase > Firestore > Regras > Publicar)
+//
+// Princípio: só usuários logados com e-mail e senha acessam os dados da empresa.
+// O login anônimo não tem acesso a nada (a tela de Apontamento passou a exigir login).
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Usuário logado com e-mail e senha. Exclui sessões anônimas.
+    function isStaff() {
+      return request.auth != null
+        && request.auth.token.firebase.sign_in_provider != 'anonymous';
+    }
+
+    // Cronograma compartilhado com cliente por link (token).
+    // "get" abre um cronograma específico; listar a coleção inteira é proibido.
+    match /public_schedules/{scheduleId} {
+      allow get: if true;
+      allow write: if isStaff();
+    }
+    match /public/schedules/{scheduleId} {
+      allow get: if true;
+      allow write: if isStaff();
+    }
+
+    // Todos os demais dados: somente funcionários logados.
+    match /{document=**} {
+      allow read, write: if isStaff();
+    }
+  }
+}
