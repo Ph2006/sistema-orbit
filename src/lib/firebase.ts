@@ -1,6 +1,6 @@
 // Import the functions you need from the SDKs you need
 import { initializeApp, getApps, getApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
+import { browserSessionPersistence, getAuth, setPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 import { getAnalytics, isSupported } from "firebase/analytics";
 import { getStorage, ref, uploadString, getDownloadURL } from "firebase/storage";
@@ -20,6 +20,10 @@ const firebaseConfig = {
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 const db = getFirestore(app);
 const auth = getAuth(app);
+// O login vale só enquanto a aba/janela estiver aberta: reabrir o sistema sempre pede login.
+if (typeof window !== "undefined") {
+  setPersistence(auth, browserSessionPersistence).catch(error => console.error("Erro ao configurar a sessão de login:", error));
+}
 const analytics = isSupported().then(yes => yes ? getAnalytics(app) : null);
 const storage = getStorage(app);
 
