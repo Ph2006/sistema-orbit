@@ -133,6 +133,7 @@ export function moduleForPath(pathname: string): ModuleId | null {
 
 /** Primeira tela que o usuário pode abrir (para redirecionar após o login). */
 export function firstAllowedHref(profile: UserProfile | null): string | null {
-  const first = MODULES.find(m => m.id !== "users" && canAccess(profile, m.id));
+  // O Apontamento é uma tela separada: não conta como acesso ao sistema.
+  const first = MODULES.find(m => m.id !== "users" && m.id !== "apontamento" && canAccess(profile, m.id));
   return first ? first.href : null;
 }

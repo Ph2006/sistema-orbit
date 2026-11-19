@@ -6,9 +6,11 @@ import {
 } from 'firebase/auth';
 import { auth } from './firebase';
 import { clearFirestoreCache } from './firestore-cache';
+import { clearSessionScope, prepareLogin } from './session-scope';
 
 export const loginUser = async (email: string, password: string) => {
   try {
+    await prepareLogin('sistema');
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return userCredential.user;
   } catch (error: any) {
@@ -55,6 +57,7 @@ export const registerUser = async (email: string, password: string) => {
 export const logoutUser = async () => {
   try {
     clearFirestoreCache();
+    clearSessionScope();
     await signOut(auth);
   } catch (error: any) {
     throw new Error(error.message);

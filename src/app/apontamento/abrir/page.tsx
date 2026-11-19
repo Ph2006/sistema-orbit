@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, Timestamp, updateDoc, where, writeBatch } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, type User } from "firebase/auth";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { canAccess, loadUserProfile } from "@/lib/access-control";
+import { endSession, getSessionScope, prepareLogin } from "@/lib/session-scope";
 
 type StageOption = { stageName: string; hourlyRate: number };
 type ItemOption = { id: string; code: string; description: string; productionPlan: any[] };
@@ -427,9 +428,10 @@ export default function AbrirApontamentoPage() {
   useEffect(() => {
     const auth = getAuth(db.app);
     return onAuthStateChanged(auth, async (current) => {
-      if (current?.isAnonymous) {
-        // Sessões anônimas antigas não têm mais acesso: encerra e pede login.
-        await signOut(auth);
+      if (current && (current.isAnonymous || getSessionScope() !== "apontamento")) {
+        // Sessões anônimas antigas, ou logins feitos no sistema, não valem aqui:
+        // o Apontamento é uma tela separada e exige o próprio login.
+        await endSession();
         return;
       }
       setAllowed(current ? canAccess(await loadUserProfile(current.email), "apontamento") : false);
@@ -443,6 +445,7 @@ export default function AbrirApontamentoPage() {
     setLoginError("");
     setSigningIn(true);
     try {
+      await prepareLogin("apontamento");
       await signInWithEmailAndPassword(getAuth(db.app), email.trim(), password);
     } catch {
       setLoginError("E-mail ou senha inválidos.");
@@ -491,7 +494,7 @@ export default function AbrirApontamentoPage() {
             <CardDescription>A conta {user.email} não tem acesso ao apontamento.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button className="w-full" variant="outline" onClick={() => signOut(getAuth(db.app))}>Entrar com outra conta</Button>
+            <Button className="w-full" variant="outline" onClick={() => endSession()}>Entrar com outra conta</Button>
           </CardContent>
         </Card>
       </div>

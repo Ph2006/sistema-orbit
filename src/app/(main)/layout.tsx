@@ -8,6 +8,7 @@ import { Sidebar, SidebarContent, SidebarHeader, SidebarMenu, SidebarMenuButton,
 import { OrbitLogo } from "@/components/logo";
 import Link from "next/link";
 import { LayoutDashboard, Package, Users, ClipboardCheck, Building, Wrench, DollarSign, FileText, LogOut, ShoppingCart, TrendingUp, ListChecks, UserCog, ShieldOff } from "lucide-react";
+import { endSession, getSessionScope } from "@/lib/session-scope";
 import { canAccess, firstAllowedHref, loadUserProfile, moduleForPath, type ModuleId, type UserProfile } from "@/lib/access-control";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AlertTriangle } from "lucide-react";
@@ -58,6 +59,17 @@ function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(true);
       setError(null);
       
+      if (currentUser && getSessionScope() !== "sistema") {
+        // Sessão não iniciada pela tela de login do sistema (ex.: veio do
+        // Apontamento ou de uma sessão antiga): encerra e exige novo login.
+        await endSession();
+        setUser(null);
+        setProfile(null);
+        setLoading(false);
+        router.push('/');
+        return;
+      }
+
       if (currentUser) {
         // Verificar se é um usuário real (não anônimo)
         if (currentUser.isAnonymous) {
