@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { addDoc, arrayUnion, collection, doc, getDoc, getDocs, query, Timestamp, updateDoc, where, writeBatch } from "firebase/firestore";
-import { getAuth, onAuthStateChanged, signInAnonymously } from "firebase/auth";
+import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, type User } from "firebase/auth";
 import { db } from "@/lib/firebase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +36,7 @@ const currentSeconds = (appointment: ActiveAppointment) => appointment.status ==
   : 0;
 const formatDuration = (seconds: number) => `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor((seconds % 3600) / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
 
-export default function AbrirApontamentoPage() {
+function AbrirApontamentoContent() {
   const { toast } = useToast();
   const [orders, setOrders] = useState<OrderOption[]>([]);
   const [selectedOrderId, setSelectedOrderId] = useState("");
@@ -65,19 +65,8 @@ export default function AbrirApontamentoPage() {
         setLoadingOrders(true);
         setOrdersLoadError("");
 
-        // A página é acessada diretamente pelo QR Code. Quando não existe uma
-        // sessão anterior no navegador, cria uma sessão anônima antes de ler o
-        // Firestore. Assim, as regras podem continuar exigindo request.auth.
-        const auth = getAuth(db.app);
-        await new Promise<void>((resolve) => {
-          const unsubscribe = onAuthStateChanged(auth, () => {
-            unsubscribe();
-            resolve();
-          });
-        });
-        if (!auth.currentUser) {
-          await signInAnonymously(auth);
-        }
+        // O acesso agora exige login (ver ApontamentoAuthGate abaixo).
+        // Esta tela só é renderizada quando já existe um usuário logado.
         if (cancelled) return;
 
         const snapshot = await getDocs(collection(db, "companies", "mecald", "orders"));
@@ -108,11 +97,9 @@ export default function AbrirApontamentoPage() {
         const code = String((error as { code?: string })?.code || "");
         const rawMessage = String((error as { message?: string })?.message || "");
 
-        const message = code === "auth/operation-not-allowed"
-          ? "A autenticação anônima ainda não está habilitada no Firebase Authentication."
-          : code === "permission-denied" || code === "firestore/permission-denied"
-            ? "A sessão foi criada, mas as regras do Firestore não permitem consultar as OS para o apontamento."
-            : `Erro inesperado${code ? ` (${code})` : ""}: ${rawMessage || "sem detalhes"}.`;
+        const message = code === "permission-denied" || code === "firestore/permission-denied"
+          ? "Este usuário não tem permissão para consultar as OS do apontamento."
+          : `Erro inesperado${code ? ` (${code})` : ""}: ${rawMessage || "sem detalhes"}.`;
 
         setOrders([]);
         setOrdersLoadError(message);
@@ -418,4 +405,79 @@ export default function AbrirApontamentoPage() {
         </div>}
       </CardContent></Card>
   </main>;
+}
+
+/**
+ * Exige login com e-mail e senha antes de mostrar a tela de apontamento.
+ * Antes, a tela entrava como usuário anônimo, o que deixava os dados de pedidos
+ * acessíveis para qualquer pessoa com o link. Crie no Firebase Authentication um
+ * usuário próprio para o chão de fábrica (ex.: producao@suaempresa.com.br).
+ * O login fica salvo no navegador do aparelho; só é preciso entrar uma vez.
+ */
+export default function AbrirApontamentoPage() {
+  const [user, setUser] = useState<User | null>(null);
+  const [checking, setChecking] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginError, setLoginError] = useState("");
+  const [signingIn, setSigningIn] = useState(false);
+
+  useEffect(() => {
+    const auth = getAuth(db.app);
+    return onAuthStateChanged(auth, async (current) => {
+      if (current?.isAnonymous) {
+        // Sessões anônimas antigas não têm mais acesso: encerra e pede login.
+        await signOut(auth);
+        return;
+      }
+      setUser(current);
+      setChecking(false);
+    });
+  }, []);
+
+  const handleLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setLoginError("");
+    setSigningIn(true);
+    try {
+      await signInWithEmailAndPassword(getAuth(db.app), email.trim(), password);
+    } catch {
+      setLoginError("E-mail ou senha inválidos.");
+    } finally {
+      setSigningIn(false);
+    }
+  };
+
+  if (checking) {
+    return <div className="flex min-h-screen items-center justify-center text-muted-foreground">Carregando...</div>;
+  }
+
+  if (!user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-4">
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle>Apontamento de produção</CardTitle>
+            <CardDescription>Entre com o usuário do chão de fábrica.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="apontamento-email">E-mail</Label>
+                <Input id="apontamento-email" type="email" autoComplete="username" value={email} onChange={e => setEmail(e.target.value)} required />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="apontamento-senha">Senha</Label>
+                <Input id="apontamento-senha" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />
+              </div>
+              {loginError && <p className="text-sm text-destructive">{loginError}</p>}
+              <Button type="submit" className="w-full" size="lg" disabled={signingIn}>{signingIn ? "Entrando..." : "Entrar"}</Button>
+            </form>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return <AbrirApontamentoContent />;
 }

@@ -13,6 +13,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { invalidateCollectionCache } from "@/lib/firestore-cache";
 import { cn } from "@/lib/utils";
 import { useAuth } from "../layout";
 import { format, startOfWeek, endOfWeek, isWithinInterval, addWeeks, subWeeks, startOfMonth, endOfMonth, addMonths, subMonths, isSameDay, addDays } from "date-fns";
@@ -327,6 +328,9 @@ const newTaskForm = (): TaskFormState => ({
 
 
 export default function TasksPage() {
+    // Esta tela grava pedidos: ao sair dela, descarta o cache de pedidos das outras telas.
+    useEffect(() => () => invalidateCollectionCache("orders"), []);
+
   // Estados simplificados
   const [tasks, setTasks] = useState<SimpleTask[]>([]);
   const [resources, setResources] = useState<Resource[]>([]);

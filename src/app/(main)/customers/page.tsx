@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getCompanyCollectionCached } from "@/lib/firestore-cache";
 import { PlusCircle, Search, Pencil, Trash2, Trophy, Package } from "lucide-react";
 import { useAuth } from "../layout";
 
@@ -144,7 +145,7 @@ export default function CustomersPage() {
     try {
       const [customersSnapshot, ordersSnapshot] = await Promise.all([
         getDocs(collection(db, "companies", "mecald", "customers")),
-        getDocs(collection(db, "companies", "mecald", "orders"))
+        getCompanyCollectionCached("orders")
       ]);
       const customersList = customersSnapshot.docs.map((doc) => {
         const data = doc.data();

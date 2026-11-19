@@ -9,6 +9,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, addDoc, doc, updateDoc, deleteDoc, Timestamp, setDoc, getDoc, arrayUnion, arrayRemove } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getCompanyCollectionCached } from "@/lib/firestore-cache";
 import { useAuth } from "../layout";
 import { format, addMonths, isPast, differenceInDays } from "date-fns";
 import jsPDF from "jspdf";
@@ -1094,7 +1095,7 @@ export default function QualityPage() {
         liquidPenetrantReportsSnapshot, ultrasoundReportsSnapshot, lessonsLearnedSnapshot,
         occurrencesSnapshot // ✅ ADICIONAR ESTA LINHA
       ] = await Promise.all([
-        getDocs(collection(db, "companies", "mecald", "orders")),
+        getCompanyCollectionCached("orders"),
         getDocs(collection(db, "companies", "mecald", "qualityReports")),
         getDocs(collection(db, "companies", "mecald", "calibrations")),
         getDoc(doc(db, "companies", "mecald", "settings", "team")),

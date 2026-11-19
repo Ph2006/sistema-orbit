@@ -5,6 +5,7 @@ import {
   User
 } from 'firebase/auth';
 import { auth } from './firebase';
+import { clearFirestoreCache } from './firestore-cache';
 
 export const loginUser = async (email: string, password: string) => {
   try {
@@ -53,6 +54,7 @@ export const registerUser = async (email: string, password: string) => {
 
 export const logoutUser = async () => {
   try {
+    clearFirestoreCache();
     await signOut(auth);
   } catch (error: any) {
     throw new Error(error.message);

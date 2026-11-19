@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { Download, Lock, Eye, EyeOff, TrendingUp, TrendingDown, DollarSign, FileText, Calculator, Target, AlertTriangle, CheckCircle, Package, Plus, Edit, Save, X } from "lucide-react";
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { invalidateCollectionCache } from "@/lib/firestore-cache";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import jsPDF from "jspdf";
@@ -95,6 +96,9 @@ interface FinancialSummary {
 }
 
 export default function FinancePage() {
+    // Esta tela grava pedidos: ao sair dela, descarta o cache de pedidos das outras telas.
+    useEffect(() => () => invalidateCollectionCache("orders"), []);
+
   // Estados de autenticação
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');

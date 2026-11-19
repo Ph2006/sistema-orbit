@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, doc, setDoc, addDoc, Timestamp, getDoc, updateDoc, deleteDoc, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { getCompanyCollectionCached } from "@/lib/firestore-cache";
 import { useAuth } from "../layout";
 import { format, isPast, endOfDay } from "date-fns";
 import { ptBR } from 'date-fns/locale';
@@ -459,7 +460,7 @@ export default function MaterialsPage() {
         try {
             const [reqsSnapshot, ordersSnapshot, teamSnapshot, cutPlansSnapshot] = await Promise.all([
                 getDocs(collection(db, "companies", "mecald", "materialRequisitions")),
-                getDocs(collection(db, "companies", "mecald", "orders")),
+                getCompanyCollectionCached("orders"),
                 getDoc(doc(db, "companies", "mecald", "settings", "team")),
                 getDocs(collection(db, "companies", "mecald", "cuttingPlans")),
             ]);

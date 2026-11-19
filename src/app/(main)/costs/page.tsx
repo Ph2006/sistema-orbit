@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, doc, updateDoc, Timestamp, getDoc, addDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, writeBatch, runTransaction } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { invalidateCollectionCache } from "@/lib/firestore-cache";
 import { useAuth } from "../layout";
 import { format } from "date-fns";
 import jsPDF from "jspdf";
@@ -613,6 +614,9 @@ const emptySupplierFormValues: z.infer<typeof supplierSchema> = {
 };
 
 export default function CostsPage() {
+    // Esta tela grava pedidos: ao sair dela, descarta o cache de pedidos das outras telas.
+    useEffect(() => () => invalidateCollectionCache("orders"), []);
+
     // Verificação inicial de problemas com datas
     React.useEffect(() => {
         try {

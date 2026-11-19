@@ -7,6 +7,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { collection, getDocs, doc, updateDoc, getDoc, Timestamp, deleteDoc, setDoc, query, where, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { invalidateCollectionCache } from "@/lib/firestore-cache";
 import {
   type Order,
   type OrderItem,
@@ -573,6 +574,9 @@ function OrdersTable({ orders, onOrderClick }: { orders: Order[]; onOrderClick: 
 }
 
 export default function OrdersPage() {
+    // Esta tela grava pedidos: ao sair dela, descarta o cache de pedidos das outras telas.
+    useEffect(() => () => invalidateCollectionCache("orders"), []);
+
     const [orders, setOrders] = useState<Order[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [isSheetOpen, setIsSheetOpen] = useState(false);
@@ -813,8 +817,6 @@ export default function OrdersPage() {
                 try {
                     const data = doc.data();
 
-                    // LOG TEMPORÁRIO - REMOVER DEPOIS
-                    console.log('📋 DOC:', doc.id, '| quotationNumber:', data.quotationNumber, '| items tipo:', typeof data.items, '| isArray:', Array.isArray(data.items));
                     const createdAtDate = safeToDate(data.createdAt) || new Date();
                     const deliveryDate = safeToDate(data.deliveryDate);
                 
